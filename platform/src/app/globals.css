@@ -1,0 +1,211 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Raut theme.
+ *
+ * Values mirror src/lib/design-tokens.ts, which is the source of truth and what
+ * the contrast test asserts against. Anything added here that carries text must
+ * also gain an entry in CONTRAST_ASSERTIONS, or it is untested.
+ *
+ * Themes are *selected*, not flipped: the dark values are their own steps
+ * chosen against the dark surface, not a programmatic inversion of light.
+ */
+
+@layer base {
+  :root {
+    /* brand ramp — anchored on the logo arm's #0ab6d6 */
+    --brand-50: #ecfafd;
+    --brand-100: #d0f1f8;
+    --brand-200: #a5e5f1;
+    --brand-300: #6fd5e8;
+    --brand-400: #33c4dd;
+    --brand-500: #0ab6d6;
+    --brand-600: #076c80;
+    --brand-700: #075868;
+    --brand-800: #0a4a57;
+    --brand-900: #0b3d47;
+
+    /* the location pin's green — brand gesture, never a status */
+    --accent-green-400: #43cc18;
+    --accent-green-500: #35a314;
+    --accent-green-600: #2a8110;
+
+    /* blue-cast neutrals, so nothing beside the navy reads as off-hue */
+    --slate-50: #f6f8fb;
+    --slate-100: #eceff5;
+    --slate-200: #dce2ec;
+    --slate-300: #c2cbda;
+    --slate-400: #94a0b8;
+    --slate-500: #6b7a96;
+    --slate-600: #4e5c78;
+    --slate-700: #3a465e;
+    --slate-800: #232d42;
+    --slate-900: #0b2136;
+    --slate-950: #052744;
+
+    /* semantic surfaces — light */
+    --bg: var(--slate-50);
+    --surface: #ffffff;
+    --surface-sunken: var(--slate-100);
+    --surface-hover: var(--slate-50);
+    --border: #e3e8f0;
+    --border-strong: var(--slate-300);
+    --text: #0f1729;
+    --text-secondary: var(--slate-600);
+    --text-muted: var(--slate-500);
+    --accent: var(--brand-600);
+    --accent-hover: var(--brand-700);
+    --accent-subtle: var(--brand-50);
+    --focus: var(--brand-500);
+    --chart-grid: #edf1f7;
+
+    --success-fg: #047857;
+    --success-bg: #ecfdf5;
+    --success-border: #a7f3d0;
+    --warning-fg: #b45309;
+    --warning-bg: #fffbeb;
+    --warning-border: #fde68a;
+    --danger-fg: #b91c1c;
+    --danger-bg: #fef2f2;
+    --danger-border: #fecaca;
+    --info-fg: var(--brand-600);
+    --info-bg: var(--brand-50);
+    --info-border: var(--brand-200);
+
+    /* categorical chart series — fixed order, never cycled */
+    --chart-1: #0078e8;
+    --chart-2: #0e9f6e;
+    --chart-3: #b45309;
+    --chart-4: #7c3aed;
+    --chart-5: #0891b2;
+    --chart-6: #be185d;
+
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-xl: 18px;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 8 40 / 0.05);
+    --shadow-md: 0 2px 4px -1px rgb(0 8 40 / 0.06), 0 1px 2px -1px rgb(0 8 40 / 0.04);
+    --shadow-lg: 0 8px 16px -4px rgb(0 8 40 / 0.1), 0 2px 6px -2px rgb(0 8 40 / 0.06);
+    --shadow-xl: 0 20px 32px -8px rgb(0 8 40 / 0.16), 0 6px 12px -4px rgb(0 8 40 / 0.08);
+
+    --header-h: 56px;
+    --sidebar-w: 248px;
+  }
+
+  .dark {
+    --bg: #050b1c;
+    --surface: #0b1430;
+    --surface-sunken: #070f26;
+    --surface-hover: #111c3a;
+    --border: #1c2747;
+    --border-strong: #2a3860;
+    --text: #e8edf7;
+    --text-secondary: var(--slate-300);
+    --text-muted: var(--slate-400);
+    --accent: var(--brand-400);
+    --accent-hover: var(--brand-300);
+    --accent-subtle: #0f1e3d;
+    --focus: var(--brand-400);
+    --chart-grid: #162242;
+
+    --success-fg: #34d399;
+    --success-bg: #06251c;
+    --success-border: #12503c;
+    --warning-fg: #fbbf24;
+    --warning-bg: #2a1c05;
+    --warning-border: #5c3f0b;
+    --danger-fg: #f87171;
+    --danger-bg: #2b0f11;
+    --danger-border: #5f1f22;
+    --info-fg: var(--brand-300);
+    --info-bg: #0f1e3d;
+    --info-border: #1e3a6b;
+
+    /* dark steps chosen against the dark surface, CVD-validated */
+    --chart-1: #2e8ae0;
+    --chart-2: #12a177;
+    --chart-3: #b87a1c;
+    --chart-4: #9575f0;
+    --chart-5: #1ba3c0;
+    --chart-6: #db5c9c;
+
+    --shadow-sm: 0 1px 2px 0 rgb(0 0 0 / 0.4);
+    --shadow-md: 0 2px 4px -1px rgb(0 0 0 / 0.45), 0 1px 2px -1px rgb(0 0 0 / 0.3);
+    --shadow-lg: 0 8px 16px -4px rgb(0 0 0 / 0.5), 0 2px 6px -2px rgb(0 0 0 / 0.35);
+    --shadow-xl: 0 20px 32px -8px rgb(0 0 0 / 0.6), 0 6px 12px -4px rgb(0 0 0 / 0.4);
+  }
+
+  * {
+    border-color: var(--border);
+  }
+
+  html {
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-size: 14px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* One focus treatment everywhere, so keyboard users get a consistent signal. */
+  :focus-visible {
+    outline: 2px solid var(--focus);
+    outline-offset: 2px;
+    border-radius: var(--radius-sm);
+  }
+
+  ::selection {
+    background: color-mix(in srgb, var(--brand-500) 24%, transparent);
+  }
+
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
+    border-radius: 999px;
+    border: 2px solid var(--bg);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+      animation-duration: 0.01ms !important;
+      transition-duration: 0.01ms !important;
+    }
+  }
+}
+
+@layer utilities {
+  .text-muted {
+    color: var(--text-muted);
+  }
+  .text-secondary {
+    color: var(--text-secondary);
+  }
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+  /* Wide content must scroll inside its own box, never the page body. */
+  .scroll-x {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+  }
+}

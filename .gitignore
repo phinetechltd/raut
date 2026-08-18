@@ -1,0 +1,31 @@
+# Dependencies and build output
+node_modules/
+.next/
+out/
+build/
+dist/
+.dart_tool/
+.flutter-plugins*
+*.apk
+*.aab
+
+# Local database and its journals — seeded data, not source
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+
+# Secrets. `.env` holds AUTH_SECRET, which signs every console session and
+# every mobile access/refresh token: committing it hands out the keys.
+# platform/.gitignore covers .env.local and .env.production but not bare
+# `.env`, which is the one that actually exists.
+.env
+.env.*
+!.env.example
+
+# OS / editor noise
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/

@@ -1,0 +1,52 @@
+{
+  "name": "raut-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Raut Multi-Tenant ERP & Field Sales Management Platform — Tari Africa Platforms Limited",
+  "scripts": {
+    "dev": "next dev -p 3200",
+    "build": "prisma generate && next build",
+    "start": "next start -p 3000",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "db:generate": "prisma generate",
+    "db:push": "prisma db push",
+    "db:migrate": "prisma migrate dev",
+    "db:seed": "tsx prisma/seed.ts",
+    "db:reset": "prisma db push --force-reset && npm run db:seed",
+    "db:studio": "prisma studio",
+    "test:smoke": "node scripts/smoke.mjs",
+    "test:pages": "node scripts/check-pages.mjs",
+    "test:integration": "node scripts/integration.mjs",
+    "test:brand": "node scripts/check-brand.mjs",
+    "test:contrast": "node scripts/check-contrast.mjs",
+    "test:permissions": "node scripts/check-permissions.mjs",
+    "test:encoding": "node scripts/check-encoding.mjs",
+    "verify": "npm run typecheck && npm run test:encoding && npm run test:contrast && npm run test:smoke && npm run test:pages && npm run test:brand && npm run test:permissions && npm run test:integration"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.2.1",
+    "bcryptjs": "^2.4.3",
+    "clsx": "^2.1.1",
+    "jose": "^5.9.6",
+    "next": "^15.1.6",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^22.10.7",
+    "@types/react": "^19.0.7",
+    "@types/react-dom": "^19.0.3",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.5.1",
+    "prisma": "^6.2.1",
+    "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

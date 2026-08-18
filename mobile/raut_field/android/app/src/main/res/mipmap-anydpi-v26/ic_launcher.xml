@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Adaptive icon for Android 8+.
+
+  The launcher masks the foreground to whatever shape the device uses (circle,
+  squircle, rounded square), so the glyph is supplied without its own background
+  and inset into the safe zone. The legacy square PNGs in the density buckets
+  still serve older launchers.
+-->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+    <background android:drawable="@color/ic_launcher_background" />
+    <foreground android:drawable="@mipmap/ic_launcher_foreground" />
+    <monochrome android:drawable="@mipmap/ic_launcher_foreground" />
+</adaptive-icon>

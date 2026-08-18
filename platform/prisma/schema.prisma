@@ -1,0 +1,1282 @@
+// Raut — One Platform. Every Mile.
+// Tari Africa Platforms Limited
+//
+// CONVENTIONS
+//  - Money is stored as INTEGER minor units (KES cents). Never floats.
+//    A single document therefore tops out at ~KES 21M, which is well inside
+//    distributor invoice sizes; aggregates are summed in JS as Numbers.
+//  - SQLite has no native enum or JSON type, so "enum" columns are Strings with
+//    the allowed values documented above the field, and structured payloads are
+//    JSON-encoded Strings. Nothing here is SQLite-specific, so the provider can
+//    be swapped for postgresql without a schema rewrite.
+//  - Every tenant-owned row carries companyId. Scoping is enforced in
+//    src/lib/tenant.ts, never by trusting client input.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  CORE · MULTI-TENANT ARCHITECTURE  (Phase One)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// A tenant. One row per client business on the shared instance.
+model Company {
+  id       String @id @default(cuid())
+  name     String
+  slug     String @unique
+  /// Registration / KRA PIN shown on invoices
+  taxPin   String?
+  email    String?
+  phone    String?
+  address  String?
+  currency String @default("KES")
+  /// ACTIVE | SUSPENDED | PENDING
+  status   String @default("PENDING")
+  /// Seats permitted by the licence — proposal caps Raut at 50 users
+  seatLimit Int   @default(50)
+  logoUrl  String?
+  /// Default geo centre for map screens
+  latitude  Float?
+  longitude Float?
+
+  activatedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  modules           CompanyModule[]
+  branches          Branch[]
+  users             User[]
+  territories       Territory[]
+  customers         Customer[]
+  customerContacts  CustomerContact[]
+  activities        CustomerActivity[]
+  categories        ProductCategory[]
+  products          Product[]
+  stockLocations    StockLocation[]
+  stockItems        StockItem[]
+  stockMovements    StockMovement[]
+  transfers         StockTransfer[]
+  quotations        Quotation[]
+  salesOrders       SalesOrder[]
+  invoices          Invoice[]
+  payments          Payment[]
+  suppliers         Supplier[]
+  purchaseOrders    PurchaseOrder[]
+  goodsReceipts     GoodsReceipt[]
+  supplierInvoices  SupplierInvoice[]
+  expenseCategories ExpenseCategory[]
+  expenses          Expense[]
+  visits            Visit[]
+  salesTargets      SalesTarget[]
+  routes            Route[]
+  geofenceEvents    GeofenceEvent[]
+  locationPings     LocationPing[]
+  smsTemplates      SmsTemplate[]
+  smsMessages       SmsMessage[]
+  auditLogs         AuditLog[]
+  counters          DocumentCounter[]
+  settings          Setting[]
+
+  @@index([status])
+}
+
+/// Per-company module licence. The commercial unit of the proposal:
+/// a module the client has not bought is absent or disabled here, and every
+/// route and screen that belongs to it returns 402 / hides itself.
+model CompanyModule {
+  id        String  @id @default(cuid())
+  companyId String
+  /// CRM | SALES_POS | INVENTORY | PROCUREMENT | FINANCE
+  /// FIELD_SALES | ROUTING | GEOFENCING | SMS | ANALYTICS
+  moduleKey String
+  enabled   Boolean @default(false)
+  /// Price paid in KES cents, for the licence record
+  priceCents Int    @default(0)
+
+  activatedAt DateTime?
+  expiresAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, moduleKey])
+  @@index([companyId, enabled])
+}
+
+model Branch {
+  id        String  @id @default(cuid())
+  companyId String
+  name      String
+  code      String
+  phone     String?
+  address   String?
+  latitude  Float?
+  longitude Float?
+  isPrimary Boolean @default(false)
+  active    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  users          User[]
+  customers      Customer[]
+  stockLocations StockLocation[]
+  invoices       Invoice[]
+  salesOrders    SalesOrder[]
+  quotations     Quotation[]
+  purchaseOrders PurchaseOrder[]
+  expenses       Expense[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+}
+
+/// Platform + tenant users. companyId is null only for SUPER_ADMIN.
+model User {
+  id        String  @id @default(cuid())
+  companyId String?
+  branchId  String?
+  name      String
+  email     String  @unique
+  phone     String?
+  passwordHash String
+  /// SUPER_ADMIN | COMPANY_ADMIN | BRANCH_MANAGER | SALES_MANAGER
+  /// ACCOUNTANT | STOREKEEPER | FIELD_REP
+  role      String
+  /// ACTIVE | SUSPENDED | INVITED
+  status    String  @default("ACTIVE")
+  avatarUrl String?
+  /// Extra permission strings granted beyond the role, JSON array
+  extraPermissions String @default("[]")
+
+  lastLoginAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch  Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  refreshTokens   RefreshToken[]
+  devices         Device[]
+  assignedCustomers Customer[]      @relation("CustomerAssignedRep")
+  activities      CustomerActivity[]
+  visits          Visit[]
+  routes          Route[]
+  salesTargets    SalesTarget[]
+  expenses        Expense[]
+  geofenceEvents  GeofenceEvent[]
+  locationPings   LocationPing[]
+  auditLogs       AuditLog[]
+
+  @@index([companyId, role])
+  @@index([companyId, status])
+}
+
+/// Rotating refresh token for the mobile app. One live row per device.
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  deviceId  String?
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// A registered mobile handset. Anchors push delivery and the sync watermark.
+model Device {
+  id         String @id @default(cuid())
+  userId     String
+  /// Client-generated stable install id
+  deviceId   String @unique
+  platform   String
+  model      String?
+  appVersion String?
+  pushToken  String?
+
+  lastSyncAt DateTime?
+  lastSeenAt DateTime?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// Deduplicates mobile writes. The app sends a client UUID per mutation; a
+/// replay after a dropped connection returns the stored response instead of
+/// creating a second order or payment.
+model IdempotencyKey {
+  id         String   @id @default(cuid())
+  key        String   @unique
+  userId     String
+  endpoint   String
+  /// JSON-encoded response body replayed on a duplicate request
+  response   String
+  entityType String?
+  entityId   String?
+  createdAt  DateTime @default(now())
+
+  @@index([userId])
+}
+
+/// Append-only security trail. Proposal Phase One: "role-based access & audit logs".
+model AuditLog {
+  id        String  @id @default(cuid())
+  companyId String?
+  userId    String?
+  /// CREATE | UPDATE | DELETE | LOGIN | LOGOUT | ACTIVATE | SUSPEND | SYNC | EXPORT
+  action    String
+  entity    String
+  entityId  String?
+  /// JSON snapshot of changed fields
+  changes   String?
+  ipAddress String?
+  userAgent String?
+  createdAt DateTime @default(now())
+
+  company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@index([entity, entityId])
+}
+
+/// Per-company document numbering (INV-0001, PO-0001 …) without races.
+model DocumentCounter {
+  id        String @id @default(cuid())
+  companyId String
+  /// INVOICE | QUOTE | ORDER | PO | GRN | PAYMENT | EXPENSE | TRANSFER
+  docType   String
+  prefix    String
+  nextValue Int    @default(1)
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, docType])
+}
+
+model Setting {
+  id        String @id @default(cuid())
+  companyId String
+  key       String
+  value     String
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, key])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MODULE 01 · CRM & CUSTOMER MANAGEMENT
+//  MODULE 08 · GEOFENCING (Territory polygons live here)
+// ═══════════════════════════════════════════════════════════════════════
+
+/// A sales territory. When the GEOFENCING module is licensed the polygon is
+/// enforced for visit verification; otherwise it is descriptive only.
+model Territory {
+  id        String @id @default(cuid())
+  companyId String
+  name      String
+  code      String
+  colour    String @default("#2f83f7")
+  /// JSON array of [lat, lng] pairs forming a closed polygon
+  boundary  String @default("[]")
+  /// Fallback circular fence when no polygon is drawn
+  centerLat Float?
+  centerLng Float?
+  radiusM   Int    @default(2000)
+  active    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company        Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customers      Customer[]
+  routes         Route[]
+  salesTargets   SalesTarget[]
+  geofenceEvents GeofenceEvent[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+}
+
+model Customer {
+  id        String  @id @default(cuid())
+  companyId String
+  branchId  String?
+  territoryId String?
+  assignedRepId String?
+
+  code      String
+  name      String
+  /// RETAIL | WHOLESALE | DISTRIBUTOR | INSTITUTION
+  type      String  @default("RETAIL")
+  /// A | B | C — value segmentation used by CRM reporting
+  segment   String  @default("C")
+  phone     String?
+  email     String?
+  address   String?
+  town      String?
+
+  /// Map pin — Phase One "customer location capture"
+  latitude  Float?
+  longitude Float?
+  /// Metres a check-in may be from the pin and still count as on-site
+  geofenceRadiusM Int @default(150)
+
+  creditLimitCents Int    @default(0)
+  paymentTermsDays Int    @default(0)
+  /// Denormalised outstanding receivable, recalculated on invoice/payment write
+  balanceCents     Int    @default(0)
+  /// ACTIVE | DORMANT | BLOCKED
+  status           String @default("ACTIVE")
+  notes            String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company     Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch      Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  territory   Territory? @relation(fields: [territoryId], references: [id], onDelete: SetNull)
+  assignedRep User?      @relation("CustomerAssignedRep", fields: [assignedRepId], references: [id], onDelete: SetNull)
+
+  contacts    CustomerContact[]
+  activities  CustomerActivity[]
+  quotations  Quotation[]
+  salesOrders SalesOrder[]
+  invoices    Invoice[]
+  payments    Payment[]
+  visits      Visit[]
+  routeStops  RouteStop[]
+  smsMessages SmsMessage[]
+
+  @@unique([companyId, code])
+  @@index([companyId, status])
+  @@index([companyId, territoryId])
+  @@index([companyId, assignedRepId])
+  @@index([companyId, updatedAt])
+}
+
+model CustomerContact {
+  id         String  @id @default(cuid())
+  companyId  String
+  customerId String
+  name       String
+  role       String?
+  phone      String?
+  email      String?
+  isPrimary  Boolean @default(false)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, customerId])
+}
+
+/// Follow-ups and the activity log required by Module 01.
+model CustomerActivity {
+  id         String  @id @default(cuid())
+  companyId  String
+  customerId String
+  userId     String?
+  /// CALL | VISIT | EMAIL | SMS | NOTE | FOLLOW_UP | ORDER | PAYMENT
+  type       String
+  subject    String
+  body       String?
+  /// OPEN | DONE | CANCELLED — only meaningful for FOLLOW_UP
+  status     String  @default("DONE")
+  dueAt      DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  user     User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, customerId, createdAt])
+  @@index([companyId, status, dueAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MODULE 03 · INVENTORY MANAGEMENT  (catalogue is shared with Sales/POS)
+// ═══════════════════════════════════════════════════════════════════════
+
+model ProductCategory {
+  id        String  @id @default(cuid())
+  companyId String
+  name      String
+  code      String
+  parentId  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parent   ProductCategory?  @relation("CategoryTree", fields: [parentId], references: [id], onDelete: SetNull)
+  children ProductCategory[] @relation("CategoryTree")
+  products Product[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+}
+
+model Product {
+  id         String  @id @default(cuid())
+  companyId  String
+  categoryId String?
+
+  sku        String
+  name       String
+  description String?
+  /// PC | CTN | KG | L | DZ …
+  unit       String  @default("PC")
+  /// Units per carton, for van-sales pack maths
+  unitsPerPack Int   @default(1)
+  barcode    String?
+
+  sellPriceCents Int @default(0)
+  costPriceCents Int @default(0)
+  /// VAT percentage × 100 (1600 = 16%)
+  taxRateBp      Int @default(1600)
+
+  reorderLevel Int     @default(0)
+  trackStock   Boolean @default(true)
+  active       Boolean @default(true)
+  imageUrl     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  category ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+
+  stockItems     StockItem[]
+  stockMovements StockMovement[]
+  quotationLines QuotationLine[]
+  orderLines     SalesOrderLine[]
+  invoiceLines   InvoiceLine[]
+  poLines        PurchaseOrderLine[]
+  grnLines       GoodsReceiptLine[]
+  transferLines  StockTransferLine[]
+
+  @@unique([companyId, sku])
+  @@index([companyId, active])
+  @@index([companyId, updatedAt])
+}
+
+/// A stockable place: main store, branch store, or a rep's van.
+model StockLocation {
+  id        String  @id @default(cuid())
+  companyId String
+  branchId  String?
+  name      String
+  code      String
+  /// WAREHOUSE | STORE | VAN
+  type      String  @default("WAREHOUSE")
+  /// Set when type = VAN, links the rolling stock to its rep
+  ownerUserId String?
+  active    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch  Branch? @relation(fields: [branchId], references: [id], onDelete: SetNull)
+
+  stockItems    StockItem[]
+  movements     StockMovement[]
+  transfersOut  StockTransfer[] @relation("TransferFrom")
+  transfersIn   StockTransfer[] @relation("TransferTo")
+  invoices      Invoice[]
+  goodsReceipts GoodsReceipt[]
+
+  @@unique([companyId, code])
+  @@index([companyId])
+}
+
+model StockItem {
+  id         String @id @default(cuid())
+  companyId  String
+  productId  String
+  locationId String
+
+  /// On-hand quantity in base units
+  quantity   Int @default(0)
+  /// Committed to unfulfilled orders
+  reserved   Int @default(0)
+
+  updatedAt DateTime @updatedAt
+
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  product  Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location StockLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@unique([productId, locationId])
+  @@index([companyId, locationId])
+}
+
+/// Immutable ledger of every stock change. Balances are derived from these.
+model StockMovement {
+  id         String @id @default(cuid())
+  companyId  String
+  productId  String
+  locationId String
+
+  /// PURCHASE | SALE | TRANSFER_IN | TRANSFER_OUT | ADJUSTMENT | RETURN | OPENING
+  type       String
+  /// Signed: positive increases the location's stock
+  quantity   Int
+  balanceAfter Int   @default(0)
+  unitCostCents Int  @default(0)
+
+  /// Originating document, e.g. INVOICE / GRN / TRANSFER
+  refType String?
+  refId   String?
+  note    String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  product  Product       @relation(fields: [productId], references: [id], onDelete: Cascade)
+  location StockLocation @relation(fields: [locationId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, productId, createdAt])
+  @@index([companyId, refType, refId])
+}
+
+model StockTransfer {
+  id        String @id @default(cuid())
+  companyId String
+  number    String
+  fromLocationId String
+  toLocationId   String
+  /// DRAFT | IN_TRANSIT | RECEIVED | CANCELLED
+  status    String @default("DRAFT")
+  note      String?
+
+  dispatchedAt DateTime?
+  receivedAt   DateTime?
+  createdById  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  fromLocation StockLocation @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocation   StockLocation @relation("TransferTo", fields: [toLocationId], references: [id])
+  lines        StockTransferLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+}
+
+model StockTransferLine {
+  id         String @id @default(cuid())
+  transferId String
+  productId  String
+  quantity   Int
+  received   Int    @default(0)
+
+  transfer StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
+  product  Product       @relation(fields: [productId], references: [id])
+
+  @@index([transferId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MODULE 02 · SALES & POS
+// ═══════════════════════════════════════════════════════════════════════
+
+model Quotation {
+  id         String @id @default(cuid())
+  companyId  String
+  branchId   String?
+  customerId String
+  number     String
+
+  /// DRAFT | SENT | ACCEPTED | REJECTED | EXPIRED | CONVERTED
+  status     String @default("DRAFT")
+  issueDate  DateTime @default(now())
+  validUntil DateTime?
+
+  subtotalCents Int @default(0)
+  discountCents Int @default(0)
+  taxCents      Int @default(0)
+  totalCents    Int @default(0)
+  note          String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch   Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  lines    QuotationLine[]
+  orders   SalesOrder[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+}
+
+model QuotationLine {
+  id          String @id @default(cuid())
+  quotationId String
+  productId   String
+  description String
+  quantity    Int
+  unitPriceCents Int
+  discountCents  Int @default(0)
+  taxRateBp      Int @default(1600)
+  lineTotalCents Int
+
+  quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
+  product   Product   @relation(fields: [productId], references: [id])
+
+  @@index([quotationId])
+}
+
+model SalesOrder {
+  id          String @id @default(cuid())
+  companyId   String
+  branchId    String?
+  customerId  String
+  quotationId String?
+  number      String
+
+  /// DRAFT | CONFIRMED | PARTIALLY_FULFILLED | FULFILLED | INVOICED | CANCELLED
+  status      String @default("DRAFT")
+  /// CONSOLE | POS | FIELD — provenance matters for rep commission
+  channel     String @default("CONSOLE")
+  orderDate   DateTime @default(now())
+  deliveryDate DateTime?
+
+  subtotalCents Int @default(0)
+  discountCents Int @default(0)
+  taxCents      Int @default(0)
+  totalCents    Int @default(0)
+  note          String?
+
+  /// Set when the order was captured during a field visit
+  visitId     String? @unique
+  /// Client UUID from the mobile app; the offline write's identity
+  clientUuid  String? @unique
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch    Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer  Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  quotation Quotation? @relation(fields: [quotationId], references: [id], onDelete: SetNull)
+  visit     Visit?     @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  lines     SalesOrderLine[]
+  invoices  Invoice[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@index([companyId, customerId])
+  @@index([companyId, updatedAt])
+}
+
+model SalesOrderLine {
+  id        String @id @default(cuid())
+  orderId   String
+  productId String
+  description String
+  quantity  Int
+  fulfilled Int    @default(0)
+  unitPriceCents Int
+  discountCents  Int @default(0)
+  taxRateBp      Int @default(1600)
+  lineTotalCents Int
+
+  order   SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product    @relation(fields: [productId], references: [id])
+
+  @@index([orderId])
+}
+
+model Invoice {
+  id         String @id @default(cuid())
+  companyId  String
+  branchId   String?
+  customerId String
+  orderId    String?
+  locationId String?
+  number     String
+
+  /// DRAFT | ISSUED | PARTIALLY_PAID | PAID | OVERDUE | CANCELLED
+  status     String @default("DRAFT")
+  channel    String @default("CONSOLE")
+  issueDate  DateTime @default(now())
+  dueDate    DateTime?
+
+  subtotalCents Int @default(0)
+  discountCents Int @default(0)
+  taxCents      Int @default(0)
+  totalCents    Int @default(0)
+  paidCents     Int @default(0)
+  note          String?
+
+  visitId    String?
+  clientUuid String? @unique
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch   Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  order    SalesOrder?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  location StockLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  lines    InvoiceLine[]
+  allocations PaymentAllocation[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@index([companyId, customerId])
+  @@index([companyId, dueDate])
+  @@index([companyId, updatedAt])
+}
+
+model InvoiceLine {
+  id        String @id @default(cuid())
+  invoiceId String
+  productId String
+  description String
+  quantity  Int
+  unitPriceCents Int
+  discountCents  Int @default(0)
+  taxRateBp      Int @default(1600)
+  lineTotalCents Int
+
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id])
+
+  @@index([invoiceId])
+}
+
+/// Money received from a customer. Allocated across one or more invoices.
+model Payment {
+  id         String @id @default(cuid())
+  companyId  String
+  customerId String
+  number     String
+
+  amountCents Int
+  /// CASH | MPESA | BANK | CHEQUE | CREDIT_NOTE
+  method      String @default("CASH")
+  reference   String?
+  paidAt      DateTime @default(now())
+  note        String?
+
+  visitId    String?
+  clientUuid String? @unique
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  allocations PaymentAllocation[]
+
+  @@unique([companyId, number])
+  @@index([companyId, customerId])
+  @@index([companyId, paidAt])
+  @@index([companyId, updatedAt])
+}
+
+model PaymentAllocation {
+  id        String @id @default(cuid())
+  paymentId String
+  invoiceId String
+  amountCents Int
+
+  payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  @@unique([paymentId, invoiceId])
+  @@index([invoiceId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MODULE 04 · PROCUREMENT & SUPPLIERS
+// ═══════════════════════════════════════════════════════════════════════
+
+model Supplier {
+  id        String @id @default(cuid())
+  companyId String
+  code      String
+  name      String
+  contactName String?
+  phone     String?
+  email     String?
+  address   String?
+  taxPin    String?
+  paymentTermsDays Int @default(30)
+  balanceCents     Int @default(0)
+  status    String @default("ACTIVE")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company        Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  purchaseOrders PurchaseOrder[]
+  goodsReceipts  GoodsReceipt[]
+  invoices       SupplierInvoice[]
+
+  @@unique([companyId, code])
+  @@index([companyId, status])
+}
+
+model PurchaseOrder {
+  id         String @id @default(cuid())
+  companyId  String
+  branchId   String?
+  supplierId String
+  number     String
+
+  /// DRAFT | SENT | PARTIALLY_RECEIVED | RECEIVED | CANCELLED
+  status     String @default("DRAFT")
+  orderDate  DateTime @default(now())
+  expectedAt DateTime?
+
+  subtotalCents Int @default(0)
+  taxCents      Int @default(0)
+  totalCents    Int @default(0)
+  note          String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch   Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  lines    PurchaseOrderLine[]
+  receipts GoodsReceipt[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+}
+
+model PurchaseOrderLine {
+  id        String @id @default(cuid())
+  poId      String
+  productId String
+  description String
+  quantity  Int
+  received  Int    @default(0)
+  unitCostCents Int
+  taxRateBp     Int @default(1600)
+  lineTotalCents Int
+
+  po      PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
+  product Product       @relation(fields: [productId], references: [id])
+
+  @@index([poId])
+}
+
+model GoodsReceipt {
+  id         String @id @default(cuid())
+  companyId  String
+  supplierId String
+  poId       String?
+  locationId String
+  number     String
+
+  /// DRAFT | POSTED
+  status     String @default("DRAFT")
+  receivedAt DateTime @default(now())
+  note       String?
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  supplier Supplier       @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  po       PurchaseOrder? @relation(fields: [poId], references: [id], onDelete: SetNull)
+  location StockLocation  @relation(fields: [locationId], references: [id])
+  lines    GoodsReceiptLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+}
+
+model GoodsReceiptLine {
+  id        String @id @default(cuid())
+  grnId     String
+  productId String
+  quantity  Int
+  unitCostCents Int
+
+  grn     GoodsReceipt @relation(fields: [grnId], references: [id], onDelete: Cascade)
+  product Product      @relation(fields: [productId], references: [id])
+
+  @@index([grnId])
+}
+
+model SupplierInvoice {
+  id         String @id @default(cuid())
+  companyId  String
+  supplierId String
+  number     String
+  supplierRef String?
+
+  /// UNPAID | PARTIALLY_PAID | PAID | CANCELLED
+  status     String @default("UNPAID")
+  issueDate  DateTime @default(now())
+  dueDate    DateTime?
+  totalCents Int @default(0)
+  paidCents  Int @default(0)
+  note       String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MODULE 05 · FINANCE, EXPENSES & RECEIVABLES
+// ═══════════════════════════════════════════════════════════════════════
+
+model ExpenseCategory {
+  id        String @id @default(cuid())
+  companyId String
+  name      String
+  code      String
+  /// Claims above this need a manager approval; 0 = always approve
+  approvalThresholdCents Int @default(0)
+  active    Boolean @default(true)
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  expenses Expense[]
+
+  @@unique([companyId, code])
+}
+
+/// Covers both office expenses and field-rep expense claims (proposal p.3).
+model Expense {
+  id         String @id @default(cuid())
+  companyId  String
+  branchId   String?
+  categoryId String?
+  userId     String?
+
+  number      String
+  description String
+  amountCents Int
+  /// DRAFT | SUBMITTED | APPROVED | REJECTED | PAID
+  status      String @default("DRAFT")
+  incurredAt  DateTime @default(now())
+  /// CASH | MPESA | BANK | PETTY_CASH
+  paymentMethod String @default("CASH")
+  receiptUrl  String?
+  /// Where the claim was raised — field claims capture the rep's position
+  latitude    Float?
+  longitude   Float?
+
+  approvedById String?
+  approvedAt   DateTime?
+  rejectReason String?
+  clientUuid   String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch   Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  category ExpenseCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  user     User?            @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@index([companyId, userId])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MODULE 06 · FIELD SALES MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════
+
+model Visit {
+  id         String @id @default(cuid())
+  companyId  String
+  customerId String
+  repId      String
+  routeId    String?
+
+  /// SCHEDULED | IN_PROGRESS | COMPLETED | MISSED | CANCELLED
+  status      String @default("SCHEDULED")
+  /// SALES | COLLECTION | DELIVERY | PROSPECTING | SUPPORT
+  purpose     String @default("SALES")
+  scheduledAt DateTime
+
+  checkInAt   DateTime?
+  checkInLat  Float?
+  checkInLng  Float?
+  checkInAccuracyM Int?
+
+  checkOutAt  DateTime?
+  checkOutLat Float?
+  checkOutLng Float?
+
+  /// Module 08 output: was the check-in inside the customer's fence?
+  geofenceVerified Boolean @default(false)
+  /// Metres between check-in point and the customer pin
+  distanceFromCustomerM Int?
+  /// Minutes on site, derived at check-out
+  durationMin Int?
+
+  outcome String?
+  notes   String?
+
+  clientUuid String? @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  rep      User     @relation(fields: [repId], references: [id], onDelete: Cascade)
+  route    Route?   @relation(fields: [routeId], references: [id], onDelete: SetNull)
+
+  photos VisitPhoto[]
+  order  SalesOrder?
+
+  @@index([companyId, repId, scheduledAt])
+  @@index([companyId, customerId])
+  @@index([companyId, status])
+  @@index([companyId, updatedAt])
+}
+
+model VisitPhoto {
+  id      String @id @default(cuid())
+  visitId String
+  /// Stored under /uploads/visits/<id>.jpg by the upload route
+  url     String
+  caption String?
+  latitude  Float?
+  longitude Float?
+  takenAt DateTime @default(now())
+  clientUuid String? @unique
+
+  visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
+
+  @@index([visitId])
+}
+
+model SalesTarget {
+  id          String @id @default(cuid())
+  companyId   String
+  repId       String?
+  territoryId String?
+
+  /// MONTHLY | QUARTERLY | ANNUAL
+  period      String @default("MONTHLY")
+  periodStart DateTime
+  periodEnd   DateTime
+
+  targetSalesCents      Int @default(0)
+  targetCollectionCents Int @default(0)
+  targetVisits          Int @default(0)
+  targetNewCustomers    Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rep       User?      @relation(fields: [repId], references: [id], onDelete: Cascade)
+  territory Territory? @relation(fields: [territoryId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, repId, periodStart])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MODULE 07 · SMART ROUTING
+// ═══════════════════════════════════════════════════════════════════════
+
+model Route {
+  id          String @id @default(cuid())
+  companyId   String
+  repId       String
+  territoryId String?
+
+  name     String
+  routeDate DateTime
+  /// PLANNED | ACTIVE | COMPLETED | CANCELLED
+  status   String @default("PLANNED")
+
+  /// Optimised total travel distance, metres
+  totalDistanceM Int @default(0)
+  /// Estimated driving time at the planning speed assumption, minutes
+  estimatedMin   Int @default(0)
+  startLat Float?
+  startLng Float?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  rep       User       @relation(fields: [repId], references: [id], onDelete: Cascade)
+  territory Territory? @relation(fields: [territoryId], references: [id], onDelete: SetNull)
+
+  stops  RouteStop[]
+  visits Visit[]
+
+  @@index([companyId, repId, routeDate])
+  @@index([companyId, updatedAt])
+}
+
+model RouteStop {
+  id         String @id @default(cuid())
+  routeId    String
+  customerId String
+
+  sequence   Int
+  /// PENDING | ARRIVED | DONE | SKIPPED
+  status     String @default("PENDING")
+  plannedAt  DateTime?
+  /// Distance from the previous stop, metres
+  legDistanceM Int @default(0)
+  legMin       Int @default(0)
+  skipReason   String?
+
+  route    Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([routeId, customerId])
+  @@index([routeId, sequence])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MODULE 08 · GEOFENCING & LOCATION INTELLIGENCE
+// ═══════════════════════════════════════════════════════════════════════
+
+model GeofenceEvent {
+  id          String @id @default(cuid())
+  companyId   String
+  userId      String
+  territoryId String?
+
+  /// ENTER | EXIT | VISIT_VERIFIED | VISIT_REJECTED | OUT_OF_ZONE
+  type      String
+  latitude  Float
+  longitude Float
+  /// Free-text detail, e.g. "check-in 412m from customer pin"
+  detail    String?
+  refType   String?
+  refId     String?
+  occurredAt DateTime @default(now())
+  createdAt  DateTime @default(now())
+
+  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  territory Territory? @relation(fields: [territoryId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, userId, occurredAt])
+  @@index([companyId, type])
+}
+
+/// Background location breadcrumbs from the mobile app. High volume — pruned
+/// by retention policy rather than kept forever.
+model LocationPing {
+  id        String @id @default(cuid())
+  companyId String
+  userId    String
+
+  latitude  Float
+  longitude Float
+  accuracyM Int?
+  speedMps  Float?
+  heading   Float?
+  batteryPct Int?
+  isMoving  Boolean @default(true)
+  recordedAt DateTime
+  createdAt  DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, userId, recordedAt])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MODULE 09 · SMS COMMUNICATION
+// ═══════════════════════════════════════════════════════════════════════
+
+model SmsTemplate {
+  id        String @id @default(cuid())
+  companyId String
+  /// ORDER_CONFIRMATION | PAYMENT_RECEIPT | BALANCE_REMINDER | PROMOTION | VISIT_REMINDER
+  key       String
+  name      String
+  /// Placeholders in {{braces}}: {{customer}}, {{amount}}, {{balance}}, {{number}}
+  body      String
+  active    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, key])
+}
+
+model SmsMessage {
+  id         String @id @default(cuid())
+  companyId  String
+  customerId String?
+
+  toPhone   String
+  body      String
+  /// QUEUED | SENT | DELIVERED | FAILED
+  status    String @default("QUEUED")
+  provider  String @default("console")
+  providerRef String?
+  templateKey String?
+  costCents Int @default(0)
+  error     String?
+
+  sentAt    DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, status])
+  @@index([companyId, createdAt])
+}

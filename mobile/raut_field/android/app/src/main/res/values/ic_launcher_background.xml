@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- White, because the Raut mark is drawn for a light ground: its own
+         navy R and the road would disappear into a dark tile. -->
+    <color name="ic_launcher_background">#FFFFFF</color>
+</resources>

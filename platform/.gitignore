@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+build/
+*.tsbuildinfo
+next-env.d.ts
+
+# SQLite database files
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+prisma/*.db*
+
+.env.local
+.env.production
+.DS_Store
