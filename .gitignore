@@ -29,3 +29,9 @@ Thumbs.db
 *.swp
 .idea/
 .vscode/
+
+# Android signing. The upload key is the app's identity on Play; it lives
+# outside the repo and its password must never be committed.
+**/android/key.properties
+*.jks
+*.keystore

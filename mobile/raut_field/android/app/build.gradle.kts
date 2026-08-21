@@ -1,3 +1,18 @@
+import java.util.Properties
+import java.io.FileInputStream
+
+// Signing material is read from android/key.properties, which is gitignored.
+// When it is absent — a fresh clone, or CI without the secret — release builds
+// fall back to the debug key so `flutter run --release` still works locally.
+// A build that would ship must never do that silently, so the fallback is
+// announced loudly at configure time.
+val keystoreProperties = Properties()
+val keystorePropertiesFile = rootProject.file("key.properties")
+val hasReleaseSigning = keystorePropertiesFile.exists()
+if (hasReleaseSigning) {
+    keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+}
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -20,21 +35,40 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "co.ke.tariafrica.raut_field"
-        // You can update the following values to match your application needs.
-        // For more information, see: https://flutter.dev/to/review-gradle-config.
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        if (hasReleaseSigning) {
+            create("release") {
+                storeFile = file(keystoreProperties["storeFile"] as String)
+                storePassword = keystoreProperties["storePassword"] as String
+                keyAlias = keystoreProperties["keyAlias"] as String
+                keyPassword = keystoreProperties["keyPassword"] as String
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = if (hasReleaseSigning) {
+                signingConfigs.getByName("release")
+            } else {
+                logger.warn(
+                    "RAUT: android/key.properties is missing — signing this release " +
+                    "with the DEBUG key. The artifact cannot be uploaded to Play."
+                )
+                signingConfigs.getByName("debug")
+            }
+
+            // R8 shrinks and obfuscates. Flutter ships the keep rules its
+            // engine needs, so this is safe without a custom proguard file.
+            isMinifyEnabled = true
+            isShrinkResources = true
         }
     }
 }
