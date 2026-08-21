@@ -139,37 +139,50 @@ class _LoginScreenState extends State<LoginScreen> {
                 // Shown deliberately: the single most common setup failure is
                 // the app pointing at the wrong host, and it is invisible
                 // otherwise.
-                Container(
-                  padding: const EdgeInsets.all(12),
-                  decoration: BoxDecoration(
-                    color: Colors.grey.shade100,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'SERVER',
-                        style: TextStyle(
-                          fontSize: 10,
-                          letterSpacing: 1,
-                          fontWeight: FontWeight.w700,
-                          color: Colors.grey.shade600,
+                // Shown only when this build points somewhere other than
+                // production. On a rep's phone it is noise; on a test build it
+                // is the one thing that explains why an order never arrived,
+                // so it reads as a warning rather than a footnote.
+                if (!AppConfig.isProduction)
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: RautTheme.warningBg,
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: RautTheme.warning.withValues(alpha: 0.35)),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Icon(Icons.warning_amber_rounded,
+                                size: 14, color: RautTheme.warning),
+                            const SizedBox(width: 6),
+                            Text(
+                              'NOT PRODUCTION',
+                              style: TextStyle(
+                                fontSize: 10,
+                                letterSpacing: 1,
+                                fontWeight: FontWeight.w700,
+                                color: RautTheme.warning,
+                              ),
+                            ),
+                          ],
                         ),
-                      ),
-                      const SizedBox(height: 4),
-                      SelectableText(
-                        AppConfig.apiBase,
-                        style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        'Change with --dart-define=RAUT_API_BASE=<url>',
-                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
-                      ),
-                    ],
+                        const SizedBox(height: 6),
+                        SelectableText(
+                          AppConfig.apiBase,
+                          style: const TextStyle(fontSize: 12, fontFamily: 'monospace'),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          'Change with --dart-define=RAUT_API_BASE=<url>',
+                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
               ],
             ),
           ),

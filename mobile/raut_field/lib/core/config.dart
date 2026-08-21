@@ -5,17 +5,29 @@
 ///
 ///   flutter run --dart-define=RAUT_API_BASE=http://10.0.2.2:3200
 ///
-/// The default is the Android emulator's host loopback (10.0.2.2), because
-/// that is where this app is developed against; `localhost` inside the emulator
-/// resolves to the emulator itself, which is the single most common cause of
-/// "the app can't reach the server" during setup.
+/// **The default is production**, deliberately. It used to be the emulator's
+/// host loopback (10.0.2.2), which meant a release build made without the flag
+/// shipped pointing at a server that exists only on a developer's laptop — the
+/// app would install, open, and simply never sign anyone in. Defaulting the
+/// other way makes the dangerous case the one you have to ask for: a developer
+/// overriding to localhost notices immediately, a rep with a misbuilt APK does
+/// not.
+///
+/// Inside the Android emulator, note that `localhost` resolves to the emulator
+/// itself; the host is reachable at 10.0.2.2, which is the single most common
+/// cause of "the app can't reach the server" during setup.
 class AppConfig {
   const AppConfig._();
 
   static const String apiBase = String.fromEnvironment(
     'RAUT_API_BASE',
-    defaultValue: 'http://10.0.2.2:3200',
+    defaultValue: 'https://raut.co.ke',
   );
+
+  /// True when this build talks to something other than production — surfaced
+  /// on the login screen so a tester can tell at a glance which server their
+  /// orders are landing in.
+  static bool get isProduction => apiBase == 'https://raut.co.ke';
 
   static String get apiV1 => '$apiBase/api/v1';
 
