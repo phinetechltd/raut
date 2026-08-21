@@ -69,6 +69,10 @@ export default function LoginPage() {
 
         <p className="text-xs text-white/40">
           Prepared for Zamar Solutions Limited · Core platform + 10 modules
+          {" · "}
+          <a href="/policy" className="underline hover:text-white/70">
+            Privacy &amp; Cookies
+          </a>
         </p>
       </section>
 
