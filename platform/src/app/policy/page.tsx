@@ -330,10 +330,15 @@ export default function PolicyPage() {
             Privacy enquiries:{" "}
             <a
               className="text-accent hover:underline"
-              href="mailto:privacy@raut.co.ke"
+              href="mailto:phinetechltd@gmail.com"
             >
-              privacy@raut.co.ke
+              phinetechltd@gmail.com
             </a>
+            {" — or use the "}
+            <Link href="/contact-us" className="text-accent hover:underline">
+              contact form
+            </Link>
+            {", which prefills what we need."}
           </p>
           <p className="text-content-muted text-sm">
             If we change how the platform handles personal data, we will update

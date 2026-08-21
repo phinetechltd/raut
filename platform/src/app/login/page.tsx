@@ -73,6 +73,10 @@ export default function LoginPage() {
           <a href="/policy" className="underline hover:text-white/70">
             Privacy &amp; Cookies
           </a>
+          {" · "}
+          <a href="/contact-us" className="underline hover:text-white/70">
+            Contact us
+          </a>
         </p>
       </section>
 
