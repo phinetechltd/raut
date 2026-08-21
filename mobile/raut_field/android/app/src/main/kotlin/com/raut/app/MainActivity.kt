@@ -1,4 +1,4 @@
-package co.ke.tariafrica.raut_field
+package com.raut.app
 
 import io.flutter.embedding.android.FlutterActivity
 

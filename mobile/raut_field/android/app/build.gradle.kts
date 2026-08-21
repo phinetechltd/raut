@@ -21,7 +21,7 @@ plugins {
 }
 
 android {
-    namespace = "co.ke.tariafrica.raut_field"
+    namespace = "com.raut.app"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
 
@@ -35,7 +35,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "co.ke.tariafrica.raut_field"
+        applicationId = "com.raut.app"
         minSdk = flutter.minSdkVersion
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode

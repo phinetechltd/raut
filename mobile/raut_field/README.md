@@ -124,7 +124,7 @@ apply, silently.
 ## Upgrading from the pre-Raut build
 
 The rebrand changed the `applicationId` from `co.ke.tariafrica.zamar_field` to
-`co.ke.tariafrica.raut_field`. **Android treats a changed applicationId as a
+`com.raut.app`. **Android treats a changed applicationId as a
 different app**, so:
 
 - The new build will not upgrade an existing install — it installs alongside it.
@@ -191,7 +191,7 @@ platform audit log as `LOGIN {"channel":"mobile"}` and registers a row in
 
 **`am start -W` reports `Status: timeout`.** Same cause — the launch is
 considered incomplete until a frame is reported. Check `adb logcat --pid=$(adb
-shell pidof co.ke.tariafrica.raut_field)` for a real Dart error before
+shell pidof com.raut.app)` for a real Dart error before
 assuming a crash; a healthy start logs `Using the Impeller rendering backend`
 and `The Dart VM service is listening`.
 
