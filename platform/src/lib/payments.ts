@@ -9,8 +9,11 @@ import { normalisePhone } from "./sms";
  *
  * Same shape as the SMS adapters in `sms.ts`: one interface, one adapter per
  * provider, a selector, and nothing transmitted until the attempt is persisted.
- * Credentials come from the environment and are never stored per-tenant in the
- * database, so a database dump does not leak the means to move money.
+ *
+ * Credentials are resolved per company and passed in — see `credsFor`. Tenant
+ * values are held encrypted (`src/lib/secrets.ts`) and fall back to the
+ * environment, so a deployment can run one shared merchant account or a
+ * different one per company without the adapters knowing the difference.
  *
  * Two properties matter more here than anywhere else in the platform:
  *
@@ -24,6 +27,41 @@ import { normalisePhone } from "./sms";
  */
 
 export type PaymentProviderName = "PAYSTACK" | "MPESA_DARAJA" | "KCB_BUNI";
+
+/**
+ * A resolved credential bundle for one company and one provider.
+ *
+ * Adapters read from this rather than `process.env` directly, so the same code
+ * serves a tenant with its own Paystack account and a deployment running a
+ * single shared one. `credsFor` below decides which wins.
+ */
+export type Creds = Record<string, string | undefined>;
+
+/**
+ * Tenant credentials take precedence; the environment is the fallback.
+ *
+ * That ordering matters: a company that has configured its own gateway must
+ * never silently collect into the platform's account because someone left a key
+ * in the server environment.
+ */
+export function credsFor(tenant: Creds | null | undefined) {
+  return (key: string): string | undefined => {
+    const own = tenant?.[key];
+    return own && own.length > 0 ? own : process.env[key];
+  };
+}
+
+/** The keys each provider needs, for validation and for the settings form. */
+export const REQUIRED_KEYS: Record<PaymentProviderName, string[]> = {
+  PAYSTACK: ["PAYSTACK_SECRET_KEY"],
+  MPESA_DARAJA: [
+    "MPESA_CONSUMER_KEY",
+    "MPESA_CONSUMER_SECRET",
+    "MPESA_SHORTCODE",
+    "MPESA_PASSKEY",
+  ],
+  KCB_BUNI: ["KCB_CONSUMER_KEY", "KCB_CONSUMER_SECRET", "KCB_TILL_NUMBER"],
+};
 
 export const PAYMENT_PROVIDERS: Array<{
   name: PaymentProviderName;
@@ -70,19 +108,26 @@ export interface VerifyResult {
 
 export interface PaymentProvider {
   readonly name: PaymentProviderName;
-  /** True when the environment carries everything this adapter needs. */
-  configured(): boolean;
-  initiate(input: InitiateInput): Promise<InitiateResult>;
+  /** True when this company's credentials carry everything the adapter needs. */
+  configured(creds?: Creds): boolean;
+  initiate(input: InitiateInput, creds?: Creds): Promise<InitiateResult>;
   /** Ask the provider directly. Used for polling and to confirm a webhook. */
-  verify(providerRef: string): Promise<VerifyResult>;
+  verify(providerRef: string, creds?: Creds): Promise<VerifyResult>;
   /**
    * Validates a webhook body against the provider's signature scheme.
    * Returning false must be treated as hostile, not as a transient error.
    */
-  verifyWebhook(rawBody: string, headers: Headers): boolean;
+  verifyWebhook(rawBody: string, headers: Headers, creds?: Creds): boolean;
 }
 
 /* ────────────────────────── helpers ────────────────────────── */
+
+type EnvReader = (key: string) => string | undefined;
+
+/** Short, non-reversible handle for a credential, used only as a cache key. */
+function cacheKeyFor(secret: string): string {
+  return crypto.createHash("sha256").update(secret).digest("hex").slice(0, 16);
+}
 
 /** Cents to the major unit the provider expects, as a string where needed. */
 const toMajor = (cents: number) => cents / 100;
@@ -131,16 +176,17 @@ async function cachedToken(
 const paystack: PaymentProvider = {
   name: "PAYSTACK",
 
-  configured() {
-    return Boolean(process.env.PAYSTACK_SECRET_KEY);
+  configured(creds) {
+    return Boolean(credsFor(creds)("PAYSTACK_SECRET_KEY"));
   },
 
-  async initiate(input) {
-    const secret = process.env.PAYSTACK_SECRET_KEY;
+  async initiate(input, creds) {
+    const env = credsFor(creds);
+    const secret = env("PAYSTACK_SECRET_KEY");
     if (!secret) return { ok: false, error: "Paystack secret key is not configured" };
     if (!input.payerEmail) return { ok: false, error: "Paystack requires the payer's email" };
 
-    const base = process.env.PAYSTACK_BASE_URL ?? "https://api.paystack.co";
+    const base = env("PAYSTACK_BASE_URL") ?? "https://api.paystack.co";
     const res = await postJson(
       `${base}/transaction/initialize`,
       {
@@ -170,11 +216,12 @@ const paystack: PaymentProvider = {
     };
   },
 
-  async verify(providerRef) {
-    const secret = process.env.PAYSTACK_SECRET_KEY;
+  async verify(providerRef, creds) {
+    const env = credsFor(creds);
+    const secret = env("PAYSTACK_SECRET_KEY");
     if (!secret) return { status: "PENDING", failureReason: "Paystack not configured" };
 
-    const base = process.env.PAYSTACK_BASE_URL ?? "https://api.paystack.co";
+    const base = env("PAYSTACK_BASE_URL") ?? "https://api.paystack.co";
     const res = await fetch(`${base}/transaction/verify/${encodeURIComponent(providerRef)}`, {
       headers: { Authorization: `Bearer ${secret}` },
     });
@@ -201,8 +248,8 @@ const paystack: PaymentProvider = {
     return { status: "PENDING", raw: json };
   },
 
-  verifyWebhook(rawBody, headers) {
-    const secret = process.env.PAYSTACK_SECRET_KEY;
+  verifyWebhook(rawBody, headers, creds) {
+    const secret = credsFor(creds)("PAYSTACK_SECRET_KEY");
     const signature = headers.get("x-paystack-signature");
     if (!secret || !signature) return false;
 
@@ -237,17 +284,16 @@ export function toDarajaMsisdn(raw: string): string | null {
 const mpesaDaraja: PaymentProvider = {
   name: "MPESA_DARAJA",
 
-  configured() {
-    return Boolean(
-      process.env.MPESA_CONSUMER_KEY &&
-        process.env.MPESA_CONSUMER_SECRET &&
-        process.env.MPESA_SHORTCODE &&
-        process.env.MPESA_PASSKEY,
-    );
+  configured(creds) {
+    const env = credsFor(creds);
+    return REQUIRED_KEYS.MPESA_DARAJA.every((k) => Boolean(env(k)));
   },
 
-  async initiate(input) {
-    if (!this.configured()) return { ok: false, error: "M-Pesa Daraja is not configured" };
+  async initiate(input, creds) {
+    const env = credsFor(creds);
+    if (!this.configured(creds)) {
+      return { ok: false, error: "M-Pesa Daraja is not configured" };
+    }
     if (!input.payerPhone) return { ok: false, error: "M-Pesa requires the payer's phone number" };
 
     const msisdn = toDarajaMsisdn(input.payerPhone);
@@ -258,25 +304,24 @@ const mpesaDaraja: PaymentProvider = {
     const shillings = Math.round(toMajor(input.amountCents));
     if (shillings < 1) return { ok: false, error: "Amount must be at least KES 1" };
 
-    const token = await darajaToken();
+    const token = await darajaToken(env);
     if (!token) return { ok: false, error: "Could not authenticate with Daraja" };
 
-    const shortcode = process.env.MPESA_SHORTCODE!;
-    const passkey = process.env.MPESA_PASSKEY!;
+    const shortcode = env("MPESA_SHORTCODE")!;
+    const passkey = env("MPESA_PASSKEY")!;
     const timestamp = darajaTimestamp();
     const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString("base64");
 
     const res = await postJson(
-      `${darajaBase()}/mpesa/stkpush/v1/processrequest`,
+      `${darajaBase(env)}/mpesa/stkpush/v1/processrequest`,
       {
         BusinessShortCode: shortcode,
         Password: password,
         Timestamp: timestamp,
-        TransactionType:
-          process.env.MPESA_TRANSACTION_TYPE ?? "CustomerPayBillOnline",
+        TransactionType: env("MPESA_TRANSACTION_TYPE") ?? "CustomerPayBillOnline",
         Amount: shillings,
         PartyA: msisdn,
-        PartyB: process.env.MPESA_PARTY_B ?? shortcode,
+        PartyB: env("MPESA_PARTY_B") ?? shortcode,
         PhoneNumber: msisdn,
         CallBackURL: input.callbackUrl,
         // Both are shown to the customer on the STK prompt, and Daraja rejects
@@ -301,19 +346,22 @@ const mpesaDaraja: PaymentProvider = {
     };
   },
 
-  async verify(providerRef) {
-    if (!this.configured()) return { status: "PENDING", failureReason: "Daraja not configured" };
+  async verify(providerRef, creds) {
+    const env = credsFor(creds);
+    if (!this.configured(creds)) {
+      return { status: "PENDING", failureReason: "Daraja not configured" };
+    }
 
-    const token = await darajaToken();
+    const token = await darajaToken(env);
     if (!token) return { status: "PENDING", failureReason: "Could not authenticate with Daraja" };
 
-    const shortcode = process.env.MPESA_SHORTCODE!;
-    const passkey = process.env.MPESA_PASSKEY!;
+    const shortcode = env("MPESA_SHORTCODE")!;
+    const passkey = env("MPESA_PASSKEY")!;
     const timestamp = darajaTimestamp();
     const password = Buffer.from(`${shortcode}${passkey}${timestamp}`).toString("base64");
 
     const res = await postJson(
-      `${darajaBase()}/mpesa/stkpushquery/v1/query`,
+      `${darajaBase(env)}/mpesa/stkpushquery/v1/query`,
       {
         BusinessShortCode: shortcode,
         Password: password,
@@ -354,21 +402,24 @@ const mpesaDaraja: PaymentProvider = {
   },
 };
 
-function darajaBase() {
-  return process.env.MPESA_ENV === "production"
+function darajaBase(env: EnvReader) {
+  return env("MPESA_ENV") === "production"
     ? "https://api.safaricom.co.ke"
     : "https://sandbox.safaricom.co.ke";
 }
 
-async function darajaToken(): Promise<string | null> {
-  return cachedToken("daraja", async () => {
-    const key = process.env.MPESA_CONSUMER_KEY;
-    const secret = process.env.MPESA_CONSUMER_SECRET;
-    if (!key || !secret) return null;
+async function darajaToken(env: EnvReader): Promise<string | null> {
+  const key = env("MPESA_CONSUMER_KEY");
+  const secret = env("MPESA_CONSUMER_SECRET");
+  if (!key || !secret) return null;
 
+  // Keyed on the credential itself, not the string "daraja". With per-company
+  // credentials a single shared cache key would hand one tenant's access token
+  // to another tenant's collection — money into the wrong merchant account.
+  return cachedToken(`daraja:${cacheKeyFor(key)}`, async () => {
     const basic = Buffer.from(`${key}:${secret}`).toString("base64");
     const res = await fetch(
-      `${darajaBase()}/oauth/v1/generate?grant_type=client_credentials`,
+      `${darajaBase(env)}/oauth/v1/generate?grant_type=client_credentials`,
       { headers: { Authorization: `Basic ${basic}` } },
     );
     if (!res.ok) return null;
@@ -385,32 +436,30 @@ async function darajaToken(): Promise<string | null> {
 const kcbBuni: PaymentProvider = {
   name: "KCB_BUNI",
 
-  configured() {
-    return Boolean(
-      process.env.KCB_CONSUMER_KEY &&
-        process.env.KCB_CONSUMER_SECRET &&
-        process.env.KCB_TILL_NUMBER,
-    );
+  configured(creds) {
+    const env = credsFor(creds);
+    return REQUIRED_KEYS.KCB_BUNI.every((k) => Boolean(env(k)));
   },
 
-  async initiate(input) {
-    if (!this.configured()) return { ok: false, error: "KCB Buni is not configured" };
+  async initiate(input, creds) {
+    const env = credsFor(creds);
+    if (!this.configured(creds)) return { ok: false, error: "KCB Buni is not configured" };
     if (!input.payerPhone) return { ok: false, error: "KCB Buni requires the payer's phone number" };
 
     const msisdn = toDarajaMsisdn(input.payerPhone);
     if (!msisdn) return { ok: false, error: "Not a valid Kenyan mobile number" };
 
-    const token = await kcbToken();
+    const token = await kcbToken(env);
     if (!token) return { ok: false, error: "Could not authenticate with KCB Buni" };
 
     const res = await postJson(
-      `${kcbBase()}/mm/api/request/1.0.0/stkpush`,
+      `${kcbBase(env)}/mm/api/request/1.0.0/stkpush`,
       {
         phoneNumber: msisdn,
         amount: Math.round(toMajor(input.amountCents)),
         invoiceNumber: input.reference,
         sharedShortCode: true,
-        till: process.env.KCB_TILL_NUMBER,
+        till: env("KCB_TILL_NUMBER"),
         callbackUrl: input.callbackUrl,
         description: input.description,
       },
@@ -434,14 +483,17 @@ const kcbBuni: PaymentProvider = {
     };
   },
 
-  async verify(providerRef) {
-    if (!this.configured()) return { status: "PENDING", failureReason: "KCB Buni not configured" };
+  async verify(providerRef, creds) {
+    const env = credsFor(creds);
+    if (!this.configured(creds)) {
+      return { status: "PENDING", failureReason: "KCB Buni not configured" };
+    }
 
-    const token = await kcbToken();
+    const token = await kcbToken(env);
     if (!token) return { status: "PENDING", failureReason: "Could not authenticate with KCB Buni" };
 
     const res = await fetch(
-      `${kcbBase()}/mm/api/request/1.0.0/transaction/${encodeURIComponent(providerRef)}`,
+      `${kcbBase(env)}/mm/api/request/1.0.0/transaction/${encodeURIComponent(providerRef)}`,
       { headers: { Authorization: `Bearer ${token}` } },
     );
     const json = (await res.json().catch(() => null)) as
@@ -463,8 +515,8 @@ const kcbBuni: PaymentProvider = {
    * configured on the app. Where the tenant has not set one, the callback is
    * treated as a hint and confirmed by an explicit query, exactly as Daraja is.
    */
-  verifyWebhook(rawBody, headers) {
-    const secret = process.env.KCB_WEBHOOK_SECRET;
+  verifyWebhook(rawBody, headers, creds) {
+    const secret = credsFor(creds)("KCB_WEBHOOK_SECRET");
     if (!secret) return true; // unsigned: confirmed by query before booking
     const signature = headers.get("x-buni-signature");
     if (!signature) return false;
@@ -476,23 +528,23 @@ const kcbBuni: PaymentProvider = {
   },
 };
 
-function kcbBase() {
+function kcbBase(env: EnvReader) {
   return (
-    process.env.KCB_BASE_URL ??
-    (process.env.KCB_ENV === "production"
+    env("KCB_BASE_URL") ??
+    (env("KCB_ENV") === "production"
       ? "https://api.buni.kcbgroup.com"
       : "https://uat.buni.kcbgroup.com")
   );
 }
 
-async function kcbToken(): Promise<string | null> {
-  return cachedToken("kcb", async () => {
-    const key = process.env.KCB_CONSUMER_KEY;
-    const secret = process.env.KCB_CONSUMER_SECRET;
-    if (!key || !secret) return null;
+async function kcbToken(env: EnvReader): Promise<string | null> {
+  const key = env("KCB_CONSUMER_KEY");
+  const secret = env("KCB_CONSUMER_SECRET");
+  if (!key || !secret) return null;
 
+  return cachedToken(`kcb:${cacheKeyFor(key)}`, async () => {
     const basic = Buffer.from(`${key}:${secret}`).toString("base64");
-    const res = await fetch(`${kcbBase()}/token?grant_type=client_credentials`, {
+    const res = await fetch(`${kcbBase(env)}/token?grant_type=client_credentials`, {
       method: "POST",
       headers: {
         Authorization: `Basic ${basic}`,
@@ -521,15 +573,19 @@ export function providerFor(name: string): PaymentProvider | null {
 }
 
 /**
- * Which gateways this deployment can actually use.
+ * Which gateways a given company can actually use.
  *
  * The console and the mobile app both read this, so a rep is never offered a
  * method that will fail the moment they tap it — the commonest way a payment
- * feature loses trust on day one.
+ * feature loses trust on day one. Pass the company's resolved credentials;
+ * omitting them reports what the environment alone supports.
  */
-export function availableProviders() {
+export function availableProviders(
+  credsByProvider?: Partial<Record<PaymentProviderName, Creds>>,
+) {
   return PAYMENT_PROVIDERS.map((p) => ({
     ...p,
-    configured: PROVIDERS[p.name].configured(),
+    requiredKeys: REQUIRED_KEYS[p.name],
+    configured: PROVIDERS[p.name].configured(credsByProvider?.[p.name]),
   }));
 }

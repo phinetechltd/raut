@@ -76,9 +76,16 @@ const ROLES = [
   {
     label: "Company Admin",
     email: "admin@zamarsolutions.co.ke",
-    reach: ["/app", "/app/customers", "/app/sales", "/app/finance", "/app/settings"],
+    reach: [
+      "/app",
+      "/app/customers",
+      "/app/sales",
+      "/app/finance",
+      "/app/settings",
+      "/app/settings/payments",
+    ],
     redirect: ["/admin"],
-    apiAllow: ["/customers", "/invoices", "/expenses", "/users"],
+    apiAllow: ["/customers", "/invoices", "/expenses", "/users", "/settings/credentials"],
     apiDeny: ["/platform/companies", "/platform/overview"],
   },
   {
@@ -104,7 +111,8 @@ const ROLES = [
     reach: ["/app", "/app/customers", "/app/field"],
     redirect: ["/admin"],
     apiAllow: ["/visits", "/routes", "/customers"],
-    apiDeny: ["/platform/companies", "/users"],
+    hidden: ["/app/settings/payments"],
+    apiDeny: ["/settings/credentials", "/platform/companies", "/users"],
   },
   {
     label: "Core-only Admin (no modules)",
@@ -145,6 +153,17 @@ async function main() {
         `${path} shows the module gate`,
         r.status === 200 && r.html.includes(GATE),
         r.status !== 200 ? `HTTP ${r.status}` : "",
+      );
+    }
+
+    // Pages this role must not find at all. 404 rather than 403 keeps the
+    // page's existence need-to-know, so this asserts the stronger answer.
+    for (const path of role.hidden ?? []) {
+      const r = await page(session.cookie, path);
+      check(
+        `${path} is hidden`,
+        r.status === 404,
+        `HTTP ${r.status}`,
       );
     }
 

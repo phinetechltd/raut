@@ -2,6 +2,7 @@ import "server-only";
 
 import { ApiError } from "@/lib/api";
 import { db } from "@/lib/db";
+import { resolveCredentials } from "./credentials";
 import {
   PAYMENT_PROVIDERS,
   providerFor,
@@ -48,14 +49,17 @@ export async function initiateCollection(input: InitiateCollectionInput) {
     throw new ApiError(422, "UNKNOWN_PROVIDER", `Unknown payment provider: ${input.provider}`);
   }
 
-  // A missing credential is a deployment problem, not a server fault. Returning
-  // 500 "something went wrong" for it sends an admin hunting through logs for a
-  // bug that does not exist, so it says plainly what is absent.
-  if (!adapter.configured()) {
+  // This company's own credentials, falling back to the platform's.
+  const creds = await resolveCredentials(input.companyId, input.provider);
+
+  // A missing credential is a configuration problem, not a server fault.
+  // Returning 500 "something went wrong" sends an admin hunting through logs
+  // for a bug that does not exist, so it says plainly what is absent.
+  if (!adapter.configured(creds ?? undefined)) {
     throw new ApiError(
       503,
       "PROVIDER_NOT_CONFIGURED",
-      `${input.provider} has no credentials on this deployment, so it cannot take payments yet.`,
+      `${input.provider} is not configured for this company yet. Add its credentials in Settings → Payments.`,
       { provider: input.provider },
     );
   }
@@ -90,15 +94,18 @@ export async function initiateCollection(input: InitiateCollectionInput) {
     },
   });
 
-  const result = await adapter.initiate({
-    amountCents: intent.amountCents,
-    currency: intent.currency,
-    reference: intent.id,
-    payerPhone: intent.payerPhone,
-    payerEmail: intent.payerEmail,
-    description: `Payment from ${customer.name}`.slice(0, 60),
-    callbackUrl: `${input.baseUrl}/api/v1/payments/callbacks/${input.provider.toLowerCase()}`,
-  });
+  const result = await adapter.initiate(
+    {
+      amountCents: intent.amountCents,
+      currency: intent.currency,
+      reference: intent.id,
+      payerPhone: intent.payerPhone,
+      payerEmail: intent.payerEmail,
+      description: `Payment from ${customer.name}`.slice(0, 60),
+      callbackUrl: `${input.baseUrl}/api/v1/payments/callbacks/${input.provider.toLowerCase()}`,
+    },
+    creds ?? undefined,
+  );
 
   return db.paymentIntent.update({
     where: { id: intent.id },
@@ -126,7 +133,8 @@ export async function settleIntent(intentId: string) {
   const adapter = providerFor(intent.provider);
   if (!adapter) return intent;
 
-  const verdict = await adapter.verify(intent.providerRef);
+  const creds = await resolveCredentials(intent.companyId, intent.provider as never);
+  const verdict = await adapter.verify(intent.providerRef, creds ?? undefined);
   const raw = verdict.raw == null ? null : JSON.stringify(verdict.raw).slice(0, 8000);
 
   if (verdict.status === "PENDING") {

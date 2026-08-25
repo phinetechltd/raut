@@ -41,6 +41,7 @@ const ROLES = [
       ["/app/sms", "Message log"],
       ["/app/reports", "Product mix"],
       ["/app/settings", "Stock locations"],
+      ["/app/settings/payments", "Payments &amp; Tax"],
     ],
   },
   {

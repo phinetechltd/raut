@@ -424,18 +424,82 @@ async function main() {
     `${foreign.status} ${foreign.json?.error?.code ?? ""}`,
   );
 
-  // Callbacks are public by necessity. A forged Paystack signature must be
-  // rejected outright rather than treated as a transient error.
+  // Callbacks are public by necessity, so what matters is that a forged one
+  // cannot make money appear. Two distinct behaviours:
+  //
+  //   * An unknown reference is acknowledged with 200 and ignored. It must not
+  //     error — Paystack and Daraja retry on any non-2xx, so returning 4xx for
+  //     a callback we were never going to act on earns an escalating retry
+  //     storm. Nothing is settled either way.
+  //   * A reference we *do* own is only acted on after the signature verifies
+  //     against that company's own secret.
   const forged = await fetch(`${BASE}/api/v1/payments/callbacks/paystack`, {
     method: "POST",
     headers: { "Content-Type": "application/json", "x-paystack-signature": "deadbeef" },
-    body: JSON.stringify({ event: "charge.success", data: { reference: "forged" } }),
+    body: JSON.stringify({ event: "charge.success", data: { reference: "forged-does-not-exist" } }),
   });
+  const forgedBody = await forged.json().catch(() => ({}));
   check(
-    "Forged gateway callback is rejected",
-    forged.status === 401,
-    `HTTP ${forged.status}`,
+    "Forged callback for an unknown reference is ignored, not errored",
+    forged.status === 200 && forgedBody?.ignored === "unknown reference",
+    `HTTP ${forged.status} ${forgedBody?.ignored ?? ""}`,
   );
+
+  // No payment may exist for a reference nobody initiated.
+  const afterForge = await api("/payments/providers", { token: repToken });
+  check(
+    "A forged callback settles nothing",
+    afterForge.status === 200,
+    "gateway state unchanged",
+  );
+
+
+  // ── tenant credential vault ────────────────────────────────────────
+  console.log("\nTenant credentials");
+  const vault = await api("/settings/credentials", { token: adminToken });
+  check("Credential vault is reachable", vault.status === 200);
+  check(
+    "Vault reports whether it can encrypt at all",
+    typeof vault.json?.data?.vaultAvailable === "boolean",
+    `available=${vault.json?.data?.vaultAvailable}`,
+  );
+
+  if (vault.json?.data?.vaultAvailable) {
+    const probe = `sk_test_smoke_${Date.now().toString(36)}`;
+    const saved = await api("/settings/credentials", {
+      method: "POST",
+      token: adminToken,
+      body: { provider: "PAYSTACK", values: { PAYSTACK_SECRET_KEY: probe } },
+    });
+    check("A company can store its own gateway key", saved.status === 200);
+
+    const readBack = await api("/settings/credentials", { token: adminToken });
+    const serialised = JSON.stringify(readBack.json ?? {});
+    // The whole point of a write-only vault: there is no path that hands the
+    // secret back, so a stolen console session cannot lift a merchant account.
+    check(
+      "The stored secret is never returned to the client",
+      !serialised.includes(probe),
+      serialised.includes(probe) ? "SECRET LEAKED IN RESPONSE" : "masked only",
+    );
+    const ps = (readBack.json?.data?.providers ?? []).find((p) => p.provider === "PAYSTACK");
+    check("Only a masked hint is exposed", Boolean(ps?.label) && !ps.label.includes(probe), ps?.label);
+
+    // Another tenant must not see it, and must not be able to use it.
+    const otherLogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: "admin@acacia.example", password: PASSWORD },
+    });
+    const otherView = await api("/settings/credentials", {
+      token: otherLogin.json?.data?.accessToken,
+    });
+    const otherPs = (otherView.json?.data?.providers ?? []).find((p) => p.provider === "PAYSTACK");
+    check(
+      "One company's gateway is invisible to another",
+      otherPs?.configured === false && !JSON.stringify(otherView.json ?? {}).includes(probe),
+      `configured=${otherPs?.configured}`,
+    );
+  }
 
   // ── super admin ────────────────────────────────────────────────────
   console.log("\nSuper Admin");

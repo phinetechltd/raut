@@ -85,6 +85,7 @@ model Company {
 
   @@index([status])
   paymentIntents PaymentIntent[]
+  credentials    TenantCredential[]
 }
 
 /// Per-company module licence. The commercial unit of the proposal:
@@ -1338,4 +1339,45 @@ model PaymentIntent {
   @@index([companyId, status])
   @@index([companyId, createdAt])
   @@index([companyId, updatedAt])
+}
+
+/// A gateway or tax-authority credential belonging to one company.
+///
+/// Encrypted with AES-256-GCM by `src/lib/secrets.ts`, with the companyId bound
+/// in as additional authenticated data — a blob moved between tenant rows fails
+/// to decrypt rather than leaking. The master key lives in the environment, so
+/// a database dump on its own is inert.
+///
+/// `label` is the only part safe to show an admin: the last few characters of
+/// the key, so they can tell which account is wired up without the secret ever
+/// travelling back to the browser.
+model TenantCredential {
+  id        String @id @default(cuid())
+  companyId String
+
+  /// PAYSTACK | MPESA_DARAJA | KCB_BUNI | DIGITAX
+  provider String
+
+  cipherText String
+  iv         String
+  authTag    String
+
+  /// Masked hint, e.g. "••••4f2a". Never the secret itself.
+  label  String?
+  active Boolean @default(true)
+
+  /// Result of the last "test connection", so an admin can see a key went bad
+  /// before a rep discovers it at a counter.
+  lastTestedAt DateTime?
+  lastTestOk   Boolean?
+  lastTestNote String?
+
+  updatedById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, provider])
+  @@index([companyId, active])
 }

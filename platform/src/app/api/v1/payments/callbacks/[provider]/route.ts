@@ -8,6 +8,7 @@ import {
   referenceFromCallback,
   settleIntent,
 } from "@/server/collections";
+import { resolveCredentials } from "@/server/credentials";
 
 export const dynamic = "force-dynamic";
 
@@ -47,17 +48,6 @@ export const POST = handler<{ provider: string }>(
     // exact bytes, and re-serialising JSON changes them.
     const raw = await request.text();
 
-    if (!adapter.verifyWebhook(raw, request.headers)) {
-      await audit({
-        action: "PAYMENT_FAILED",
-        entity: "PaymentIntent",
-        changes: { provider, reason: "callback signature rejected" },
-        request,
-      });
-      // 401 rather than 200: this one is hostile, and a retry will not fix it.
-      return NextResponse.json({ ok: false }, { status: 401 });
-    }
-
     let body: unknown = null;
     try {
       body = JSON.parse(raw);
@@ -65,11 +55,31 @@ export const POST = handler<{ provider: string }>(
       return NextResponse.json({ ok: true, ignored: "unparseable body" });
     }
 
+    // The intent is resolved *before* the signature is checked, and that
+    // ordering is forced by per-company credentials: the secret to verify
+    // against belongs to whichever company owns this collection, and the only
+    // thing identifying that company is the reference in the body. Reading a
+    // row is harmless; nothing is settled until the signature passes below.
     const providerRef = referenceFromCallback(provider, body);
     if (!providerRef) return NextResponse.json({ ok: true, ignored: "no reference" });
 
     const intent = await intentForCallback(provider, providerRef);
     if (!intent) return NextResponse.json({ ok: true, ignored: "unknown reference" });
+
+    const creds = await resolveCredentials(intent.companyId, provider);
+
+    if (!adapter.verifyWebhook(raw, request.headers, creds ?? undefined)) {
+      await audit({
+        companyId: intent.companyId,
+        action: "PAYMENT_FAILED",
+        entity: "PaymentIntent",
+        entityId: intent.id,
+        changes: { provider, reason: "callback signature rejected" },
+        request,
+      });
+      // 401 rather than 200: this one is hostile, and a retry will not fix it.
+      return NextResponse.json({ ok: false }, { status: 401 });
+    }
 
     // Confirms with the provider before booking anything.
     const settled = await settleIntent(intent.id);
