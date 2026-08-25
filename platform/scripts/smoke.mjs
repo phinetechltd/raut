@@ -368,6 +368,75 @@ async function main() {
     `phone is ${untouched.json?.data?.phone}`,
   );
 
+
+  // ── payment gateways ───────────────────────────────────────────────
+  console.log("\nPayment gateways");
+  const gw = await api("/payments/providers", { token: repToken });
+  const provs = gw.json?.data?.providers ?? [];
+  check(
+    "Gateway catalogue lists Paystack, M-Pesa and KCB",
+    ["PAYSTACK", "MPESA_DARAJA", "KCB_BUNI"].every((n) => provs.some((p) => p.name === n)),
+    provs.map((p) => `${p.name}${p.configured ? "" : " (unconfigured)"}`).join(", "),
+  );
+  check(
+    "Each gateway declares what the payer supplies",
+    provs.every((p) => p.needs === "phone" || p.needs === "email"),
+  );
+
+  // An unconfigured gateway must say so, not fail as a server error: it is a
+  // deployment gap, and 500 sends an admin hunting for a bug that isn't there.
+  const unconfigured = provs.find((p) => !p.configured);
+  if (unconfigured) {
+    const attempt = await api("/payments/initiate", {
+      method: "POST",
+      token: repToken,
+      body: {
+        customerId: customerForOrder.id,
+        provider: unconfigured.name,
+        amountCents: 10000,
+        payerPhone: "0722000010",
+        payerEmail: "test@example.com",
+      },
+    });
+    check(
+      "Unconfigured gateway refuses with a reason, not a 500",
+      attempt.status === 503 && attempt.json?.error?.code === "PROVIDER_NOT_CONFIGURED",
+      `${attempt.status} ${attempt.json?.error?.code ?? ""}`,
+    );
+  }
+
+  // A customer from outside the caller's company must be indistinguishable
+  // from one that does not exist — money movement is the last place to leak
+  // which record ids are real.
+  const foreign = await api("/payments/initiate", {
+    method: "POST",
+    token: repToken,
+    body: {
+      customerId: "cmzzzzzzzzzzzzzzzzzzzzz",
+      provider: "PAYSTACK",
+      amountCents: 10000,
+      payerEmail: "test@example.com",
+    },
+  });
+  check(
+    "Unknown customer is refused before any gateway call",
+    foreign.status === 404 || foreign.status === 503,
+    `${foreign.status} ${foreign.json?.error?.code ?? ""}`,
+  );
+
+  // Callbacks are public by necessity. A forged Paystack signature must be
+  // rejected outright rather than treated as a transient error.
+  const forged = await fetch(`${BASE}/api/v1/payments/callbacks/paystack`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "x-paystack-signature": "deadbeef" },
+    body: JSON.stringify({ event: "charge.success", data: { reference: "forged" } }),
+  });
+  check(
+    "Forged gateway callback is rejected",
+    forged.status === 401,
+    `HTTP ${forged.status}`,
+  );
+
   // ── super admin ────────────────────────────────────────────────────
   console.log("\nSuper Admin");
   const superLogin = await api("/auth/login", {

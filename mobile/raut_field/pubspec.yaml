@@ -1,7 +1,7 @@
 name: raut_field
 description: "Raut Field Sales — offline-first field sales app for the Raut ERP platform."
 publish_to: "none"
-version: 1.0.0+1
+version: 1.0.1+2
 
 environment:
   sdk: ^3.9.2

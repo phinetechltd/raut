@@ -28,7 +28,12 @@ export type AuditAction =
   | "APPROVE"
   | "REJECT"
   | "SYNC"
-  | "EXPORT";
+  | "EXPORT"
+  // Gateway collections. Kept distinct from CREATE so a money-movement
+  // attempt is greppable in the audit trail on its own.
+  | "PAYMENT_INITIATE"
+  | "PAYMENT_SETTLED"
+  | "PAYMENT_FAILED";
 
 export interface AuditInput {
   companyId?: string | null;

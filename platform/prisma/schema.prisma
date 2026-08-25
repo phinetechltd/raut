@@ -84,6 +84,7 @@ model Company {
   settings          Setting[]
 
   @@index([status])
+  paymentIntents PaymentIntent[]
 }
 
 /// Per-company module licence. The commercial unit of the proposal:
@@ -370,6 +371,7 @@ model Customer {
   @@index([companyId, territoryId])
   @@index([companyId, assignedRepId])
   @@index([companyId, updatedAt])
+  paymentIntents PaymentIntent[]
 }
 
 model CustomerContact {
@@ -787,7 +789,7 @@ model Payment {
   number     String
 
   amountCents Int
-  /// CASH | MPESA | BANK | CHEQUE | CREDIT_NOTE
+  /// CASH | MPESA | BANK | CHEQUE | CREDIT_NOTE | PAYSTACK | MPESA_STK | KCB_BUNI
   method      String @default("CASH")
   reference   String?
   paidAt      DateTime @default(now())
@@ -1279,4 +1281,61 @@ model SmsMessage {
 
   @@index([companyId, status])
   @@index([companyId, createdAt])
+}
+
+/// A gateway collection attempt, kept apart from `Payment`.
+///
+/// A Payment is money the business has. An intent is a request that may still
+/// fail, time out, or be abandoned at the PIN prompt — and for M-Pesa it exists
+/// for minutes while the customer decides. Settling them into the same table
+/// would either pollute the ledger with attempts or lose the audit trail of
+/// what was tried; so the intent is the attempt, and `paymentId` is set only
+/// once the provider confirms and a real Payment is written.
+model PaymentIntent {
+  id         String @id @default(cuid())
+  companyId  String
+  customerId String
+  visitId    String?
+
+  /// PAYSTACK | MPESA_DARAJA | KCB_BUNI
+  provider    String
+  amountCents Int
+  currency    String @default("KES")
+
+  /// Payer contact, as the provider needs it: MSISDN for M-Pesa and KCB,
+  /// email for Paystack.
+  payerPhone String?
+  payerEmail String?
+
+  /// PENDING | PROCESSING | SUCCEEDED | FAILED | CANCELLED | EXPIRED
+  status        String  @default("PENDING")
+  failureReason String?
+
+  /// The provider's own handle: Paystack reference, Daraja CheckoutRequestID,
+  /// KCB transaction id. Unique per provider so a replayed webhook is a no-op.
+  providerRef String?
+  /// The provider's confirmation code shown to the customer (M-Pesa receipt).
+  receiptRef String?
+  /// Raw callback body, kept verbatim for dispute resolution. SQLite has no
+  /// JSON type, so this is the serialised string.
+  providerPayload String?
+
+  /// Client-generated idempotency key, same contract as the offline outbox.
+  clientUuid String? @unique
+
+  /// Set once the provider confirms and the money is booked.
+  paymentId String? @unique
+
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  completedAt DateTime?
+
+  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerRef])
+  @@index([companyId, status])
+  @@index([companyId, createdAt])
+  @@index([companyId, updatedAt])
 }

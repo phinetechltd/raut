@@ -6,6 +6,7 @@ import 'core/auth_service.dart';
 import 'core/local_db.dart';
 import 'core/location_service.dart';
 import 'core/outbox.dart';
+import 'core/payments_service.dart';
 import 'core/sync_service.dart';
 import 'data/field_repository.dart';
 import 'screens/home_screen.dart';
@@ -42,6 +43,7 @@ Widget buildRautApp({LocalDb? database, ApiClient? client}) {
         create: (_) => FieldRepository(db: db, outbox: outbox),
       ),
       ChangeNotifierProvider(create: (_) => LocationService(db)),
+      ChangeNotifierProvider(create: (_) => PaymentsService(api)),
     ],
     child: const RautFieldApp(),
   );
