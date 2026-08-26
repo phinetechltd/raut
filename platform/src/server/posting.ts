@@ -361,3 +361,61 @@ export async function postStockAdjustment(
         ],
   });
 }
+
+/**
+ * Opening stock brought onto the books.
+ *
+ *   in    Dr Inventory          Cr Owner's equity
+ *   out   Dr Owner's equity     Cr Inventory
+ *
+ * Goods a company already held the day it started using the system were never
+ * bought through it, so there is no purchase or payable to book against. They
+ * are capital introduced, and that is where the other side belongs.
+ *
+ * Skipping this is not cosmetic. Every sale relieves inventory at cost, so
+ * stock that was never booked in drives the inventory account negative — a
+ * credit balance on an asset — and overstates equity by the same amount. It is
+ * the single largest opening difference on any system that starts mid-life.
+ */
+export async function postOpeningStock(
+  tx: Tx,
+  movement: {
+    id: string;
+    companyId: string;
+    createdAt: Date;
+    quantity: number;
+    unitCostCents: number;
+  },
+  userId?: string | null,
+) {
+  const value = Math.abs(movement.quantity) * movement.unitCostCents;
+  if (value === 0) return null;
+
+  const acc = await systemAccounts(
+    movement.companyId,
+    ["INVENTORY", "OWNERS_EQUITY"],
+    tx,
+  );
+  const inventory = acc.INVENTORY;
+  const equity = acc.OWNERS_EQUITY;
+  const bringingIn = movement.quantity > 0;
+
+  return postEntry(tx, {
+    companyId: movement.companyId,
+    date: movement.createdAt,
+    refType: "StockMovement",
+    refId: movement.id,
+    sourceKind: "OPENING",
+    memo: "Opening stock",
+    postedById: userId ?? null,
+    lines: bringingIn
+      ? [
+          { accountId: inventory, debitCents: value },
+          { accountId: equity, creditCents: value },
+        ]
+      : [
+          { accountId: equity, debitCents: value },
+          { accountId: inventory, creditCents: value },
+        ],
+  });
+}

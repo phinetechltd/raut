@@ -3,7 +3,12 @@ import "server-only";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { db } from "@/lib/db";
-import { postCogs, postGoodsReceiptEntry, postStockAdjustment } from "./posting";
+import {
+  postCogs,
+  postGoodsReceiptEntry,
+  postOpeningStock,
+  postStockAdjustment,
+} from "./posting";
 
 /**
  * Module 03 · Inventory.
@@ -116,6 +121,11 @@ async function postMovementConsequence(
     case "ADJUSTMENT":
     case "WRITE_OFF":
       return postStockAdjustment(tx, movement, userId);
+
+    // Stock the company already held before it kept books here. The contra is
+    // equity, not a purchase — nobody bought it through this system.
+    case "OPENING":
+      return postOpeningStock(tx, movement, userId);
 
     default:
       // PURCHASE is booked from the goods receipt, which also knows the
