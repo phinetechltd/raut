@@ -93,7 +93,17 @@ const ROLES = [
     email: "accounts@zamarsolutions.co.ke",
     reach: ["/app", "/app/sales", "/app/finance"],
     redirect: ["/admin"],
-    apiAllow: ["/invoices", "/payments", "/expenses"],
+    apiAllow: [
+      "/invoices",
+      "/payments",
+      "/expenses",
+      "/reports/profit-and-loss",
+      "/reports/balance-sheet",
+      "/reports/cash-flow",
+      "/reports/vat-summary",
+      "/reports/stock-valuation",
+      "/reports/trial-balance",
+    ],
     // No stock-write rights and no platform reach.
     apiDeny: ["/platform/companies"],
   },
@@ -103,7 +113,7 @@ const ROLES = [
     reach: ["/app", "/app/inventory"],
     redirect: ["/admin"],
     apiAllow: ["/stock", "/products", "/suppliers"],
-    apiDeny: ["/platform/companies"],
+    apiDeny: ["/platform/companies", "/reports/balance-sheet", "/reports/stock-valuation"],
   },
   {
     label: "Field Rep",
@@ -111,8 +121,20 @@ const ROLES = [
     reach: ["/app", "/app/customers", "/app/field"],
     redirect: ["/admin"],
     apiAllow: ["/visits", "/routes", "/customers"],
-    hidden: ["/app/settings/payments"],
-    apiDeny: ["/settings/credentials", "/platform/companies", "/users"],
+    hidden: ["/app/settings/payments", "/app/finance/reports"],
+    // A rep holds report:read for their own numbers. The statutory statements
+    // carry company margin, cash position and tax owed, and are not theirs.
+    apiDeny: [
+      "/settings/credentials",
+      "/platform/companies",
+      "/users",
+      "/reports/profit-and-loss",
+      "/reports/balance-sheet",
+      "/reports/cash-flow",
+      "/reports/vat-summary",
+      "/reports/stock-valuation",
+      "/reports/trial-balance",
+    ],
   },
   {
     label: "Core-only Admin (no modules)",

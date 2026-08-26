@@ -34,8 +34,9 @@ async function api(path, { method = "GET", token, body } = {}) {
     },
     ...(body ? { body: JSON.stringify(body) } : {}),
   });
+  // A CSV response has no JSON body; the catch is what makes that fine.
   const json = await res.json().catch(() => ({}));
-  return { status: res.status, json };
+  return { status: res.status, json, headers: res.headers };
 }
 
 function uuid() {
@@ -558,6 +559,84 @@ async function main() {
   );
 
   // ── super admin ────────────────────────────────────────────────────
+  console.log("\nFinancial reports");
+
+  const pl = await api("/reports/profit-and-loss?comparatives=true", { token: adminToken });
+  check("Profit and loss is available", pl.status === 200);
+
+  // Every report reads from the trial balance, so this really asserts that the
+  // split into revenue / cost of sales / expenses loses nothing on the way.
+  const p = pl.json?.data;
+  check(
+    "Profit is revenue less cost of sales less expenses",
+    p?.netProfit === p?.revenueTotal - p?.costOfSalesTotal - p?.expensesTotal,
+    `${p?.revenueTotal} - ${p?.costOfSalesTotal} - ${p?.expensesTotal} = ${p?.netProfit}`,
+  );
+  check("Gross profit sits above net profit", p?.grossProfit >= p?.netProfit);
+  check("Comparatives are returned when asked for", p?.prior !== undefined);
+
+  const bs = await api("/reports/balance-sheet", { token: adminToken });
+  check("Balance sheet is available", bs.status === 200);
+
+  // Assets = liabilities + equity is the accounting identity, and it holds only
+  // if profit earned to date is carried into equity. That is the one thing a
+  // hand-rolled balance sheet reliably gets wrong, so it is asserted directly
+  // below rather than trusted to the total.
+  const b = bs.json?.data;
+  check(
+    "The balance sheet balances",
+    b?.balanced === true,
+    b?.balanced
+      ? `assets = liabilities + equity = ${b.assetsTotal}`
+      : `OUT BY ${b?.differenceCents}`,
+  );
+  check(
+    "Profit for the period is carried into equity",
+    b?.equity?.some((l) => l.code === "3910" && l.amountCents === b.currentEarnings),
+  );
+
+  const cf = await api("/reports/cash-flow", { token: adminToken });
+  check("Cash flow is available", cf.status === 200);
+  check(
+    "Cash flow reconciles to the cash accounts",
+    cf.json?.data?.reconciles === true,
+    cf.json?.data?.reconciles
+      ? `movement ${cf.json.data.netMovement}`
+      : `explained ${cf.json?.data?.netMovement} vs actual ${cf.json?.data?.actualMovement}`,
+  );
+  check(
+    "Closing cash is opening plus the movement",
+    cf.json?.data?.closing === cf.json?.data?.opening + cf.json?.data?.actualMovement,
+  );
+
+  const vatReport = await api("/reports/vat-summary", { token: adminToken });
+  check("VAT summary is available", vatReport.status === 200);
+  check(
+    "VAT payable is output less input",
+    vatReport.json?.data?.payableCents ===
+      vatReport.json?.data?.outputCents - vatReport.json?.data?.inputCents,
+  );
+  // A return and a balance sheet must never disagree about the same tax.
+  check(
+    "VAT agrees with the balance sheet",
+    vatReport.json?.data?.outputCents ===
+      (b?.liabilities?.find((l) => l.code === "2100")?.amountCents ?? -1),
+  );
+
+  const sv = await api("/reports/stock-valuation", { token: adminToken });
+  check("Stock valuation is available", sv.status === 200);
+  check(
+    "Stock valuation reports its variance against account 1300",
+    sv.json?.data?.variesBy === sv.json?.data?.totalCents - sv.json?.data?.ledgerCents,
+  );
+
+  const csv = await api("/reports/profit-and-loss?format=csv", { token: adminToken });
+  check("Reports export as CSV", csv.status === 200);
+  check(
+    "The CSV is served as a download",
+    (csv.headers?.get("content-type") ?? "").includes("text/csv"),
+  );
+
   console.log("\nSuper Admin");
   const superLogin = await api("/auth/login", {
     method: "POST",

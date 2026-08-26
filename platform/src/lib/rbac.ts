@@ -93,7 +93,11 @@ export type Permission =
   | "sms:template"
   // Analytics
   | "report:read"
-  | "report:advanced";
+  | "report:advanced"
+  // Statutory financial statements. Deliberately NOT report:read: that is held
+  // by field reps, and the P&L, balance sheet, cash position and VAT liability
+  // are not theirs to see.
+  | "report:financial";
 
 /**
  * Which module owns each permission. Permissions absent from this map belong to
@@ -145,6 +149,10 @@ const PERMISSION_MODULE: Partial<Record<Permission, ModuleKey>> = {
   "sms:template": "SMS",
 
   "report:advanced": "ANALYTICS",
+  // Owned by Finance, not Analytics, so the API and the Finance console page
+  // gate on the same module. A page that renders and then 402s on its own data
+  // reads as a broken product rather than a licence boundary.
+  "report:financial": "FINANCE",
 };
 
 const CORE_READ: Permission[] = ["company:read", "user:read", "customer:read", "product:read", "report:read"];
@@ -196,6 +204,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "sms:send",
     "sms:template",
     "report:advanced",
+    "report:financial",
   ],
 
   BRANCH_MANAGER: [
@@ -225,6 +234,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "sms:read",
     "sms:send",
     "report:advanced",
+    "report:financial",
   ],
 
   SALES_MANAGER: [
@@ -250,6 +260,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "sms:read",
     "sms:send",
     "report:advanced",
+    "report:financial",
   ],
 
   ACCOUNTANT: [
@@ -268,6 +279,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "sms:read",
     "sms:send",
     "report:advanced",
+    "report:financial",
   ],
 
   STOREKEEPER: [

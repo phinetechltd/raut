@@ -36,6 +36,7 @@ const ROLES = [
       ["/app/inventory", "Recent stock movements"],
       ["/app/procurement", "Goods received"],
       ["/app/finance", "Receivables ageing"],
+      ["/app/finance/reports", "Profit and loss"],
       ["/app/field", "Today in the field"],
       ["/app/routes", "Routing &amp; Geofencing"],
       ["/app/sms", "Message log"],

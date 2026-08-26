@@ -306,31 +306,36 @@ async function main() {
 
   // Opening stock. A couple of lines are deliberately left below reorder level
   // so the low-stock alert on the dashboard has something real to report.
-  for (const [i, product] of products.entries()) {
-    const mainQty = i === 4 ? 8 : i === 9 ? 12 : 120 + i * 25;
+  //
+  // Every stock row gets its movement. Writing a StockItem on its own leaves
+  // goods that no movement created: the quantity is real, the ledger never
+  // hears about it, and the stock valuation report reports a variance against
+  // account 1300 forever. The seed is also where people learn the shape of a
+  // stock write, so it has to model the right one.
+  const openStock = async (
+    productId: string,
+    costPriceCents: number,
+    locationId: string,
+    quantity: number,
+  ) => {
     await db.stockItem.create({
-      data: { companyId: zamar.id, productId: product.id, locationId: mainStore.id, quantity: mainQty },
+      data: { companyId: zamar.id, productId, locationId, quantity },
     });
     await db.stockMovement.create({
       data: {
-        companyId: zamar.id, productId: product.id, locationId: mainStore.id,
-        type: "OPENING", quantity: mainQty, balanceAfter: mainQty,
-        unitCostCents: product.costPriceCents, note: "Opening balance",
+        companyId: zamar.id, productId, locationId,
+        type: "OPENING", quantity, balanceAfter: quantity,
+        unitCostCents: costPriceCents, note: "Opening balance",
         createdById: storekeeper.id, createdAt: daysAgo(110),
       },
     });
+  };
 
-    const msaQty = 40 + i * 8;
-    await db.stockItem.create({
-      data: { companyId: zamar.id, productId: product.id, locationId: msaStore.id, quantity: msaQty },
-    });
-
-    if (i < 6) {
-      const vanQty = 20 + i * 3;
-      await db.stockItem.create({
-        data: { companyId: zamar.id, productId: product.id, locationId: vanJames.id, quantity: vanQty },
-      });
-    }
+  for (const [i, product] of products.entries()) {
+    const cost = product.costPriceCents;
+    await openStock(product.id, cost, mainStore.id, i === 4 ? 8 : i === 9 ? 12 : 120 + i * 25);
+    await openStock(product.id, cost, msaStore.id, 40 + i * 8);
+    if (i < 6) await openStock(product.id, cost, vanJames.id, 20 + i * 3);
   }
   console.log("✓ Opening stock");
 

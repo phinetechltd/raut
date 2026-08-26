@@ -1,5 +1,6 @@
 ﻿
 import {
+  ButtonLink,
   Meter,
   ModuleLocked,
   Money,
@@ -8,6 +9,7 @@ import {
   StatusBadge,
 } from "@/components/ui";
 import { db } from "@/lib/db";
+import { can } from "@/lib/rbac";
 import { AGE_BUCKET_LABELS } from "@/lib/money";
 import { requireTenant } from "@/lib/session";
 import { daysAgo, receivablesAgeing } from "@/server/analytics";
@@ -65,11 +67,18 @@ export default async function FinancePage() {
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Finance</h1>
-        <p className="text-content-muted text-sm">
-          Receivables, payment history and field expense claims.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">Finance</h1>
+          <p className="text-content-muted text-sm">
+            Receivables, payment history and field expense claims.
+          </p>
+        </div>
+        {can(principal, "report:financial") && (
+          <ButtonLink href="/app/finance/reports" variant="primary" size="sm">
+            Financial reports
+          </ButtonLink>
+        )}
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

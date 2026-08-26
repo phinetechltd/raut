@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * every figure derived from them — profit, tax owed, what a customer owes — is
  * suspect. It is asserted in the smoke suite for exactly that reason.
  */
-export const GET = handler({ permission: "report:read" }, async ({ principal, searchParams }) => {
+export const GET = handler({ permission: "report:financial" }, async ({ principal, searchParams }) => {
   const companyId = companyIdOf(principal);
 
   const from = searchParams.get("from") ? new Date(searchParams.get("from")!) : undefined;
