@@ -501,6 +501,62 @@ async function main() {
     );
   }
 
+
+  // ── double-entry ledger ────────────────────────────────────────────
+  console.log("\nLedger");
+
+  const tb = await api("/reports/trial-balance", { token: adminToken });
+  check("Trial balance is available", tb.status === 200);
+
+  // The single most important assertion in this suite. If the books do not
+  // balance, every figure derived from them — profit, tax owed, what a customer
+  // owes — is wrong, and nothing else the system reports can be trusted.
+  check(
+    "The books balance",
+    tb.json?.data?.balanced === true,
+    tb.json?.data?.balanced
+      ? `debits = credits = ${tb.json.data.debits}`
+      : `OUT BY ${tb.json?.data?.difference}`,
+  );
+
+  const tbRows = tb.json?.data?.rows ?? [];
+  check("Accounts have been posted to", tbRows.length > 0, `${tbRows.length} accounts with activity`);
+
+  // Raising an invoice must move the books, and must keep them balanced.
+  const before = tb.json?.data?.debits ?? 0;
+  const ledgerInvoice = await api("/invoices", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      customerId: customerForOrder.id,
+      issue: true,
+      lines: [{ productId: productA.id, quantity: 1, unitPriceCents: 100000 }],
+    },
+  });
+  check("Invoice posts to the ledger", ledgerInvoice.status === 201);
+
+  const after = await api("/reports/trial-balance", { token: adminToken });
+  check(
+    "Still balanced after posting",
+    after.json?.data?.balanced === true,
+    after.json?.data?.balanced ? "" : `OUT BY ${after.json?.data?.difference}`,
+  );
+  check(
+    "The invoice actually moved the books",
+    (after.json?.data?.debits ?? 0) > before,
+    `${before} → ${after.json?.data?.debits}`,
+  );
+
+  // Revenue is booked net of tax. Booking the tax as income is the commonest
+  // way a small system overstates profit and under-reports what it owes KRA.
+  const sales = tbRows.find((r) => r.code === "4000");
+  const vat = tbRows.find((r) => r.code === "2100");
+  check(
+    "Tax is held apart from revenue",
+    Boolean(sales) && Boolean(vat) && vat.creditCents > 0,
+    sales && vat ? `sales ${sales.creditCents}, VAT ${vat.creditCents}` : "missing account",
+  );
+
   // ── super admin ────────────────────────────────────────────────────
   console.log("\nSuper Admin");
   const superLogin = await api("/auth/login", {

@@ -86,6 +86,9 @@ model Company {
   @@index([status])
   paymentIntents PaymentIntent[]
   credentials    TenantCredential[]
+  accounts          Account[]
+  journalEntries    JournalEntry[]
+  periods           AccountingPeriod[]
 }
 
 /// Per-company module licence. The commercial unit of the proposal:
@@ -976,6 +979,9 @@ model SupplierInvoice {
 model ExpenseCategory {
   id        String @id @default(cuid())
   companyId String
+
+  /// Ledger account this category posts to. Null falls back to 6000.
+  accountCode String?
   name      String
   code      String
   /// Claims above this need a manager approval; 0 = always approve
@@ -1380,4 +1386,118 @@ model TenantCredential {
 
   @@unique([companyId, provider])
   @@index([companyId, active])
+}
+
+/// A line in the chart of accounts.
+///
+/// Codes follow the conventional ranges so an accountant recognises them on
+/// sight: 1xxx assets, 2xxx liabilities, 3xxx equity, 4xxx income, 5xxx cost of
+/// sales, 6xxx expenses. `isPostable` is false for headers that exist only to
+/// group children — posting to a header is how a chart of accounts rots.
+model Account {
+  id        String @id @default(cuid())
+  companyId String
+
+  code String
+  name String
+  /// ASSET | LIABILITY | EQUITY | INCOME | EXPENSE
+  type String
+
+  parentId   String?
+  isPostable Boolean @default(true)
+  /// Set on the accounts the posting rules look up by role, so a company can
+  /// rename "Bank" without breaking the machinery that posts to it.
+  systemKey String?
+  active    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  parent   Account?      @relation("AccountTree", fields: [parentId], references: [id])
+  children Account[]     @relation("AccountTree")
+  lines    JournalLine[]
+
+  @@unique([companyId, code])
+  @@unique([companyId, systemKey])
+  @@index([companyId, type])
+}
+
+/// One balanced double-entry transaction.
+///
+/// Entries are never edited or deleted. A correction is a reversing entry —
+/// an audit trail you can rewrite is not one.
+///
+/// The unique on (companyId, refType, refId, sourceKind) is what makes posting
+/// idempotent: replaying an invoice, or a callback arriving twice, cannot
+/// double-post. `sourceKind` distinguishes the several entries one document can
+/// produce — an invoice raises both revenue and cost of sales.
+model JournalEntry {
+  id        String @id @default(cuid())
+  companyId String
+
+  number String
+  date   DateTime
+  memo   String?
+
+  /// The document this came from: Invoice | Payment | StockMovement | Expense …
+  refType String
+  refId   String
+  /// REVENUE | COGS | SETTLEMENT | RECEIPT | PURCHASE | ADJUSTMENT | REVERSAL …
+  sourceKind String
+
+  /// Set on the entry that reverses this one, and vice versa.
+  reversedById String? @unique
+  reversalOfId String?
+
+  postedById String?
+  createdAt  DateTime @default(now())
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  lines   JournalLine[]
+
+  reversedBy JournalEntry? @relation("Reversal", fields: [reversedById], references: [id])
+  reverses   JournalEntry? @relation("Reversal")
+
+  @@unique([companyId, number])
+  @@unique([companyId, refType, refId, sourceKind])
+  @@index([companyId, date])
+  @@index([companyId, refType, refId])
+}
+
+/// One side of an entry. Exactly one of debit/credit is non-zero.
+model JournalLine {
+  id        String @id @default(cuid())
+  entryId   String
+  accountId String
+
+  debitCents  Int @default(0)
+  creditCents Int @default(0)
+
+  memo String?
+
+  entry   JournalEntry @relation(fields: [entryId], references: [id], onDelete: Cascade)
+  account Account      @relation(fields: [accountId], references: [id])
+
+  @@index([entryId])
+  @@index([accountId])
+}
+
+/// A month, and whether it is closed.
+///
+/// A closed period refuses new postings, which is what stops last quarter's
+/// reported profit changing after it has been reported.
+model AccountingPeriod {
+  id        String @id @default(cuid())
+  companyId String
+
+  year  Int
+  month Int
+
+  closedAt   DateTime?
+  closedById String?
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, year, month])
 }

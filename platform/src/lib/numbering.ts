@@ -1,6 +1,7 @@
 import "server-only";
 
 import { db } from "./db";
+import type { Prisma } from "@prisma/client";
 
 /**
  * Per-company document numbering (INV-0001, ZM-PO-0007 …).
@@ -21,6 +22,7 @@ export type DocType =
   | "EXPENSE"
   | "TRANSFER"
   | "SUPPLIER_INVOICE"
+  | "JOURNAL"
   | "CUSTOMER"
   | "SUPPLIER";
 
@@ -33,6 +35,7 @@ const DEFAULT_PREFIX: Record<DocType, string> = {
   PAYMENT: "PAY",
   EXPENSE: "EXP",
   TRANSFER: "TRF",
+  JOURNAL: "JV",
   SUPPLIER_INVOICE: "SIN",
   CUSTOMER: "CUS",
   SUPPLIER: "SUP",
@@ -43,8 +46,18 @@ const PAD = 4;
 export async function nextNumber(
   companyId: string,
   docType: DocType,
+  /**
+   * Run inside an existing transaction rather than opening a new one.
+   *
+   * This is not an optimisation. SQLite allows a single writer, so opening a
+   * nested transaction from inside an interactive one deadlocks: the inner
+   * connection waits for a write lock the outer transaction is still holding,
+   * until the socket times out. Callers already inside a transaction — the
+   * ledger posts a journal number from inside the invoice's — must pass it.
+   */
+  client?: Prisma.TransactionClient,
 ): Promise<string> {
-  return db.$transaction(async (tx) => {
+  const run = async (tx: Prisma.TransactionClient) => {
     const existing = await tx.documentCounter.findUnique({
       where: { companyId_docType: { companyId, docType } },
     });
@@ -63,7 +76,9 @@ export async function nextNumber(
       data: { nextValue: value + 1 },
     });
     return `${existing.prefix}-${String(value).padStart(PAD, "0")}`;
-  });
+  };
+
+  return client ? run(client) : db.$transaction(run);
 }
 
 /** Seeds counters for a newly created company so the first document is -0001. */

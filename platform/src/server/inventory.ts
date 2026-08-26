@@ -3,6 +3,7 @@ import "server-only";
 import type { Prisma, PrismaClient } from "@prisma/client";
 
 import { db } from "@/lib/db";
+import { postCogs, postGoodsReceiptEntry, postStockAdjustment } from "./posting";
 
 /**
  * Module 03 · Inventory.
@@ -63,7 +64,7 @@ export async function applyMovement(tx: Tx, input: MovementInput) {
     data: { quantity: balanceAfter },
   });
 
-  return tx.stockMovement.create({
+  const movement = await tx.stockMovement.create({
     data: {
       companyId: input.companyId,
       productId: input.productId,
@@ -78,6 +79,50 @@ export async function applyMovement(tx: Tx, input: MovementInput) {
       createdById: input.createdById ?? null,
     },
   });
+
+  // The ledger consequence hangs off the movement rather than off each caller,
+  // because this is the one place every stock change passes through. A new
+  // caller therefore cannot forget to book the cost.
+  //
+  // Transfers and conversions are deliberately excluded: goods moving between
+  // this company's own locations change no value, and posting both legs would
+  // inflate cost of sales and inventory in equal, invisible measure.
+  await postMovementConsequence(tx, movement, input.createdById ?? null);
+
+  return movement;
+}
+
+/** Which ledger rule, if any, a movement type implies. */
+async function postMovementConsequence(
+  tx: Tx,
+  movement: {
+    id: string;
+    companyId: string;
+    type: string;
+    quantity: number;
+    unitCostCents: number;
+    createdAt: Date;
+  },
+  userId: string | null,
+) {
+  switch (movement.type) {
+    // Both go through postCogs, which reads the direction off the quantity:
+    // a sale is negative and relieves inventory, a return is positive and puts
+    // the cost back.
+    case "SALE":
+    case "RETURN":
+      return postCogs(tx, movement, userId);
+
+    case "ADJUSTMENT":
+    case "WRITE_OFF":
+      return postStockAdjustment(tx, movement, userId);
+
+    default:
+      // PURCHASE is booked from the goods receipt, which also knows the
+      // payable side. TRANSFER_IN / TRANSFER_OUT move goods between this
+      // company's own locations and change no value.
+      return null;
+  }
 }
 
 /**
@@ -139,7 +184,7 @@ export async function returnFromSale(
   for (const line of params.lines) {
     const product = await tx.product.findUnique({
       where: { id: line.productId },
-      select: { trackStock: true },
+      select: { trackStock: true, costPriceCents: true },
     });
     if (!product?.trackStock) continue;
 
@@ -149,6 +194,10 @@ export async function returnFromSale(
       locationId: params.locationId,
       type: "RETURN",
       quantity: Math.abs(line.quantity),
+      // Without this the goods return to the shelf but not to the balance
+      // sheet: inventory quantity rises while its value does not, and cost of
+      // sales stays overstated for ever.
+      unitCostCents: product.costPriceCents,
       refType: params.refType,
       refId: params.refId,
       createdById: params.createdById,
@@ -337,9 +386,30 @@ export async function postGoodsReceipt(grnId: string, userId: string) {
       });
     }
 
+    // Inventory rises and a liability to the supplier is created. Valued from
+    // the receipt's own lines, so it matches exactly what applyMovement put on
+    // the shelf rather than what a purchase order once expected.
+    const valueCents = grn.lines.reduce(
+      (n, l) => n + Math.abs(l.quantity) * l.unitCostCents,
+      0,
+    );
+    await postGoodsReceiptEntry(
+      tx,
+      {
+        id: grn.id,
+        companyId: grn.companyId,
+        receivedAt: grn.receivedAt ?? new Date(),
+        valueCents,
+      },
+      userId,
+    );
+
     return tx.goodsReceipt.update({
       where: { id: grnId },
       data: { status: "POSTED" },
     });
+  }, {
+    // Also posts to the ledger now; see the note in sales.ts.
+    timeout: 15_000,
   });
 }

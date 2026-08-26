@@ -3,6 +3,8 @@ import "server-only";
 import { db } from "@/lib/db";
 import { computeLine, computeTotals, deriveInvoiceStatus, formatKES } from "@/lib/money";
 import { nextNumber } from "@/lib/numbering";
+
+import { postInvoice, postPayment } from "./posting";
 import { sendTemplated } from "@/lib/sms";
 
 import { consumeForSale } from "./inventory";
@@ -213,9 +215,19 @@ export async function createInvoice(input: CreateInvoiceInput) {
           data: { status: "INVOICED" },
         });
       }
+
+      // Inside the same transaction on purpose: an invoice that exists without
+      // its journal entry is a silent hole in the books, and the only way to
+      // guarantee they arrive together is to let one roll the other back.
+      await postInvoice(tx, created, input.createdById ?? null);
     }
 
     return created;
+  }, {
+    // SQLite serialises writers, and this transaction now also posts to the
+    // ledger. The 5s default was enough to fail a legitimate sale under load,
+    // and a sale failing because bookkeeping was slow is the wrong trade.
+    timeout: 15_000,
   });
 
   return invoice;
@@ -249,6 +261,11 @@ export async function issueInvoice(invoiceId: string, userId: string) {
       where: { id: invoiceId },
       data: { status: "ISSUED" },
     });
+  }, {
+    // SQLite serialises writers, and this transaction now also posts to the
+    // ledger. The 5s default was enough to fail a legitimate sale under load,
+    // and a sale failing because bookkeeping was slow is the wrong trade.
+    timeout: 15_000,
   });
 }
 
@@ -368,7 +385,14 @@ export async function recordPayment(input: RecordPaymentInput) {
       },
     });
 
+    await postPayment(tx, payment, input.createdById ?? null);
+
     return { payment, customer };
+  }, {
+    // SQLite serialises writers, and this transaction now also posts to the
+    // ledger. The 5s default was enough to fail a legitimate sale under load,
+    // and a sale failing because bookkeeping was slow is the wrong trade.
+    timeout: 15_000,
   });
 }
 

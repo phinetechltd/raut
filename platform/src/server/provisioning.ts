@@ -5,6 +5,7 @@ import { db } from "@/lib/db";
 import { MODULE_CATALOG, MODULE_KEYS, type ModuleKey } from "@/lib/modules";
 import { initCounters } from "@/lib/numbering";
 import { DEFAULT_TEMPLATES } from "@/lib/sms";
+import { ensureChartOfAccounts } from "./ledger";
 
 /**
  * Super Admin provisioning — "create & activate companies" from Phase One.
@@ -137,6 +138,12 @@ export async function createCompany(input: CreateCompanyInput) {
   });
 
   await initCounters(company.id);
+
+  // Every company gets books from the moment it exists. Creating the chart
+  // lazily on first posting would work, but it would also mean the first sale
+  // a company ever makes is the one that discovers a problem with it.
+  await ensureChartOfAccounts(company.id);
+
   return company;
 }
 
