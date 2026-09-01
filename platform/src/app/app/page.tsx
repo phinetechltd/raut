@@ -16,6 +16,7 @@ import {
   type Column,
 } from "@/components/ui";
 import { db } from "@/lib/db";
+import { MODULE_KEYS } from "@/lib/modules";
 import { AGE_BUCKET_LABELS } from "@/lib/money";
 import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
@@ -171,7 +172,7 @@ export default async function TenantDashboard() {
           {greeting}, {claims.name.split(" ")[0]}
         </h1>
         <p className="mt-1 text-base text-content-secondary">
-          Last 30 days · {principal.enabledModules.size} of 10 modules licensed
+          Last 30 days · {principal.enabledModules.size} of {MODULE_KEYS.length} modules licensed
         </p>
       </header>
 

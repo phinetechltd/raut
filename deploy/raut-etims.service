@@ -1,0 +1,13 @@
+[Unit]
+Description=Raut - drain the eTIMS transmission queue
+After=network-online.target raut.service
+Requires=raut.service
+
+[Service]
+Type=oneshot
+# The token comes from the app's own environment file so there is one place to
+# rotate it. The endpoint refuses every request when it is unset, which is the
+# right default: an open endpoint that triggers outbound filing to KRA would be
+# a free way to burn a company's rate limit.
+EnvironmentFile=/var/www/raut/platform/.env
+ExecStart=/usr/bin/curl -fsS -m 120 -X POST -H "Authorization: Bearer ${ETIMS_RUNNER_TOKEN}" -H "Host: raut.co.ke" http://127.0.0.1/api/v1/etims/run

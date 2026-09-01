@@ -1,0 +1,15 @@
+[Unit]
+Description=Drain the eTIMS queue every ten minutes
+
+[Timer]
+# Ten minutes is a deliberate compromise. KRA does not require real-time
+# filing, and a tighter loop mostly retries things Digitax is still queueing on
+# its own side. Anything urgent was already sent inline when the invoice was
+# issued; this is the safety net for the ones that failed.
+OnBootSec=5min
+OnUnitActiveSec=10min
+RandomizedDelaySec=60
+Persistent=true
+
+[Install]
+WantedBy=timers.target

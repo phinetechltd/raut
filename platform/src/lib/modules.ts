@@ -17,6 +17,7 @@ export const MODULE_KEYS = [
   "GEOFENCING",
   "SMS",
   "ANALYTICS",
+  "ETIMS",
 ] as const;
 
 export type ModuleKey = (typeof MODULE_KEYS)[number];
@@ -172,15 +173,42 @@ export const MODULE_CATALOG: Record<ModuleKey, ModuleDefinition> = {
     requires: [],
     icon: "bar-chart",
   },
+  ETIMS: {
+    key: "ETIMS",
+    ordinal: "11",
+    name: "eTIMS Tax Compliance",
+    // PLACEHOLDER — set before this goes in front of a client. It sits between
+    // Analytics (KES 5,000) and Sales & POS (KES 30,000) in the current range.
+    priceCents: 30_000_00,
+    summary:
+      "Transmits invoices and credit notes to KRA and returns the control code and QR that make them valid tax documents.",
+    features: [
+      "Invoices & credit notes filed with KRA",
+      "Control code & QR on every document",
+      "Item, customer and stock reporting",
+    ],
+    // Without Sales & POS there are no invoices to file.
+    requires: ["SALES_POS"],
+    icon: "shield-check",
+  },
 };
 
 export const MODULE_LIST = MODULE_KEYS.map((k) => MODULE_CATALOG[k]);
 
+/**
+ * The ten modules the original proposal priced, and eTIMS separately.
+ *
+ * eTIMS was added after the proposal was signed, so it must not be folded into
+ * the KES 350,000 headline a client has already seen. It licenses through the
+ * identical mechanism — it is simply quoted on its own.
+ */
+export const PROPOSAL_MODULES = MODULE_LIST.filter((m) => m.key !== "ETIMS");
+
 /** Core platform price from proposal §2 — always included, never a module. */
 export const CORE_PLATFORM_PRICE_CENTS = 160_000_00;
 
-/** Sum of all ten modules: KES 190,000 (proposal §4). */
-export const ALL_MODULES_PRICE_CENTS = MODULE_LIST.reduce(
+/** Sum of the ten proposal modules: KES 190,000 (proposal §4). */
+export const ALL_MODULES_PRICE_CENTS = PROPOSAL_MODULES.reduce(
   (sum, m) => sum + m.priceCents,
   0,
 );

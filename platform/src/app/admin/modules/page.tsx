@@ -37,7 +37,7 @@ export default async function ModuleCataloguePage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard label="Core platform" value={<Money cents={CORE_PLATFORM_PRICE_CENTS} />} hint="Always included" />
-        <StatCard label="All modules" value={<Money cents={ALL_MODULES_PRICE_CENTS} />} hint="10 modules" />
+        <StatCard label="All modules" value={<Money cents={ALL_MODULES_PRICE_CENTS} />} hint="10 modules + eTIMS" />
         <StatCard label="Full platform" value={<Money cents={FULL_PLATFORM_PRICE_CENTS} />} hint="Per company ceiling" />
         <StatCard
           label="Licensed across tenants"

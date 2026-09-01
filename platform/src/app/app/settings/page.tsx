@@ -1,7 +1,15 @@
-import { Money, Meter, SectionHeading, StatCard, StatusBadge } from "@/components/ui";
+import {
+  ButtonLink,
+  Card,
+  Meter,
+  Money,
+  SectionHeading,
+  StatCard,
+  StatusBadge,
+} from "@/components/ui";
 import { db } from "@/lib/db";
 import { CORE_PLATFORM_PRICE_CENTS, MODULE_CATALOG, MODULE_LIST, type ModuleKey } from "@/lib/modules";
-import { ROLE_LABELS, type Role } from "@/lib/rbac";
+import { can, ROLE_LABELS, type Role } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
 import { seatUsage } from "@/lib/tenant";
 
@@ -74,6 +82,33 @@ export default async function SettingsPage() {
           value={<Money cents={CORE_PLATFORM_PRICE_CENTS + moduleValue} />}
           hint={`Core + ${enabled.length} of ${MODULE_LIST.length} modules`}
         />
+      </div>
+
+      {/* These two pages existed with nothing linking to them, so the only way
+          in was to know the URL. */}
+      <div className="grid gap-4 sm:grid-cols-2">
+        {can(principal, "settings:write") && (
+          <Card>
+            <SectionHeading
+              title="Payments"
+              description="Paystack, M-Pesa and KCB Buni, under this company's own merchant accounts."
+            />
+            <ButtonLink href="/app/settings/payments" variant="secondary" size="sm">
+              Configure payments
+            </ButtonLink>
+          </Card>
+        )}
+        {principal.enabledModules.has("ETIMS") && can(principal, "etims:configure") && (
+          <Card>
+            <SectionHeading
+              title="eTIMS"
+              description="Switch KRA transmission on or off and set the classification defaults."
+            />
+            <ButtonLink href="/app/settings/etims" variant="secondary" size="sm">
+              Configure eTIMS
+            </ButtonLink>
+          </Card>
+        )}
       </div>
 
       <div>

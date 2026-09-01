@@ -27,27 +27,27 @@ datasource db {
 
 /// A tenant. One row per client business on the shared instance.
 model Company {
-  id       String @id @default(cuid())
-  name     String
-  slug     String @unique
+  id        String  @id @default(cuid())
+  name      String
+  slug      String  @unique
   /// Registration / KRA PIN shown on invoices
-  taxPin   String?
-  email    String?
-  phone    String?
-  address  String?
-  currency String @default("KES")
+  taxPin    String?
+  email     String?
+  phone     String?
+  address   String?
+  currency  String  @default("KES")
   /// ACTIVE | SUSPENDED | PENDING
-  status   String @default("PENDING")
+  status    String  @default("PENDING")
   /// Seats permitted by the licence — proposal caps Raut at 50 users
-  seatLimit Int   @default(50)
-  logoUrl  String?
+  seatLimit Int     @default(50)
+  logoUrl   String?
   /// Default geo centre for map screens
   latitude  Float?
   longitude Float?
 
   activatedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   modules           CompanyModule[]
   branches          Branch[]
@@ -82,32 +82,35 @@ model Company {
   auditLogs         AuditLog[]
   counters          DocumentCounter[]
   settings          Setting[]
-
-  @@index([status])
-  paymentIntents PaymentIntent[]
-  credentials    TenantCredential[]
+  paymentIntents    PaymentIntent[]
+  credentials       TenantCredential[]
   accounts          Account[]
   journalEntries    JournalEntry[]
   periods           AccountingPeriod[]
+  etimsConfig       EtimsConfig?
+  etimsSubmissions  EtimsSubmission[]
+  creditNotes       CreditNote[]
+
+  @@index([status])
 }
 
 /// Per-company module licence. The commercial unit of the proposal:
 /// a module the client has not bought is absent or disabled here, and every
 /// route and screen that belongs to it returns 402 / hides itself.
 model CompanyModule {
-  id        String  @id @default(cuid())
-  companyId String
+  id         String  @id @default(cuid())
+  companyId  String
   /// CRM | SALES_POS | INVENTORY | PROCUREMENT | FINANCE
   /// FIELD_SALES | ROUTING | GEOFENCING | SMS | ANALYTICS
-  moduleKey String
-  enabled   Boolean @default(false)
+  moduleKey  String
+  enabled    Boolean @default(false)
   /// Price paid in KES cents, for the licence record
-  priceCents Int    @default(0)
+  priceCents Int     @default(0)
 
   activatedAt DateTime?
   expiresAt   DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
@@ -146,40 +149,40 @@ model Branch {
 
 /// Platform + tenant users. companyId is null only for SUPER_ADMIN.
 model User {
-  id        String  @id @default(cuid())
-  companyId String?
-  branchId  String?
-  name      String
-  email     String  @unique
-  phone     String?
-  passwordHash String
+  id               String  @id @default(cuid())
+  companyId        String?
+  branchId         String?
+  name             String
+  email            String  @unique
+  phone            String?
+  passwordHash     String
   /// SUPER_ADMIN | COMPANY_ADMIN | BRANCH_MANAGER | SALES_MANAGER
   /// ACCOUNTANT | STOREKEEPER | FIELD_REP
-  role      String
+  role             String
   /// ACTIVE | SUSPENDED | INVITED
-  status    String  @default("ACTIVE")
-  avatarUrl String?
+  status           String  @default("ACTIVE")
+  avatarUrl        String?
   /// Extra permission strings granted beyond the role, JSON array
-  extraPermissions String @default("[]")
+  extraPermissions String  @default("[]")
 
   lastLoginAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   branch  Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
-  refreshTokens   RefreshToken[]
-  devices         Device[]
-  assignedCustomers Customer[]      @relation("CustomerAssignedRep")
-  activities      CustomerActivity[]
-  visits          Visit[]
-  routes          Route[]
-  salesTargets    SalesTarget[]
-  expenses        Expense[]
-  geofenceEvents  GeofenceEvent[]
-  locationPings   LocationPing[]
-  auditLogs       AuditLog[]
+  refreshTokens     RefreshToken[]
+  devices           Device[]
+  assignedCustomers Customer[]         @relation("CustomerAssignedRep")
+  activities        CustomerActivity[]
+  visits            Visit[]
+  routes            Route[]
+  salesTargets      SalesTarget[]
+  expenses          Expense[]
+  geofenceEvents    GeofenceEvent[]
+  locationPings     LocationPing[]
+  auditLogs         AuditLog[]
 
   @@index([companyId, role])
   @@index([companyId, status])
@@ -187,13 +190,13 @@ model User {
 
 /// Rotating refresh token for the mobile app. One live row per device.
 model RefreshToken {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
-  tokenHash String   @unique
+  tokenHash String    @unique
   deviceId  String?
   expiresAt DateTime
   revokedAt DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -202,10 +205,10 @@ model RefreshToken {
 
 /// A registered mobile handset. Anchors push delivery and the sync watermark.
 model Device {
-  id         String @id @default(cuid())
+  id         String  @id @default(cuid())
   userId     String
   /// Client-generated stable install id
-  deviceId   String @unique
+  deviceId   String  @unique
   platform   String
   model      String?
   appVersion String?
@@ -213,8 +216,8 @@ model Device {
 
   lastSyncAt DateTime?
   lastSeenAt DateTime?
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -240,7 +243,7 @@ model IdempotencyKey {
 
 /// Append-only security trail. Proposal Phase One: "role-based access & audit logs".
 model AuditLog {
-  id        String  @id @default(cuid())
+  id        String   @id @default(cuid())
   companyId String?
   userId    String?
   /// CREATE | UPDATE | DELETE | LOGIN | LOGOUT | ACTIVATE | SUSPEND | SYNC | EXPORT
@@ -293,17 +296,17 @@ model Setting {
 /// A sales territory. When the GEOFENCING module is licensed the polygon is
 /// enforced for visit verification; otherwise it is descriptive only.
 model Territory {
-  id        String @id @default(cuid())
+  id        String  @id @default(cuid())
   companyId String
   name      String
   code      String
-  colour    String @default("#2f83f7")
+  colour    String  @default("#2f83f7")
   /// JSON array of [lat, lng] pairs forming a closed polygon
-  boundary  String @default("[]")
+  boundary  String  @default("[]")
   /// Fallback circular fence when no polygon is drawn
   centerLat Float?
   centerLng Float?
-  radiusM   Int    @default(2000)
+  radiusM   Int     @default(2000)
   active    Boolean @default(true)
 
   createdAt DateTime @default(now())
@@ -320,35 +323,40 @@ model Territory {
 }
 
 model Customer {
-  id        String  @id @default(cuid())
-  companyId String
-  branchId  String?
-  territoryId String?
+  id            String  @id @default(cuid())
+  companyId     String
+  branchId      String?
+  territoryId   String?
   assignedRepId String?
 
-  code      String
-  name      String
+  code            String
+  name            String
   /// RETAIL | WHOLESALE | DISTRIBUTOR | INSTITUTION
-  type      String  @default("RETAIL")
+  type            String  @default("RETAIL")
+  /// Buyer's KRA PIN. Without it an invoice cannot be claimed by the buyer,
+  /// so it is optional for a kiosk and effectively required for a wholesaler.
+  taxPin          String?
+  /// This customer's id inside the company's own Digitax account.
+  etimsCustomerId String?
   /// A | B | C — value segmentation used by CRM reporting
-  segment   String  @default("C")
-  phone     String?
-  email     String?
-  address   String?
-  town      String?
+  segment         String  @default("C")
+  phone           String?
+  email           String?
+  address         String?
+  town            String?
 
   /// Map pin — Phase One "customer location capture"
-  latitude  Float?
-  longitude Float?
+  latitude        Float?
+  longitude       Float?
   /// Metres a check-in may be from the pin and still count as on-site
-  geofenceRadiusM Int @default(150)
+  geofenceRadiusM Int    @default(150)
 
-  creditLimitCents Int    @default(0)
-  paymentTermsDays Int    @default(0)
+  creditLimitCents Int     @default(0)
+  paymentTermsDays Int     @default(0)
   /// Denormalised outstanding receivable, recalculated on invoice/payment write
-  balanceCents     Int    @default(0)
+  balanceCents     Int     @default(0)
   /// ACTIVE | DORMANT | BLOCKED
-  status           String @default("ACTIVE")
+  status           String  @default("ACTIVE")
   notes            String?
 
   createdById String?
@@ -360,22 +368,23 @@ model Customer {
   territory   Territory? @relation(fields: [territoryId], references: [id], onDelete: SetNull)
   assignedRep User?      @relation("CustomerAssignedRep", fields: [assignedRepId], references: [id], onDelete: SetNull)
 
-  contacts    CustomerContact[]
-  activities  CustomerActivity[]
-  quotations  Quotation[]
-  salesOrders SalesOrder[]
-  invoices    Invoice[]
-  payments    Payment[]
-  visits      Visit[]
-  routeStops  RouteStop[]
-  smsMessages SmsMessage[]
+  contacts       CustomerContact[]
+  activities     CustomerActivity[]
+  quotations     Quotation[]
+  salesOrders    SalesOrder[]
+  invoices       Invoice[]
+  payments       Payment[]
+  visits         Visit[]
+  routeStops     RouteStop[]
+  smsMessages    SmsMessage[]
+  paymentIntents PaymentIntent[]
+  creditNotes    CreditNote[]
 
   @@unique([companyId, code])
   @@index([companyId, status])
   @@index([companyId, territoryId])
   @@index([companyId, assignedRepId])
   @@index([companyId, updatedAt])
-  paymentIntents PaymentIntent[]
 }
 
 model CustomerContact {
@@ -399,17 +408,17 @@ model CustomerContact {
 
 /// Follow-ups and the activity log required by Module 01.
 model CustomerActivity {
-  id         String  @id @default(cuid())
-  companyId  String
-  customerId String
-  userId     String?
+  id          String    @id @default(cuid())
+  companyId   String
+  customerId  String
+  userId      String?
   /// CALL | VISIT | EMAIL | SMS | NOTE | FOLLOW_UP | ORDER | PAYMENT
-  type       String
-  subject    String
-  body       String?
+  type        String
+  subject     String
+  body        String?
   /// OPEN | DONE | CANCELLED — only meaningful for FOLLOW_UP
-  status     String  @default("DONE")
-  dueAt      DateTime?
+  status      String    @default("DONE")
+  dueAt       DateTime?
   completedAt DateTime?
 
   createdAt DateTime @default(now())
@@ -451,19 +460,42 @@ model Product {
   companyId  String
   categoryId String?
 
-  sku        String
-  name       String
-  description String?
+  sku          String
+  name         String
+  description  String?
   /// PC | CTN | KG | L | DZ …
-  unit       String  @default("PC")
+  unit         String  @default("PC")
   /// Units per carton, for van-sales pack maths
-  unitsPerPack Int   @default(1)
-  barcode    String?
+  unitsPerPack Int     @default(1)
+  barcode      String?
 
   sellPriceCents Int @default(0)
   costPriceCents Int @default(0)
   /// VAT percentage × 100 (1600 = 16%)
   taxRateBp      Int @default(1600)
+
+  /// eTIMS classification. KRA will not accept a line without these, and they
+  /// describe the goods rather than the price, so they live on the product and
+  /// are copied onto the submission rather than derived at send time.
+  /// 8-digit UNSPSC. 99000000 (VAT Act) is the legitimate generic fallback.
+  etimsItemClassCode String?
+  /// 1 raw material | 2 finished product | 3 service
+  etimsItemTypeCode  String?
+  /// A exempt | B 16% | C 0% | D non-VAT | E 8%
+  etimsTaxTypeCode   String?
+  /// eTIMS quantity unit, e.g. U (pieces), KG, L
+  etimsQuantityUnit  String?
+  /// eTIMS packaging unit, e.g. CT (carton), BG (bag), NT
+  etimsPackageUnit   String?
+  /// ISO country of origin, e.g. KE
+  etimsOriginNation  String?
+  /// Assigned by eTIMS once registered. Belongs to one Digitax account, so it
+  /// is cleared when the company's credentials change.
+  etimsItemCode      String?
+  /// UNREGISTERED | PENDING | REGISTERED | FAILED
+  etimsStatus        String    @default("UNREGISTERED")
+  etimsSyncedAt      DateTime?
+  etimsError         String?
 
   reorderLevel Int     @default(0)
   trackStock   Boolean @default(true)
@@ -476,14 +508,15 @@ model Product {
   company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   category ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
-  stockItems     StockItem[]
-  stockMovements StockMovement[]
-  quotationLines QuotationLine[]
-  orderLines     SalesOrderLine[]
-  invoiceLines   InvoiceLine[]
-  poLines        PurchaseOrderLine[]
-  grnLines       GoodsReceiptLine[]
-  transferLines  StockTransferLine[]
+  stockItems      StockItem[]
+  stockMovements  StockMovement[]
+  quotationLines  QuotationLine[]
+  orderLines      SalesOrderLine[]
+  invoiceLines    InvoiceLine[]
+  poLines         PurchaseOrderLine[]
+  grnLines        GoodsReceiptLine[]
+  creditNoteLines CreditNoteLine[]
+  transferLines   StockTransferLine[]
 
   @@unique([companyId, sku])
   @@index([companyId, active])
@@ -492,16 +525,16 @@ model Product {
 
 /// A stockable place: main store, branch store, or a rep's van.
 model StockLocation {
-  id        String  @id @default(cuid())
-  companyId String
-  branchId  String?
-  name      String
-  code      String
+  id          String  @id @default(cuid())
+  companyId   String
+  branchId    String?
+  name        String
+  code        String
   /// WAREHOUSE | STORE | VAN
-  type      String  @default("WAREHOUSE")
+  type        String  @default("WAREHOUSE")
   /// Set when type = VAN, links the rolling stock to its rep
   ownerUserId String?
-  active    Boolean @default(true)
+  active      Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -527,9 +560,9 @@ model StockItem {
   locationId String
 
   /// On-hand quantity in base units
-  quantity   Int @default(0)
+  quantity Int @default(0)
   /// Committed to unfulfilled orders
-  reserved   Int @default(0)
+  reserved Int @default(0)
 
   updatedAt DateTime @updatedAt
 
@@ -549,11 +582,11 @@ model StockMovement {
   locationId String
 
   /// PURCHASE | SALE | TRANSFER_IN | TRANSFER_OUT | ADJUSTMENT | RETURN | OPENING
-  type       String
+  type          String
   /// Signed: positive increases the location's stock
-  quantity   Int
-  balanceAfter Int   @default(0)
-  unitCostCents Int  @default(0)
+  quantity      Int
+  balanceAfter  Int    @default(0)
+  unitCostCents Int    @default(0)
 
   /// Originating document, e.g. INVOICE / GRN / TRANSFER
   refType String?
@@ -572,24 +605,24 @@ model StockMovement {
 }
 
 model StockTransfer {
-  id        String @id @default(cuid())
-  companyId String
-  number    String
+  id             String  @id @default(cuid())
+  companyId      String
+  number         String
   fromLocationId String
   toLocationId   String
   /// DRAFT | IN_TRANSIT | RECEIVED | CANCELLED
-  status    String @default("DRAFT")
-  note      String?
+  status         String  @default("DRAFT")
+  note           String?
 
   dispatchedAt DateTime?
   receivedAt   DateTime?
   createdById  String?
-  createdAt    DateTime @default(now())
-  updatedAt    DateTime @updatedAt
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
-  company      Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  fromLocation StockLocation @relation("TransferFrom", fields: [fromLocationId], references: [id])
-  toLocation   StockLocation @relation("TransferTo", fields: [toLocationId], references: [id])
+  company      Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  fromLocation StockLocation       @relation("TransferFrom", fields: [fromLocationId], references: [id])
+  toLocation   StockLocation       @relation("TransferTo", fields: [toLocationId], references: [id])
   lines        StockTransferLine[]
 
   @@unique([companyId, number])
@@ -614,30 +647,30 @@ model StockTransferLine {
 // ═══════════════════════════════════════════════════════════════════════
 
 model Quotation {
-  id         String @id @default(cuid())
+  id         String  @id @default(cuid())
   companyId  String
   branchId   String?
   customerId String
   number     String
 
   /// DRAFT | SENT | ACCEPTED | REJECTED | EXPIRED | CONVERTED
-  status     String @default("DRAFT")
-  issueDate  DateTime @default(now())
+  status     String    @default("DRAFT")
+  issueDate  DateTime  @default(now())
   validUntil DateTime?
 
-  subtotalCents Int @default(0)
-  discountCents Int @default(0)
-  taxCents      Int @default(0)
-  totalCents    Int @default(0)
+  subtotalCents Int     @default(0)
+  discountCents Int     @default(0)
+  taxCents      Int     @default(0)
+  totalCents    Int     @default(0)
   note          String?
 
   createdById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  branch   Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  company  Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch   Branch?         @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer Customer        @relation(fields: [customerId], references: [id], onDelete: Cascade)
   lines    QuotationLine[]
   orders   SalesOrder[]
 
@@ -646,14 +679,14 @@ model Quotation {
 }
 
 model QuotationLine {
-  id          String @id @default(cuid())
-  quotationId String
-  productId   String
-  description String
-  quantity    Int
+  id             String @id @default(cuid())
+  quotationId    String
+  productId      String
+  description    String
+  quantity       Int
   unitPriceCents Int
-  discountCents  Int @default(0)
-  taxRateBp      Int @default(1600)
+  discountCents  Int    @default(0)
+  taxRateBp      Int    @default(1600)
   lineTotalCents Int
 
   quotation Quotation @relation(fields: [quotationId], references: [id], onDelete: Cascade)
@@ -663,7 +696,7 @@ model QuotationLine {
 }
 
 model SalesOrder {
-  id          String @id @default(cuid())
+  id          String  @id @default(cuid())
   companyId   String
   branchId    String?
   customerId  String
@@ -671,32 +704,32 @@ model SalesOrder {
   number      String
 
   /// DRAFT | CONFIRMED | PARTIALLY_FULFILLED | FULFILLED | INVOICED | CANCELLED
-  status      String @default("DRAFT")
+  status       String    @default("DRAFT")
   /// CONSOLE | POS | FIELD — provenance matters for rep commission
-  channel     String @default("CONSOLE")
-  orderDate   DateTime @default(now())
+  channel      String    @default("CONSOLE")
+  orderDate    DateTime  @default(now())
   deliveryDate DateTime?
 
-  subtotalCents Int @default(0)
-  discountCents Int @default(0)
-  taxCents      Int @default(0)
-  totalCents    Int @default(0)
+  subtotalCents Int     @default(0)
+  discountCents Int     @default(0)
+  taxCents      Int     @default(0)
+  totalCents    Int     @default(0)
   note          String?
 
   /// Set when the order was captured during a field visit
-  visitId     String? @unique
+  visitId    String? @unique
   /// Client UUID from the mobile app; the offline write's identity
-  clientUuid  String? @unique
+  clientUuid String? @unique
 
   createdById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  branch    Branch?    @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customer  Customer   @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  quotation Quotation? @relation(fields: [quotationId], references: [id], onDelete: SetNull)
-  visit     Visit?     @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  company   Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch    Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer  Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  quotation Quotation?       @relation(fields: [quotationId], references: [id], onDelete: SetNull)
+  visit     Visit?           @relation(fields: [visitId], references: [id], onDelete: SetNull)
   lines     SalesOrderLine[]
   invoices  Invoice[]
 
@@ -707,15 +740,15 @@ model SalesOrder {
 }
 
 model SalesOrderLine {
-  id        String @id @default(cuid())
-  orderId   String
-  productId String
-  description String
-  quantity  Int
-  fulfilled Int    @default(0)
+  id             String @id @default(cuid())
+  orderId        String
+  productId      String
+  description    String
+  quantity       Int
+  fulfilled      Int    @default(0)
   unitPriceCents Int
-  discountCents  Int @default(0)
-  taxRateBp      Int @default(1600)
+  discountCents  Int    @default(0)
+  taxRateBp      Int    @default(1600)
   lineTotalCents Int
 
   order   SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
@@ -725,7 +758,7 @@ model SalesOrderLine {
 }
 
 model Invoice {
-  id         String @id @default(cuid())
+  id         String  @id @default(cuid())
   companyId  String
   branchId   String?
   customerId String
@@ -734,17 +767,34 @@ model Invoice {
   number     String
 
   /// DRAFT | ISSUED | PARTIALLY_PAID | PAID | OVERDUE | CANCELLED
-  status     String @default("DRAFT")
-  channel    String @default("CONSOLE")
-  issueDate  DateTime @default(now())
-  dueDate    DateTime?
+  status    String    @default("DRAFT")
+  channel   String    @default("CONSOLE")
+  issueDate DateTime  @default(now())
+  dueDate   DateTime?
 
-  subtotalCents Int @default(0)
-  discountCents Int @default(0)
-  taxCents      Int @default(0)
-  totalCents    Int @default(0)
-  paidCents     Int @default(0)
+  subtotalCents Int     @default(0)
+  discountCents Int     @default(0)
+  taxCents      Int     @default(0)
+  totalCents    Int     @default(0)
+  paidCents     Int     @default(0)
   note          String?
+
+  /// NOT_APPLICABLE | QUEUED | SUBMITTED | ACCEPTED | REJECTED
+  /// NOT_APPLICABLE is the honest default: most companies do not file through
+  /// this system, and an invoice they raise is not "pending" anything.
+  etimsStatus        String    @default("NOT_APPLICABLE")
+  /// Digitax's id for the sale, needed to raise a credit note against it.
+  etimsSaleId        String?
+  /// The control code (receipt_signature). This, with the QR, is what makes
+  /// the printed document a valid tax invoice.
+  etimsControlCode   String?
+  etimsInvoiceNumber String?
+  etimsSerialNumber  String?
+  etimsReceiptNumber Int?
+  etimsQrUrl         String?
+  etimsOfflineUrl    String?
+  etimsSubmittedAt   DateTime?
+  etimsError         String?
 
   visitId    String?
   clientUuid String? @unique
@@ -753,13 +803,14 @@ model Invoice {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  branch   Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customer Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  order    SalesOrder?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  location StockLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  lines    InvoiceLine[]
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch      Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer    Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  order       SalesOrder?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  location    StockLocation?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  lines       InvoiceLine[]
   allocations PaymentAllocation[]
+  creditNotes CreditNote[]
 
   @@unique([companyId, number])
   @@index([companyId, status])
@@ -769,14 +820,14 @@ model Invoice {
 }
 
 model InvoiceLine {
-  id        String @id @default(cuid())
-  invoiceId String
-  productId String
-  description String
-  quantity  Int
+  id             String @id @default(cuid())
+  invoiceId      String
+  productId      String
+  description    String
+  quantity       Int
   unitPriceCents Int
-  discountCents  Int @default(0)
-  taxRateBp      Int @default(1600)
+  discountCents  Int    @default(0)
+  taxRateBp      Int    @default(1600)
   lineTotalCents Int
 
   invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
@@ -794,7 +845,7 @@ model Payment {
 
   amountCents Int
   /// CASH | MPESA | BANK | CHEQUE | CREDIT_NOTE | PAYSTACK | MPESA_STK | KCB_BUNI
-  method      String @default("CASH")
+  method      String   @default("CASH")
   reference   String?
   paidAt      DateTime @default(now())
   note        String?
@@ -806,8 +857,8 @@ model Payment {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  company     Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  customer    Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer    Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
   allocations PaymentAllocation[]
 
   @@unique([companyId, number])
@@ -817,9 +868,9 @@ model Payment {
 }
 
 model PaymentAllocation {
-  id        String @id @default(cuid())
-  paymentId String
-  invoiceId String
+  id          String @id @default(cuid())
+  paymentId   String
+  invoiceId   String
   amountCents Int
 
   payment Payment @relation(fields: [paymentId], references: [id], onDelete: Cascade)
@@ -834,18 +885,18 @@ model PaymentAllocation {
 // ═══════════════════════════════════════════════════════════════════════
 
 model Supplier {
-  id        String @id @default(cuid())
-  companyId String
-  code      String
-  name      String
-  contactName String?
-  phone     String?
-  email     String?
-  address   String?
-  taxPin    String?
-  paymentTermsDays Int @default(30)
-  balanceCents     Int @default(0)
-  status    String @default("ACTIVE")
+  id               String  @id @default(cuid())
+  companyId        String
+  code             String
+  name             String
+  contactName      String?
+  phone            String?
+  email            String?
+  address          String?
+  taxPin           String?
+  paymentTermsDays Int     @default(30)
+  balanceCents     Int     @default(0)
+  status           String  @default("ACTIVE")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -860,29 +911,29 @@ model Supplier {
 }
 
 model PurchaseOrder {
-  id         String @id @default(cuid())
+  id         String  @id @default(cuid())
   companyId  String
   branchId   String?
   supplierId String
   number     String
 
   /// DRAFT | SENT | PARTIALLY_RECEIVED | RECEIVED | CANCELLED
-  status     String @default("DRAFT")
-  orderDate  DateTime @default(now())
+  status     String    @default("DRAFT")
+  orderDate  DateTime  @default(now())
   expectedAt DateTime?
 
-  subtotalCents Int @default(0)
-  taxCents      Int @default(0)
-  totalCents    Int @default(0)
+  subtotalCents Int     @default(0)
+  taxCents      Int     @default(0)
+  totalCents    Int     @default(0)
   note          String?
 
   createdById String?
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  branch   Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  company  Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch   Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  supplier Supplier            @relation(fields: [supplierId], references: [id], onDelete: Cascade)
   lines    PurchaseOrderLine[]
   receipts GoodsReceipt[]
 
@@ -891,14 +942,14 @@ model PurchaseOrder {
 }
 
 model PurchaseOrderLine {
-  id        String @id @default(cuid())
-  poId      String
-  productId String
-  description String
-  quantity  Int
-  received  Int    @default(0)
-  unitCostCents Int
-  taxRateBp     Int @default(1600)
+  id             String @id @default(cuid())
+  poId           String
+  productId      String
+  description    String
+  quantity       Int
+  received       Int    @default(0)
+  unitCostCents  Int
+  taxRateBp      Int    @default(1600)
   lineTotalCents Int
 
   po      PurchaseOrder @relation(fields: [poId], references: [id], onDelete: Cascade)
@@ -908,7 +959,7 @@ model PurchaseOrderLine {
 }
 
 model GoodsReceipt {
-  id         String @id @default(cuid())
+  id         String  @id @default(cuid())
   companyId  String
   supplierId String
   poId       String?
@@ -916,7 +967,7 @@ model GoodsReceipt {
   number     String
 
   /// DRAFT | POSTED
-  status     String @default("DRAFT")
+  status     String   @default("DRAFT")
   receivedAt DateTime @default(now())
   note       String?
 
@@ -924,10 +975,10 @@ model GoodsReceipt {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  supplier Supplier       @relation(fields: [supplierId], references: [id], onDelete: Cascade)
-  po       PurchaseOrder? @relation(fields: [poId], references: [id], onDelete: SetNull)
-  location StockLocation  @relation(fields: [locationId], references: [id])
+  company  Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  supplier Supplier           @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  po       PurchaseOrder?     @relation(fields: [poId], references: [id], onDelete: SetNull)
+  location StockLocation      @relation(fields: [locationId], references: [id])
   lines    GoodsReceiptLine[]
 
   @@unique([companyId, number])
@@ -935,10 +986,10 @@ model GoodsReceipt {
 }
 
 model GoodsReceiptLine {
-  id        String @id @default(cuid())
-  grnId     String
-  productId String
-  quantity  Int
+  id            String @id @default(cuid())
+  grnId         String
+  productId     String
+  quantity      Int
   unitCostCents Int
 
   grn     GoodsReceipt @relation(fields: [grnId], references: [id], onDelete: Cascade)
@@ -948,18 +999,18 @@ model GoodsReceiptLine {
 }
 
 model SupplierInvoice {
-  id         String @id @default(cuid())
-  companyId  String
-  supplierId String
-  number     String
+  id          String  @id @default(cuid())
+  companyId   String
+  supplierId  String
+  number      String
   supplierRef String?
 
   /// UNPAID | PARTIALLY_PAID | PAID | CANCELLED
-  status     String @default("UNPAID")
-  issueDate  DateTime @default(now())
+  status     String    @default("UNPAID")
+  issueDate  DateTime  @default(now())
   dueDate    DateTime?
-  totalCents Int @default(0)
-  paidCents  Int @default(0)
+  totalCents Int       @default(0)
+  paidCents  Int       @default(0)
   note       String?
 
   createdAt DateTime @default(now())
@@ -981,12 +1032,12 @@ model ExpenseCategory {
   companyId String
 
   /// Ledger account this category posts to. Null falls back to 6000.
-  accountCode String?
-  name      String
-  code      String
+  accountCode            String?
+  name                   String
+  code                   String
   /// Claims above this need a manager approval; 0 = always approve
-  approvalThresholdCents Int @default(0)
-  active    Boolean @default(true)
+  approvalThresholdCents Int     @default(0)
+  active                 Boolean @default(true)
 
   company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   expenses Expense[]
@@ -996,29 +1047,29 @@ model ExpenseCategory {
 
 /// Covers both office expenses and field-rep expense claims (proposal p.3).
 model Expense {
-  id         String @id @default(cuid())
+  id         String  @id @default(cuid())
   companyId  String
   branchId   String?
   categoryId String?
   userId     String?
 
-  number      String
-  description String
-  amountCents Int
+  number        String
+  description   String
+  amountCents   Int
   /// DRAFT | SUBMITTED | APPROVED | REJECTED | PAID
-  status      String @default("DRAFT")
-  incurredAt  DateTime @default(now())
+  status        String   @default("DRAFT")
+  incurredAt    DateTime @default(now())
   /// CASH | MPESA | BANK | PETTY_CASH
-  paymentMethod String @default("CASH")
-  receiptUrl  String?
+  paymentMethod String   @default("CASH")
+  receiptUrl    String?
   /// Where the claim was raised — field claims capture the rep's position
-  latitude    Float?
-  longitude   Float?
+  latitude      Float?
+  longitude     Float?
 
   approvedById String?
   approvedAt   DateTime?
   rejectReason String?
-  clientUuid   String? @unique
+  clientUuid   String?   @unique
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1038,21 +1089,21 @@ model Expense {
 // ═══════════════════════════════════════════════════════════════════════
 
 model Visit {
-  id         String @id @default(cuid())
+  id         String  @id @default(cuid())
   companyId  String
   customerId String
   repId      String
   routeId    String?
 
   /// SCHEDULED | IN_PROGRESS | COMPLETED | MISSED | CANCELLED
-  status      String @default("SCHEDULED")
+  status      String   @default("SCHEDULED")
   /// SALES | COLLECTION | DELIVERY | PROSPECTING | SUPPORT
-  purpose     String @default("SALES")
+  purpose     String   @default("SALES")
   scheduledAt DateTime
 
-  checkInAt   DateTime?
-  checkInLat  Float?
-  checkInLng  Float?
+  checkInAt        DateTime?
+  checkInLat       Float?
+  checkInLng       Float?
   checkInAccuracyM Int?
 
   checkOutAt  DateTime?
@@ -1060,11 +1111,11 @@ model Visit {
   checkOutLng Float?
 
   /// Module 08 output: was the check-in inside the customer's fence?
-  geofenceVerified Boolean @default(false)
+  geofenceVerified      Boolean @default(false)
   /// Metres between check-in point and the customer pin
   distanceFromCustomerM Int?
   /// Minutes on site, derived at check-out
-  durationMin Int?
+  durationMin           Int?
 
   outcome String?
   notes   String?
@@ -1089,15 +1140,15 @@ model Visit {
 }
 
 model VisitPhoto {
-  id      String @id @default(cuid())
-  visitId String
+  id         String   @id @default(cuid())
+  visitId    String
   /// Stored under /uploads/visits/<id>.jpg by the upload route
-  url     String
-  caption String?
-  latitude  Float?
-  longitude Float?
-  takenAt DateTime @default(now())
-  clientUuid String? @unique
+  url        String
+  caption    String?
+  latitude   Float?
+  longitude  Float?
+  takenAt    DateTime @default(now())
+  clientUuid String?  @unique
 
   visit Visit @relation(fields: [visitId], references: [id], onDelete: Cascade)
 
@@ -1105,13 +1156,13 @@ model VisitPhoto {
 }
 
 model SalesTarget {
-  id          String @id @default(cuid())
+  id          String  @id @default(cuid())
   companyId   String
   repId       String?
   territoryId String?
 
   /// MONTHLY | QUARTERLY | ANNUAL
-  period      String @default("MONTHLY")
+  period      String   @default("MONTHLY")
   periodStart DateTime
   periodEnd   DateTime
 
@@ -1135,22 +1186,22 @@ model SalesTarget {
 // ═══════════════════════════════════════════════════════════════════════
 
 model Route {
-  id          String @id @default(cuid())
+  id          String  @id @default(cuid())
   companyId   String
   repId       String
   territoryId String?
 
-  name     String
+  name      String
   routeDate DateTime
   /// PLANNED | ACTIVE | COMPLETED | CANCELLED
-  status   String @default("PLANNED")
+  status    String   @default("PLANNED")
 
   /// Optimised total travel distance, metres
-  totalDistanceM Int @default(0)
+  totalDistanceM Int    @default(0)
   /// Estimated driving time at the planning speed assumption, minutes
-  estimatedMin   Int @default(0)
-  startLat Float?
-  startLng Float?
+  estimatedMin   Int    @default(0)
+  startLat       Float?
+  startLng       Float?
 
   startedAt   DateTime?
   completedAt DateTime?
@@ -1174,13 +1225,13 @@ model RouteStop {
   routeId    String
   customerId String
 
-  sequence   Int
+  sequence     Int
   /// PENDING | ARRIVED | DONE | SKIPPED
-  status     String @default("PENDING")
-  plannedAt  DateTime?
+  status       String    @default("PENDING")
+  plannedAt    DateTime?
   /// Distance from the previous stop, metres
-  legDistanceM Int @default(0)
-  legMin       Int @default(0)
+  legDistanceM Int       @default(0)
+  legMin       Int       @default(0)
   skipReason   String?
 
   route    Route    @relation(fields: [routeId], references: [id], onDelete: Cascade)
@@ -1195,19 +1246,19 @@ model RouteStop {
 // ═══════════════════════════════════════════════════════════════════════
 
 model GeofenceEvent {
-  id          String @id @default(cuid())
+  id          String  @id @default(cuid())
   companyId   String
   userId      String
   territoryId String?
 
   /// ENTER | EXIT | VISIT_VERIFIED | VISIT_REJECTED | OUT_OF_ZONE
-  type      String
-  latitude  Float
-  longitude Float
+  type       String
+  latitude   Float
+  longitude  Float
   /// Free-text detail, e.g. "check-in 412m from customer pin"
-  detail    String?
-  refType   String?
-  refId     String?
+  detail     String?
+  refType    String?
+  refId      String?
   occurredAt DateTime @default(now())
   createdAt  DateTime @default(now())
 
@@ -1226,13 +1277,13 @@ model LocationPing {
   companyId String
   userId    String
 
-  latitude  Float
-  longitude Float
-  accuracyM Int?
-  speedMps  Float?
-  heading   Float?
+  latitude   Float
+  longitude  Float
+  accuracyM  Int?
+  speedMps   Float?
+  heading    Float?
   batteryPct Int?
-  isMoving  Boolean @default(true)
+  isMoving   Boolean  @default(true)
   recordedAt DateTime
   createdAt  DateTime @default(now())
 
@@ -1247,7 +1298,7 @@ model LocationPing {
 // ═══════════════════════════════════════════════════════════════════════
 
 model SmsTemplate {
-  id        String @id @default(cuid())
+  id        String  @id @default(cuid())
   companyId String
   /// ORDER_CONFIRMATION | PAYMENT_RECEIPT | BALANCE_REMINDER | PROMOTION | VISIT_REMINDER
   key       String
@@ -1265,23 +1316,23 @@ model SmsTemplate {
 }
 
 model SmsMessage {
-  id         String @id @default(cuid())
+  id         String  @id @default(cuid())
   companyId  String
   customerId String?
 
-  toPhone   String
-  body      String
+  toPhone     String
+  body        String
   /// QUEUED | SENT | DELIVERED | FAILED
-  status    String @default("QUEUED")
-  provider  String @default("console")
+  status      String  @default("QUEUED")
+  provider    String  @default("console")
   providerRef String?
   templateKey String?
-  costCents Int @default(0)
-  error     String?
+  costCents   Int     @default(0)
+  error       String?
 
   sentAt    DateTime?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 
   company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
   customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
@@ -1299,7 +1350,7 @@ model SmsMessage {
 /// what was tried; so the intent is the attempt, and `paymentId` is set only
 /// once the provider confirms and a real Payment is written.
 model PaymentIntent {
-  id         String @id @default(cuid())
+  id         String  @id @default(cuid())
   companyId  String
   customerId String
   visitId    String?
@@ -1320,9 +1371,9 @@ model PaymentIntent {
 
   /// The provider's own handle: Paystack reference, Daraja CheckoutRequestID,
   /// KCB transaction id. Unique per provider so a replayed webhook is a no-op.
-  providerRef String?
+  providerRef     String?
   /// The provider's confirmation code shown to the customer (M-Pesa receipt).
-  receiptRef String?
+  receiptRef      String?
   /// Raw callback body, kept verbatim for dispute resolution. SQLite has no
   /// JSON type, so this is the serialised string.
   providerPayload String?
@@ -1334,8 +1385,8 @@ model PaymentIntent {
   paymentId String? @unique
 
   createdById String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
   completedAt DateTime?
 
   company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
@@ -1407,8 +1458,8 @@ model Account {
   isPostable Boolean @default(true)
   /// Set on the accounts the posting rules look up by role, so a company can
   /// rename "Bank" without breaking the machinery that posts to it.
-  systemKey String?
-  active    Boolean @default(true)
+  systemKey  String?
+  active     Boolean @default(true)
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1441,8 +1492,8 @@ model JournalEntry {
   memo   String?
 
   /// The document this came from: Invoice | Payment | StockMovement | Expense …
-  refType String
-  refId   String
+  refType    String
+  refId      String
   /// REVENUE | COGS | SETTLEMENT | RECEIPT | PURCHASE | ADJUSTMENT | REVERSAL …
   sourceKind String
 
@@ -1500,4 +1551,167 @@ model AccountingPeriod {
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, year, month])
+}
+
+// ---------------------------------------------------------------------------
+// eTIMS  (KRA electronic tax invoicing, through Digitax)
+// ---------------------------------------------------------------------------
+
+/// A company's own eTIMS settings.
+///
+/// Separate from the module licence on purpose. The licence says the company
+/// has *bought* eTIMS; this says whether it is *switched on*. A company that
+/// has paid but has not finished onboarding with KRA must be able to run with
+/// it off, and turning it off must never stop them trading.
+model EtimsConfig {
+  id        String @id @default(cuid())
+  companyId String @unique
+
+  /// The switch. False means invoices issue exactly as before and nothing is
+  /// transmitted or queued.
+  enabled      Boolean @default(false)
+  /// SANDBOX | LIVE. A live key files real returns under a real PIN.
+  environment  String  @default("SANDBOX")
+  /// Transmit on issue, or leave submissions for someone to release by hand.
+  autoTransmit Boolean @default(true)
+
+  /// Nothing raised before this date is transmitted. Without it, switching the
+  /// feature on would push the entire back catalogue at KRA.
+  activeFrom DateTime?
+
+  /// Read back from GET /etims-info so an admin can see which business and
+  /// branch the stored key actually belongs to.
+  businessId String?
+  branchId   String?
+  branchName String?
+  taxPin     String?
+
+  /// Fallbacks applied to products that have no classification of their own.
+  defaultItemClassCode String @default("99000000")
+  defaultItemTypeCode  String @default("2")
+  defaultTaxTypeCode   String @default("B")
+  defaultQuantityUnit  String @default("U")
+  defaultPackageUnit   String @default("NT")
+  defaultOriginNation  String @default("KE")
+
+  /// Which credential produced the Digitax ids held on products, customers and
+  /// invoices. When the key or PIN is replaced this changes, and those ids —
+  /// which belong to the *old* Digitax business — must be cleared before
+  /// anything is submitted against the new one.
+  credentialFingerprint String?
+
+  lastVerifiedAt DateTime?
+  lastError      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+}
+
+/// Every attempt at every transmission, request and response kept verbatim.
+///
+/// When KRA disputes a figure two years from now, the answer has to be what was
+/// actually sent, not what today's code would send.
+model EtimsSubmission {
+  id        String @id @default(cuid())
+  companyId String
+
+  /// SALE | CREDIT_NOTE | ITEM | CUSTOMER | STOCK
+  docType String
+  /// Local id of the document this is for.
+  docId   String
+
+  attempt Int    @default(1)
+  /// PENDING | SENT | ACCEPTED | REJECTED | FAILED
+  status  String @default("PENDING")
+
+  endpoint   String?
+  request    String?
+  response   String?
+  /// HTTP status, where there was one.
+  httpStatus Int?
+  error      String?
+  /// Set when a failure is worth retrying. A permanent rejection has none.
+  retryAfter DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@index([companyId, status])
+  @@index([companyId, docType, docId])
+}
+
+/// A credit note against an issued invoice.
+///
+/// KRA requires a reversal to be its own transmitted document referencing the
+/// original sale. Raut had returns as stock movements with no document behind
+/// them, which cannot be filed at all.
+model CreditNote {
+  id         String @id @default(cuid())
+  companyId  String
+  invoiceId  String
+  customerId String
+  number     String
+
+  /// DRAFT | ISSUED | CANCELLED
+  status String @default("DRAFT")
+  reason String
+
+  issueDate DateTime @default(now())
+
+  subtotalCents Int @default(0)
+  taxCents      Int @default(0)
+  totalCents    Int @default(0)
+
+  /// Whether the returned goods went back into stock. A damaged return is
+  /// credited but not restocked, and the two must not be assumed together.
+  restock Boolean @default(true)
+
+  etimsStatus        String    @default("NOT_APPLICABLE")
+  etimsSaleId        String?
+  etimsControlCode   String?
+  etimsInvoiceNumber String?
+  etimsSerialNumber  String?
+  etimsReceiptNumber Int?
+  etimsQrUrl         String?
+  etimsOfflineUrl    String?
+  etimsSubmittedAt   DateTime?
+  etimsError         String?
+
+  clientUuid  String?  @unique
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  invoice  Invoice          @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  customer Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  lines    CreditNoteLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@index([companyId, invoiceId])
+}
+
+model CreditNoteLine {
+  id            String  @id @default(cuid())
+  creditNoteId  String
+  productId     String
+  /// The line on the original invoice being credited, so a partial return can
+  /// be matched back to what was sold.
+  invoiceLineId String?
+
+  description    String
+  quantity       Int
+  unitPriceCents Int
+  taxRateBp      Int    @default(1600)
+  lineTotalCents Int
+
+  creditNote CreditNote @relation(fields: [creditNoteId], references: [id], onDelete: Cascade)
+  product    Product    @relation(fields: [productId], references: [id])
+
+  @@index([creditNoteId])
 }

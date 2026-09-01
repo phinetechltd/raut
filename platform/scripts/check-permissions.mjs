@@ -103,6 +103,7 @@ const ROLES = [
       "/reports/vat-summary",
       "/reports/stock-valuation",
       "/reports/trial-balance",
+      "/etims/config",
     ],
     // No stock-write rights and no platform reach.
     apiDeny: ["/platform/companies"],
@@ -121,7 +122,7 @@ const ROLES = [
     reach: ["/app", "/app/customers", "/app/field"],
     redirect: ["/admin"],
     apiAllow: ["/visits", "/routes", "/customers"],
-    hidden: ["/app/settings/payments", "/app/finance/reports"],
+    hidden: ["/app/settings/payments", "/app/finance/reports", "/app/settings/etims"],
     // A rep holds report:read for their own numbers. The statutory statements
     // carry company margin, cash position and tax owed, and are not theirs.
     apiDeny: [

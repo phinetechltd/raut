@@ -70,7 +70,7 @@ async function main() {
   check("Refresh token issued for device", typeof refreshToken === "string");
   check(
     "All ten modules reported",
-    login.json?.data?.modules?.length === 10,
+    login.json?.data?.modules?.length === 11,
     `${login.json?.data?.modules?.length} modules`,
   );
 
@@ -636,6 +636,143 @@ async function main() {
     "The CSV is served as a download",
     (csv.headers?.get("content-type") ?? "").includes("text/csv"),
   );
+
+  console.log("\neTIMS");
+
+  const cfg = await api("/etims/config", { token: adminToken });
+  check("eTIMS settings are readable", cfg.status === 200);
+  check("eTIMS is switched on for the demo company", cfg.json?.data?.config?.enabled === true);
+  // The vault is write-only in both directions that matter: the console may see
+  // WHICH taxpayer is filing, never the key that files as them.
+  check(
+    "The API key is never returned",
+    JSON.stringify(cfg.json ?? {}).includes("DIGITAX_API_KEY") === false,
+  );
+
+  // The whole point of the feature: an invoice comes back with a control code
+  // and a QR, which is what makes the printed document a tax invoice.
+  const etimsInvoice = await api("/invoices", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      customerId: customerForOrder.id,
+      issue: true,
+      clientUuid: uuid(),
+      lines: [{ productId: productA.id, quantity: 1, unitPriceCents: 250000 }],
+    },
+  });
+  check("An invoice can be raised with eTIMS on", etimsInvoice.status === 201 || etimsInvoice.status === 200);
+
+  const etimsInvoiceId = etimsInvoice.json?.data?.invoice?.id ?? etimsInvoice.json?.data?.id;
+  const filed = await api(`/invoices/${etimsInvoiceId}`, { token: adminToken });
+  const filedInvoice = filed.json?.data?.invoice ?? filed.json?.data;
+  check(
+    "It was filed and carries a control code",
+    filedInvoice?.etimsStatus === "ACCEPTED" && Boolean(filedInvoice?.etimsControlCode),
+    `status ${filedInvoice?.etimsStatus}`,
+  );
+  check("It carries a QR target", Boolean(filedInvoice?.etimsQrUrl));
+
+  const log = await api("/etims/submissions", { token: adminToken });
+  check("Transmissions are logged", log.status === 200 && (log.json?.data?.rows?.length ?? 0) > 0);
+  // The audit trail has to hold what was actually sent, not a summary of it.
+  check(
+    "The log keeps the request verbatim",
+    Boolean(log.json?.data?.rows?.find((r) => r.docType === "SALE")?.request),
+  );
+
+  // Idempotence: a second send must not file the same sale twice.
+  const resend = await api("/etims/transmit", {
+    method: "POST",
+    token: adminToken,
+    body: { docType: "SALE", docId: etimsInvoiceId },
+  });
+  check("Re-sending an accepted invoice is a no-op", resend.json?.data?.ok === true);
+  const afterResend = await api("/etims/submissions", { token: adminToken });
+  check(
+    "It did not file a second time",
+    (afterResend.json?.data?.rows ?? []).filter(
+      (r) => r.docType === "SALE" && r.docId === etimsInvoiceId,
+    ).length === 1,
+  );
+
+  // A credit note is the only way to reverse a filed invoice.
+  const invoiceLines = filedInvoice?.lines ?? [];
+  const note = await api("/credit-notes", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      invoiceId: etimsInvoiceId,
+      reason: "Smoke test return",
+      restock: true,
+      lines: [{ invoiceLineId: invoiceLines[0]?.id, quantity: 1 }],
+    },
+  });
+  check("A credit note can be raised", note.status === 200 || note.status === 201);
+  check(
+    "The credit note references the original sale",
+    Boolean(note.json?.data?.creditNote?.etimsControlCode) ||
+      note.json?.data?.creditNote?.etimsStatus === "ACCEPTED",
+    `status ${note.json?.data?.creditNote?.etimsStatus}`,
+  );
+
+  // Reversing must move the books, not just the document.
+  const tbAfter = await api("/reports/trial-balance", { token: adminToken });
+  check("The books still balance after a credit note", tbAfter.json?.data?.balanced === true);
+
+  // The switch. Turning eTIMS off must never stop a company trading: the sale
+  // still completes, the books still move, and nothing is queued. A tax
+  // integration that can take the till down is worse than no integration.
+  const off = await api("/etims/config", {
+    method: "PUT",
+    token: adminToken,
+    body: { enabled: false },
+  });
+  check("eTIMS can be switched off", off.json?.data?.config?.enabled === false);
+
+  const beforeOff = (await api("/etims/submissions", { token: adminToken })).json?.data?.rows
+    ?.length;
+
+  const whileOff = await api("/invoices", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      customerId: customerForOrder.id,
+      issue: true,
+      clientUuid: uuid(),
+      lines: [{ productId: productA.id, quantity: 1, unitPriceCents: 150000 }],
+    },
+  });
+  check("An invoice still issues with eTIMS off", whileOff.status === 201 || whileOff.status === 200);
+
+  const offInvoiceId = whileOff.json?.data?.invoice?.id ?? whileOff.json?.data?.id;
+  const offInvoice = (await api(`/invoices/${offInvoiceId}`, { token: adminToken })).json?.data
+    ?.invoice;
+  check(
+    "It is not marked for filing",
+    offInvoice?.etimsStatus === "NOT_APPLICABLE",
+    `status ${offInvoice?.etimsStatus}`,
+  );
+
+  const afterOff = (await api("/etims/submissions", { token: adminToken })).json?.data?.rows?.length;
+  check("Nothing was transmitted while off", afterOff === beforeOff, `${beforeOff} -> ${afterOff}`);
+
+  // Back on, and the books are unaffected either way.
+  await api("/etims/config", { method: "PUT", token: adminToken, body: { enabled: true } });
+  const tbSwitch = await api("/reports/trial-balance", { token: adminToken });
+  check("The books balance either way", tbSwitch.json?.data?.balanced === true);
+
+  // Tenancy: a company without the module cannot reach any of it, and — more
+  // importantly — cannot see another company's filings.
+  const otherLogin = await api("/auth/login", {
+    method: "POST",
+    body: { email: "admin@acacia.example", password: PASSWORD },
+  });
+  const otherToken = otherLogin.json?.data?.accessToken;
+  for (const path of ["/etims/config", "/etims/submissions"]) {
+    const r = await api(path, { token: otherToken });
+    check(`An unlicensed company is refused ${path}`, r.status === 402 || r.status === 403, `HTTP ${r.status}`);
+  }
 
   console.log("\nSuper Admin");
   const superLogin = await api("/auth/login", {

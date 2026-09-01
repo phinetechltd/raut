@@ -7,31 +7,26 @@
  * Wholesale) and the rep on page 9 (J. Mwangi) are the ones seeded here, with
  * real Kenyan coordinates so the maps and geofencing are exercisable.
  *
- * Two tenants are created: Zamar Solutions with the full ten modules, and a
+ * Two tenants are created: Zamar Solutions with every module, and a
  * second company on the core platform only — without it, nothing proves the
  * module gate actually gates anything.
  */
 
 import { PrismaClient } from "@prisma/client";
+import { MODULE_LIST } from "../src/lib/modules";
 import bcrypt from "bcryptjs";
 
 const db = new PrismaClient();
 
 const PASSWORD = "Raut@2026";
 
-const MODULE_PRICES: Record<string, number> = {
-  CRM: 25_000_00,
-  SALES_POS: 30_000_00,
-  INVENTORY: 25_000_00,
-  PROCUREMENT: 20_000_00,
-  FINANCE: 25_000_00,
-  FIELD_SALES: 20_000_00,
-  ROUTING: 15_000_00,
-  GEOFENCING: 15_000_00,
-  SMS: 10_000_00,
-  ANALYTICS: 5_000_00,
-};
-const ALL_MODULES = Object.keys(MODULE_PRICES);
+// Derived from the catalogue rather than copied from it. The duplicate list
+// this replaces silently withheld the eleventh module from every seeded
+// company, because adding a module to the catalogue did not add it here.
+const MODULE_PRICES: Record<string, number> = Object.fromEntries(
+  MODULE_LIST.map((m) => [m.key, m.priceCents]),
+);
+const ALL_MODULES = MODULE_LIST.map((m) => m.key);
 
 const SMS_TEMPLATES = [
   {
@@ -338,6 +333,27 @@ async function main() {
     if (i < 6) await openStock(product.id, cost, vanJames.id, 20 + i * 3);
   }
   console.log("✓ Opening stock");
+
+  // eTIMS on, in sandbox. With no Digitax key stored the console adapter is
+  // used, so the whole flow — registration, control code, QR on the printed
+  // invoice, credit note — is demonstrable without a Digitax account. It will
+  // never reach KRA in this state, which is the point.
+  await db.etimsConfig.create({
+    data: {
+      companyId: zamar.id,
+      enabled: true,
+      environment: "SANDBOX",
+      autoTransmit: true,
+      activeFrom: daysAgo(1),
+      defaultItemClassCode: "99010000",
+      defaultItemTypeCode: "2",
+      defaultTaxTypeCode: "B",
+      defaultQuantityUnit: "U",
+      defaultPackageUnit: "CT",
+      defaultOriginNation: "KE",
+    },
+  });
+  console.log("✓ eTIMS (sandbox, console adapter)");
 
   // Customers from the proposal mockups, with real coordinates.
   const customerSpecs = [
@@ -766,7 +782,7 @@ async function main() {
   PLATFORM
     admin@tariafrica.com            Super Admin
 
-  ZAMAR SOLUTIONS  (all 10 modules licensed)
+  ZAMAR SOLUTIONS  (all 11 modules licensed, eTIMS in sandbox)
     admin@zamarsolutions.co.ke      Company Admin
     sales@zamarsolutions.co.ke      Sales Manager
     accounts@zamarsolutions.co.ke   Accountant

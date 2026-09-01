@@ -8,6 +8,7 @@ import { postInvoice, postPayment } from "./posting";
 import { sendTemplated } from "@/lib/sms";
 
 import { consumeForSale } from "./inventory";
+import { queueInvoice } from "./etims";
 
 /**
  * Module 02 · Sales & POS.
@@ -230,12 +231,21 @@ export async function createInvoice(input: CreateInvoiceInput) {
     timeout: 15_000,
   });
 
+  // eTIMS AFTER the commit, never inside it. A Digitax round trip holds
+  // SQLite's single write lock for as long as the network takes, which would
+  // block every other writer and eventually fail the sale that triggered it.
+  //
+  // And it must never fail the sale: a company that cannot reach KRA still has
+  // a customer in front of it. Anything that goes wrong leaves the invoice
+  // queued for the runner.
+  await queueInvoice(invoice.id, input.companyId).catch(() => {});
+
   return invoice;
 }
 
 /** Issues a previously drafted invoice, applying the same consequences. */
 export async function issueInvoice(invoiceId: string, userId: string) {
-  return db.$transaction(async (tx) => {
+  const issued = await db.$transaction(async (tx) => {
     const invoice = await tx.invoice.findUnique({
       where: { id: invoiceId },
       include: { lines: true },
@@ -267,6 +277,17 @@ export async function issueInvoice(invoiceId: string, userId: string) {
     // and a sale failing because bookkeeping was slow is the wrong trade.
     timeout: 15_000,
   });
+
+  // eTIMS AFTER the commit, never inside it. A Digitax round trip holds
+  // SQLite's single write lock for as long as the network takes, which would
+  // block every other writer and eventually fail the sale that triggered it.
+  //
+  // And it can never fail the sale: a company that cannot reach KRA must still
+  // be able to serve the customer in front of them. Anything that goes wrong
+  // leaves the invoice queued, to be retried by the runner.
+  await queueInvoice(issued.id, issued.companyId).catch(() => {});
+
+  return issued;
 }
 
 // ── payments ───────────────────────────────────────────────────────────

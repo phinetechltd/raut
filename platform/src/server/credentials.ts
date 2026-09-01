@@ -6,6 +6,7 @@ import {
   type Creds,
   type PaymentProviderName,
 } from "@/lib/payments";
+import { baseUrlFor, type EtimsCredentials } from "@/lib/etims";
 import {
   maskSecret,
   openJson,
@@ -27,7 +28,7 @@ export type CredentialProvider = PaymentProviderName | "DIGITAX";
 /** Keys each provider expects. Digitax joins the payment providers here. */
 export const CREDENTIAL_KEYS: Record<CredentialProvider, string[]> = {
   ...REQUIRED_KEYS,
-  DIGITAX: ["DIGITAX_API_KEY", "DIGITAX_API_SECRET", "DIGITAX_TIN"],
+  DIGITAX: ["DIGITAX_API_KEY", "DIGITAX_TIN"],
 };
 
 /** Optional keys accepted but not required, e.g. environment switches. */
@@ -35,7 +36,7 @@ export const OPTIONAL_KEYS: Partial<Record<CredentialProvider, string[]>> = {
   PAYSTACK: ["PAYSTACK_PUBLIC_KEY", "PAYSTACK_BASE_URL"],
   MPESA_DARAJA: ["MPESA_ENV", "MPESA_TRANSACTION_TYPE", "MPESA_PARTY_B"],
   KCB_BUNI: ["KCB_ENV", "KCB_BASE_URL", "KCB_WEBHOOK_SECRET"],
-  DIGITAX: ["DIGITAX_ENV", "DIGITAX_BASE_URL", "DIGITAX_BRANCH_ID"],
+  DIGITAX: ["DIGITAX_BASE_URL", "DIGITAX_BRANCH_ID"],
 };
 
 /**
@@ -74,6 +75,36 @@ export async function resolvePaymentCredentials(companyId: string) {
   return Object.fromEntries(
     entries.filter(([, creds]) => creds !== null),
   ) as Partial<Record<PaymentProviderName, Creds>>;
+}
+
+/**
+ * A company's eTIMS credentials, or null.
+ *
+ * Deliberately NOT `credsFor()`. That helper falls back to `process.env`, which
+ * is right for a payment gateway the platform may run centrally and wrong — in
+ * a way that is only ever discovered by the revenue authority — for a tax
+ * filing. There is no shared eTIMS account: a company with no stored key is not
+ * configured, and nothing is transmitted on its behalf.
+ *
+ * The base URL is read from env when the company has not set one, because a
+ * host is not an identity.
+ */
+export async function resolveEtimsCredentials(
+  companyId: string,
+): Promise<EtimsCredentials | null> {
+  const creds = await resolveCredentials(companyId, "DIGITAX");
+  if (!creds) return null;
+
+  const apiKey = creds.DIGITAX_API_KEY;
+  const taxPin = creds.DIGITAX_TIN;
+  if (!apiKey || !taxPin) return null;
+
+  return {
+    apiKey,
+    taxPin,
+    baseUrl: baseUrlFor(creds.DIGITAX_BASE_URL),
+    branchId: creds.DIGITAX_BRANCH_ID,
+  };
 }
 
 export interface SaveCredentialInput {

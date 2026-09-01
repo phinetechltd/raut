@@ -73,9 +73,7 @@ const KEY_LABELS: Record<string, string> = {
   KCB_ENV: "Environment (sandbox / production)",
   KCB_BASE_URL: "API base URL",
   DIGITAX_API_KEY: "API key",
-  DIGITAX_API_SECRET: "API secret",
   DIGITAX_TIN: "KRA PIN / TIN",
-  DIGITAX_ENV: "Environment (sandbox / production)",
   DIGITAX_BASE_URL: "API base URL",
   DIGITAX_BRANCH_ID: "Branch id",
 };

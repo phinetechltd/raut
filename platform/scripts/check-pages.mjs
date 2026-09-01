@@ -37,6 +37,8 @@ const ROLES = [
       ["/app/procurement", "Goods received"],
       ["/app/finance", "Receivables ageing"],
       ["/app/finance/reports", "Profit and loss"],
+      ["/app/finance/etims", "eTIMS transmissions"],
+      ["/app/settings/etims", "eTIMS transmission"],
       ["/app/field", "Today in the field"],
       ["/app/routes", "Routing &amp; Geofencing"],
       ["/app/sms", "Message log"],

@@ -1,4 +1,6 @@
 ﻿
+import Link from "next/link";
+
 import {
   ModuleLocked,
   Money,
@@ -234,7 +236,14 @@ export default async function SalesPage({
               ) : (
                 invoices.map((inv) => (
                   <tr key={inv.id}>
-                    <td className="font-medium">{inv.number}</td>
+                    <td className="font-medium">
+                      <Link
+                        href={`/app/sales/invoices/${inv.id}`}
+                        className="underline underline-offset-2"
+                      >
+                        {inv.number}
+                      </Link>
+                    </td>
                     <td>
                       {inv.customer.name}
                       <span className="text-content-muted block text-xs">{inv.customer.town}</span>

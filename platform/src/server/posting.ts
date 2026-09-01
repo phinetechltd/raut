@@ -419,3 +419,55 @@ export async function postOpeningStock(
         ],
   });
 }
+
+/**
+ * Credit note issued against a sale.
+ *
+ *   Dr Sales returns          net of tax
+ *   Dr VAT payable            tax
+ *     Cr Accounts receivable  gross
+ *
+ * The exact mirror of an invoice, but debited to sales *returns* rather than
+ * against sales itself. Netting it off revenue would hide the return: a company
+ * that invoiced ten million and credited two needs to see both figures, not an
+ * eight-million line that looks like it never happened. It also reclaims the
+ * output VAT, which is the half a hand-rolled reversal usually forgets and the
+ * revenue authority always notices.
+ */
+export async function postCreditNote(
+  tx: Tx,
+  note: {
+    id: string;
+    companyId: string;
+    number: string;
+    issueDate: Date;
+    taxCents: number;
+    totalCents: number;
+  },
+  userId?: string | null,
+) {
+  if (note.totalCents === 0) return null;
+
+  const acc = await systemAccounts(
+    note.companyId,
+    ["SALES_RETURNS", "VAT_OUTPUT", "ACCOUNTS_RECEIVABLE"],
+    tx,
+  );
+
+  const netCents = note.totalCents - note.taxCents;
+
+  return postEntry(tx, {
+    companyId: note.companyId,
+    date: note.issueDate,
+    refType: "CreditNote",
+    refId: note.id,
+    sourceKind: "CREDIT_NOTE",
+    memo: `Credit note ${note.number}`,
+    postedById: userId ?? null,
+    lines: [
+      { accountId: acc.SALES_RETURNS, debitCents: netCents, memo: "Sales return" },
+      { accountId: acc.VAT_OUTPUT, debitCents: note.taxCents, memo: "VAT reversed" },
+      { accountId: acc.ACCOUNTS_RECEIVABLE, creditCents: note.totalCents },
+    ],
+  });
+}

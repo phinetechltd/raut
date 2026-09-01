@@ -97,7 +97,13 @@ export type Permission =
   // Statutory financial statements. Deliberately NOT report:read: that is held
   // by field reps, and the P&L, balance sheet, cash position and VAT liability
   // are not theirs to see.
-  | "report:financial";
+  | "report:financial"
+  // eTIMS
+  | "etims:read"
+  | "etims:configure"
+  | "etims:submit"
+  | "creditnote:read"
+  | "creditnote:write";
 
 /**
  * Which module owns each permission. Permissions absent from this map belong to
@@ -153,6 +159,14 @@ const PERMISSION_MODULE: Partial<Record<Permission, ModuleKey>> = {
   // gate on the same module. A page that renders and then 402s on its own data
   // reads as a broken product rather than a licence boundary.
   "report:financial": "FINANCE",
+
+  "etims:read": "ETIMS",
+  "etims:configure": "ETIMS",
+  "etims:submit": "ETIMS",
+  // Credit notes belong to Sales: a company reverses an invoice whether or not
+  // it files with KRA. Only the transmission is gated on ETIMS.
+  "creditnote:read": "SALES_POS",
+  "creditnote:write": "SALES_POS",
 };
 
 const CORE_READ: Permission[] = ["company:read", "user:read", "customer:read", "product:read", "report:read"];
@@ -205,6 +219,11 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "sms:template",
     "report:advanced",
     "report:financial",
+    "etims:read",
+    "etims:configure",
+    "etims:submit",
+    "creditnote:read",
+    "creditnote:write",
   ],
 
   BRANCH_MANAGER: [
@@ -235,6 +254,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "sms:send",
     "report:advanced",
     "report:financial",
+    "etims:read",
+    "etims:submit",
+    "creditnote:read",
+    "creditnote:write",
   ],
 
   SALES_MANAGER: [
@@ -261,6 +284,9 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "sms:send",
     "report:advanced",
     "report:financial",
+    "etims:read",
+    "creditnote:read",
+    "creditnote:write",
   ],
 
   ACCOUNTANT: [
@@ -280,6 +306,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "sms:send",
     "report:advanced",
     "report:financial",
+    "etims:read",
+    "etims:submit",
+    "creditnote:read",
+    "creditnote:write",
   ],
 
   STOREKEEPER: [
@@ -293,6 +323,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "purchase:write",
     "grn:write",
     "order:read",
+    "etims:read",
   ],
 
   // The mobile principal. Deliberately narrow: a rep sees their own field data
@@ -315,6 +346,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "expense:write",
     "field:self",
     "report:read",
+    "creditnote:read",
   ],
 };
 

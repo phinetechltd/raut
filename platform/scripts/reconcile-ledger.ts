@@ -55,8 +55,21 @@ async function reconcile(companyId: string, name: string) {
   const invTax = invoices.reduce((n, i) => n + i.taxCents, 0);
   const invPaid = invoices.reduce((n, i) => n + i.paidCents, 0);
 
-  check("Sales (4000)", bal("4000"), invTotal - invTax);
-  check("VAT payable (2100)", bal("2100"), invTax);
+  // Credit notes reverse part of a sale, so every figure derived from invoices
+  // has to net them off. Leaving them out overstates revenue, receivables and
+  // the VAT owed by exactly the amount that was credited.
+  const notes = await db.creditNote.findMany({
+    where: { companyId, status: { not: "CANCELLED" } },
+    select: { totalCents: true, taxCents: true },
+  });
+  const cnTotal = notes.reduce((n, c) => n + c.totalCents, 0);
+  const cnTax = notes.reduce((n, c) => n + c.taxCents, 0);
+
+  // Sales and Sales returns are separate accounts. `bal` already reports each
+  // in its natural direction, so a returns account that has only been debited
+  // comes back negative — these are added, not subtracted.
+  check("Sales net of returns", bal("4000") + bal("4100"), invTotal - invTax - (cnTotal - cnTax));
+  check("VAT payable (2100)", bal("2100"), invTax - cnTax);
 
   // --- Receivables --------------------------------------------------------
   const payments = await db.payment.findMany({
@@ -68,8 +81,8 @@ async function reconcile(companyId: string, name: string) {
   check(
     "Receivables (1200)",
     bal("1200"),
-    invTotal - paidTotal,
-    "AR is invoiced less received. A gap here means payments were posted that no invoice accounts for.",
+    invTotal - paidTotal - cnTotal,
+    "AR is invoiced, less received, less credited. A gap means something was posted that no document accounts for.",
   );
 
   // --- Cash, bank and gateway clearing ------------------------------------
@@ -129,10 +142,11 @@ async function reconcile(companyId: string, name: string) {
   console.log(
     `\n  P&L from the ledger:  revenue ${fmt(income)} − cost ${fmt(cost)} = ${fmt(income - cost)}`,
   );
+  const netRevenue = invTotal - invTax - (cnTotal - cnTax);
   console.log(
-    `  P&L from the tables:  revenue ${fmt(invTotal - invTax)} − COGS ${fmt(cogs)} − expenses ${fmt(expTotal)} = ${fmt(invTotal - invTax - cogs - expTotal)}`,
+    `  P&L from the tables:  revenue ${fmt(netRevenue)} − COGS ${fmt(cogs)} − expenses ${fmt(expTotal)} = ${fmt(netRevenue - cogs - expTotal)}`,
   );
-  check("Profit", income - cost, invTotal - invTax - cogs - expTotal);
+  check("Profit", income - cost, netRevenue - cogs - expTotal);
 
   // A figure worth printing on its own: allocations vs receipts.
   if (invPaid !== paidTotal) {
