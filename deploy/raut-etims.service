@@ -10,4 +10,7 @@ Type=oneshot
 # right default: an open endpoint that triggers outbound filing to KRA would be
 # a free way to burn a company's rate limit.
 EnvironmentFile=/var/www/raut/platform/.env
-ExecStart=/usr/bin/curl -fsS -m 120 -X POST -H "Authorization: Bearer ${ETIMS_RUNNER_TOKEN}" -H "Host: raut.co.ke" http://127.0.0.1/api/v1/etims/run
+# https, not http://127.0.0.1 with a Host header: nginx answers plain HTTP with
+# a 301 to https, and `curl -f` treats a redirect as success. The timer would
+# have reported healthy forever while never reaching the app at all.
+ExecStart=/usr/bin/curl -fsS --max-time 120 -X POST -H "Authorization: Bearer ${ETIMS_RUNNER_TOKEN}" -H "Content-Type: application/json" https://raut.co.ke/api/v1/etims/run
