@@ -10,6 +10,7 @@ import '../core/outbox.dart';
 import '../core/sync_service.dart';
 import '../data/field_repository.dart';
 import '../theme.dart';
+import 'etims_queue_screen.dart';
 
 /// Sync queue, expense claims, account and diagnostics.
 class MoreScreen extends StatelessWidget {
@@ -122,6 +123,35 @@ class MoreScreen extends StatelessWidget {
 
           const Divider(),
           _SectionLabel('Field'),
+
+          // Only where the company actually files. A rep at a company that
+          // does not use eTIMS should never see a queue that will always be
+          // empty and means nothing to them.
+          if (session.etimsEnabled)
+            FutureBuilder<int>(
+              future: context.read<FieldRepository>().invoicesAwaitingEtims().then(
+                    (rows) => rows.length,
+                  ),
+              builder: (context, snap) {
+                final count = snap.data ?? 0;
+                return ListTile(
+                  leading: Icon(
+                    count > 0 ? Icons.pending_actions_outlined : Icons.verified_outlined,
+                    color: count > 0 ? RautTheme.warning : RautTheme.success,
+                  ),
+                  title: const Text('Awaiting KRA'),
+                  subtitle: Text(
+                    count == 0
+                        ? 'Everything is filed'
+                        : '$count sale${count == 1 ? '' : 's'} not yet a tax invoice',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const EtimsQueueScreen()),
+                  ),
+                );
+              },
+            ),
 
           if (session.canRaiseExpenses)
             ListTile(

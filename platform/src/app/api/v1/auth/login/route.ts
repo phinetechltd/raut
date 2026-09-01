@@ -119,12 +119,26 @@ export async function POST(request: Request) {
     request,
   });
 
+  // Read rather than inferred from the module licence: a company can hold the
+  // licence and still have transmission switched off.
+  const etimsConfig = user.companyId
+    ? await db.etimsConfig.findUnique({
+        where: { companyId: user.companyId },
+        select: { enabled: true, environment: true },
+      })
+    : null;
+
   const licences = user.companyId
     ? await db.companyModule.findMany({
         where: { companyId: user.companyId, enabled: true },
         select: { moduleKey: true },
       })
     : [];
+
+  const etimsState = {
+    enabled: etimsConfig?.enabled ?? false,
+    environment: etimsConfig?.environment ?? "SANDBOX",
+  };
 
   const modules = licences.map((l) => l.moduleKey);
 
@@ -149,8 +163,20 @@ export async function POST(request: Request) {
           currency: user.company.currency,
           latitude: user.company.latitude,
           longitude: user.company.longitude,
+          // The receipt header a POS prints. A tax invoice without the
+          // seller's PIN on it is not one, and the handset has no other way
+          // to learn these.
+          taxPin: user.company.taxPin,
+          address: user.company.address,
+          phone: user.company.phone,
+          email: user.company.email,
         }
       : null,
+    // Whether this company files with KRA, which decides what the POS does at
+    // the moment of sale: wait for a control code before printing, or print
+    // straight away. The app must not guess — a company that does not file
+    // would otherwise wait for a code that is never coming.
+    etims: etimsState,
     modules,
     moduleDetails: modules.map((k) => ({
       key: k,

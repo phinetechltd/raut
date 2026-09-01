@@ -540,6 +540,26 @@ class FieldRepository extends ChangeNotifier {
   Future<int> pendingPhotoCount() =>
       _db.count('pending_photos', where: 'syncedAt IS NULL');
 
+  /// Selling units, grouped by product.
+  ///
+  /// Read in one query rather than per product: a catalogue screen renders
+  /// several hundred rows and a query each would make scrolling stutter on the
+  /// low-end hardware these run on.
+  Future<Map<String, List<ProductVariant>>> variantsByProduct() async {
+    final rows = await _db.query(
+      'product_variants',
+      where: 'active = 1',
+      orderBy: 'unitsPerVariant ASC',
+    );
+
+    final out = <String, List<ProductVariant>>{};
+    for (final r in rows) {
+      final v = ProductVariant.fromRow(r);
+      (out[v.productId] ??= []).add(v);
+    }
+    return out;
+  }
+
   // ── receivables ──────────────────────────────────────────────────────
 
   Future<List<InvoiceSummary>> openInvoices(String customerId) async {
@@ -550,6 +570,57 @@ class FieldRepository extends ChangeNotifier {
       orderBy: 'dueDate ASC',
     );
     return rows.map(InvoiceSummary.fromRow).toList();
+  }
+
+  /// One invoice with its lines, for printing.
+  ///
+  /// Reads the mirror, not the network. A receipt has to reprint at a roadside
+  /// stop with no signal, days after the sale.
+  Future<(InvoiceSummary, List<InvoiceLine>)?> invoiceForPrinting(
+    String invoiceId,
+  ) async {
+    final rows = await _db.query('invoices', where: 'id = ?', whereArgs: [invoiceId]);
+    if (rows.isEmpty) return null;
+
+    final lines = await _db.query(
+      'invoice_lines',
+      where: 'invoiceId = ?',
+      whereArgs: [invoiceId],
+      orderBy: 'id ASC',
+    );
+
+    return (
+      InvoiceSummary.fromRow(rows.first),
+      lines.map(InvoiceLine.fromRow).toList(),
+    );
+  }
+
+  /// Invoices this handset knows about that KRA has not accepted.
+  ///
+  /// Deliberately built from the rep's own mirrored invoices rather than the
+  /// company-wide transmission log: a rep can push a stuck filing but has no
+  /// business reading every sale the company has made.
+  Future<List<InvoiceSummary>> invoicesAwaitingEtims() async {
+    final rows = await _db.query(
+      'invoices',
+      where: "etimsStatus IN ('QUEUED','REJECTED','SUBMITTED')",
+      orderBy: 'issueDate DESC',
+      limit: 50,
+    );
+    return rows.map(InvoiceSummary.fromRow).toList();
+  }
+
+  /// The most recent invoice for a customer, which is what a rep reaches for
+  /// straight after a sale.
+  Future<InvoiceSummary?> latestInvoiceFor(String customerId) async {
+    final rows = await _db.query(
+      'invoices',
+      where: 'customerId = ?',
+      whereArgs: [customerId],
+      orderBy: 'issueDate DESC',
+      limit: 1,
+    );
+    return rows.isEmpty ? null : InvoiceSummary.fromRow(rows.first);
   }
 
   // ── day summary ──────────────────────────────────────────────────────

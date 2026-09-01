@@ -34,6 +34,13 @@ android {
         jvmTarget = JavaVersion.VERSION_11.toString()
     }
 
+    // The Sunmi printer is reached over AIDL. The interface is declared in
+    // src/main/aidl rather than pulled from a vendor jar, so the build has no
+    // binary dependency we cannot check into the repository.
+    buildFeatures {
+        aidl = true
+    }
+
     defaultConfig {
         applicationId = "com.raut.app"
         minSdk = flutter.minSdkVersion

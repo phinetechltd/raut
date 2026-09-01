@@ -90,6 +90,7 @@ model Company {
   etimsConfig       EtimsConfig?
   etimsSubmissions  EtimsSubmission[]
   creditNotes       CreditNote[]
+  productVariants   ProductVariant[]
 
   @@index([status])
 }
@@ -516,6 +517,7 @@ model Product {
   poLines         PurchaseOrderLine[]
   grnLines        GoodsReceiptLine[]
   creditNoteLines CreditNoteLine[]
+  variants        ProductVariant[]
   transferLines   StockTransferLine[]
 
   @@unique([companyId, sku])
@@ -740,19 +742,27 @@ model SalesOrder {
 }
 
 model SalesOrderLine {
-  id             String @id @default(cuid())
-  orderId        String
-  productId      String
+  id          String  @id @default(cuid())
+  orderId     String
+  productId   String
+  /// The selling unit, when the line was sold as one.
+  variantId   String?
+  /// Snapshotted, because renaming "Carton of 12" later must not rewrite an
+  /// invoice that has already been printed and filed with KRA.
+  variantName String?
+
   description    String
   quantity       Int
+  baseQuantity   Int    @default(0)
   fulfilled      Int    @default(0)
   unitPriceCents Int
   discountCents  Int    @default(0)
   taxRateBp      Int    @default(1600)
   lineTotalCents Int
 
-  order   SalesOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  product Product    @relation(fields: [productId], references: [id])
+  order   SalesOrder      @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id])
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
 
   @@index([orderId])
 }
@@ -820,18 +830,29 @@ model Invoice {
 }
 
 model InvoiceLine {
-  id             String @id @default(cuid())
-  invoiceId      String
-  productId      String
+  id          String  @id @default(cuid())
+  invoiceId   String
+  productId   String
+  /// The selling unit, when the line was sold as one.
+  variantId   String?
+  /// Snapshotted, because renaming "Carton of 12" later must not rewrite an
+  /// invoice that has already been printed and filed with KRA.
+  variantName String?
+
   description    String
+  /// Quantity in the unit sold: 2 means two cartons, not twenty-four bottles.
   quantity       Int
+  /// The same line in base units, which is what stock and cost of sales
+  /// move on. Equal to quantity where no variant was used.
+  baseQuantity   Int    @default(0)
   unitPriceCents Int
   discountCents  Int    @default(0)
   taxRateBp      Int    @default(1600)
   lineTotalCents Int
 
-  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
-  product Product @relation(fields: [productId], references: [id])
+  invoice Invoice         @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+  product Product         @relation(fields: [productId], references: [id])
+  variant ProductVariant? @relation(fields: [variantId], references: [id], onDelete: SetNull)
 
   @@index([invoiceId])
 }
@@ -1714,4 +1735,57 @@ model CreditNoteLine {
   product    Product    @relation(fields: [productId], references: [id])
 
   @@index([creditNoteId])
+}
+
+/// A way of selling a product.
+///
+/// A distributor buys cartons and sells cartons, dozens and single bottles.
+/// Modelling those as three products means three stock pools that have to be
+/// kept in step by hand, and they never are. Here there is **one pool, held in
+/// base units**, and a variant is a multiplier onto it: selling two cartons of
+/// twelve takes twenty-four base units off the shelf.
+///
+/// That is what makes stock splitting arithmetic rather than a document. There
+/// is nothing to convert, because the carton was never a separate thing.
+///
+/// Price is per variant, not derived from the base price. A carton is cheaper
+/// per bottle than a bottle is, and deriving it would either lose that or
+/// introduce rounding drift on every line.
+model ProductVariant {
+  id        String @id @default(cuid())
+  companyId String
+  productId String
+
+  /// What a rep sees on the button: "Carton of 12", "Dozen", "Single".
+  name    String
+  sku     String
+  barcode String?
+
+  /// Base units in one of these. 1 is the base unit itself.
+  unitsPerVariant Int @default(1)
+  sellPriceCents  Int @default(0)
+
+  /// The variant offered first on the POS. Exactly one per product should hold
+  /// it; the app falls back to the lowest unitsPerVariant if none does.
+  isDefault Boolean @default(false)
+  active    Boolean @default(true)
+
+  /// eTIMS classifies what appears on the invoice line, which is the variant
+  /// rather than the product. Null falls back to the product's own.
+  etimsItemClassCode String?
+  etimsPackageUnit   String?
+  etimsItemCode      String?
+  etimsStatus        String  @default("UNREGISTERED")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  invoiceLines InvoiceLine[]
+  orderLines   SalesOrderLine[]
+
+  @@unique([companyId, sku])
+  @@index([companyId, productId, active])
 }

@@ -41,11 +41,12 @@ class LocalDb {
     final path = _overridePath ?? p.join(await getDatabasesPath(), 'raut_field.db');
     return openDatabase(
       path,
-      version: 1,
+      version: 3,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
       onCreate: _createSchema,
+      onUpgrade: _upgradeSchema,
     );
   }
 
@@ -55,6 +56,76 @@ class LocalDb {
   Future<void> close() async {
     await _db?.close();
     _db = null;
+  }
+
+  /// Migrates in place rather than recreating.
+  ///
+  /// The obvious shortcut - drop everything and let the next sync refill it -
+  /// would take the **outbox** with it, and the outbox holds sales a rep has
+  /// made but not yet synced. Those exist nowhere else. Mirrored tables are
+  /// disposable; the outbox is not, and one schema change must not be able to
+  /// lose a day of field work.
+  Future<void> _upgradeSchema(Database db, int from, int to) async {
+    if (from < 2) {
+      for (final column in const [
+        'subtotalCents INTEGER',
+        'discountCents INTEGER',
+        'taxCents INTEGER',
+        'etimsStatus TEXT',
+        'etimsControlCode TEXT',
+        'etimsInvoiceNumber TEXT',
+        'etimsSerialNumber TEXT',
+        'etimsQrUrl TEXT',
+      ]) {
+        // Tolerated one at a time: an upgrade interrupted half way through
+        // must not brick the app on the next launch.
+        try {
+          await db.execute('ALTER TABLE invoices ADD COLUMN $column');
+        } catch (_) {}
+      }
+
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS invoice_lines (
+          id TEXT PRIMARY KEY,
+          invoiceId TEXT,
+          productId TEXT,
+          description TEXT,
+          quantity INTEGER,
+          unitPriceCents INTEGER,
+          discountCents INTEGER,
+          taxRateBp INTEGER,
+          lineTotalCents INTEGER
+        )
+      ''');
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_invoice_lines ON invoice_lines(invoiceId)',
+      );
+    }
+
+    if (from < 3) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS product_variants (
+          id TEXT PRIMARY KEY,
+          productId TEXT,
+          name TEXT,
+          sku TEXT,
+          barcode TEXT,
+          unitsPerVariant INTEGER,
+          sellPriceCents INTEGER,
+          isDefault INTEGER,
+          active INTEGER,
+          updatedAt TEXT
+        )
+      ''');
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_variants_product ON product_variants(productId)',
+      );
+      for (final column in const ['variantId TEXT', 'variantName TEXT', 'baseQuantity INTEGER']) {
+        try {
+          await db.execute('ALTER TABLE invoice_lines ADD COLUMN $column');
+        } catch (_) {}
+      }
+    }
   }
 
   Future<void> _createSchema(Database db, int version) async {
@@ -202,11 +273,60 @@ class LocalDb {
         status TEXT,
         issueDate TEXT,
         dueDate TEXT,
+        subtotalCents INTEGER,
+        discountCents INTEGER,
+        taxCents INTEGER,
         totalCents INTEGER,
         paidCents INTEGER,
+        etimsStatus TEXT,
+        etimsControlCode TEXT,
+        etimsInvoiceNumber TEXT,
+        etimsSerialNumber TEXT,
+        etimsQrUrl TEXT,
         updatedAt TEXT
       )
     ''');
+
+    // Selling units. Kept as their own table rather than columns on
+    // products, because one product has several and a rep picks between
+    // them at the counter.
+    await db.execute('''
+      CREATE TABLE product_variants (
+        id TEXT PRIMARY KEY,
+        productId TEXT,
+        name TEXT,
+        sku TEXT,
+        barcode TEXT,
+        unitsPerVariant INTEGER,
+        sellPriceCents INTEGER,
+        isDefault INTEGER,
+        active INTEGER,
+        updatedAt TEXT
+      )
+    ''');
+
+    await db.execute('CREATE INDEX idx_variants_product ON product_variants(productId)');
+
+    // Lines are mirrored, not derived: a receipt has to reprint identically
+    // days later, on a handset that may never see that invoice again.
+    await db.execute('''
+      CREATE TABLE invoice_lines (
+        id TEXT PRIMARY KEY,
+        invoiceId TEXT,
+        productId TEXT,
+        variantId TEXT,
+        variantName TEXT,
+        description TEXT,
+        quantity INTEGER,
+        baseQuantity INTEGER,
+        unitPriceCents INTEGER,
+        discountCents INTEGER,
+        taxRateBp INTEGER,
+        lineTotalCents INTEGER
+      )
+    ''');
+
+    await db.execute('CREATE INDEX idx_invoice_lines ON invoice_lines(invoiceId)');
 
     await db.execute('''
       CREATE TABLE payments (

@@ -8,6 +8,7 @@ import '../core/sync_service.dart';
 import '../data/field_repository.dart';
 import '../models/models.dart';
 import '../theme.dart';
+import 'receipt_screen.dart';
 
 /// Payment collection, offline and through a gateway.
 ///
@@ -479,9 +480,34 @@ class _PaymentScreenState extends State<PaymentScreen> {
                                       : Colors.grey.shade600,
                                 ),
                               ),
-                        trailing: Text(
-                          Money.format(inv.outstandingCents),
-                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(
+                              Money.format(inv.outstandingCents),
+                              style: const TextStyle(fontWeight: FontWeight.w700),
+                            ),
+                            // The receipt is reachable from wherever the
+                            // invoice is, because a rep asked for one is
+                            // standing at the counter, not navigating a menu.
+                            IconButton(
+                              tooltip: 'Receipt',
+                              icon: Icon(
+                                inv.isFiled
+                                    ? Icons.receipt_long_outlined
+                                    : Icons.print_outlined,
+                                size: 20,
+                              ),
+                              onPressed: () => Navigator.of(context).push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) => ReceiptScreen(
+                                    invoiceId: inv.id,
+                                    customerName: widget.customer.name,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
                       ),
                     )

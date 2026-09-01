@@ -7,6 +7,7 @@ import 'core/local_db.dart';
 import 'core/location_service.dart';
 import 'core/outbox.dart';
 import 'core/payments_service.dart';
+import 'core/printer_service.dart';
 import 'core/sync_service.dart';
 import 'data/field_repository.dart';
 import 'screens/home_screen.dart';
@@ -44,6 +45,9 @@ Widget buildRautApp({LocalDb? database, ApiClient? client}) {
       ),
       ChangeNotifierProvider(create: (_) => LocationService(db)),
       ChangeNotifierProvider(create: (_) => PaymentsService(api)),
+      // Probed at startup so the print buttons are correct on the first
+      // receipt of the day rather than after a round trip the rep waits for.
+      ChangeNotifierProvider(create: (_) => PrinterService()..probe()),
     ],
     child: const RautFieldApp(),
   );

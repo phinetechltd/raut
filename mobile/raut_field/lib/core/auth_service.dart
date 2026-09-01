@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import '../models/models.dart';
 import 'api_client.dart';
 import 'config.dart';
 import 'local_db.dart';
@@ -22,6 +23,9 @@ class Session {
     this.branchId,
     this.branchName,
     this.phone,
+    this.company,
+    this.etimsEnabled = false,
+    this.etimsEnvironment = 'SANDBOX',
   });
 
   final String userId;
@@ -36,6 +40,17 @@ class Session {
   final String? branchName;
   final String? phone;
 
+  /// The seller's details for a printed receipt. Null on an older session
+  /// restored from storage, which is why every use is null-guarded.
+  final CompanyInfo? company;
+
+  /// Whether this company files with KRA. Decides what the POS does at the
+  /// moment of sale — wait for a control code, or print straight away. The app
+  /// must not infer it from the module licence: a company can hold the licence
+  /// and still have transmission switched off.
+  final bool etimsEnabled;
+  final String etimsEnvironment;
+
   bool hasModule(String key) => modules.contains(key);
   bool can(String permission) => permissions.contains(permission);
 
@@ -49,6 +64,12 @@ class Session {
 
   String get firstName => name.split(' ').first;
 
+  /// A receipt can only be printed where there is a company header to print.
+  bool get canPrintReceipts => company != null;
+
+  /// Reps push their own stuck filings; they cannot read the company log.
+  bool get canRetryEtims => etimsEnabled && can('etims:submit');
+
   Map<String, dynamic> toJson() => {
         'userId': userId,
         'name': name,
@@ -61,6 +82,9 @@ class Session {
         'branchId': branchId,
         'branchName': branchName,
         'phone': phone,
+        'company': company?.toJson(),
+        'etimsEnabled': etimsEnabled,
+        'etimsEnvironment': etimsEnvironment,
       };
 
   factory Session.fromJson(Map<String, dynamic> json) => Session(
@@ -75,6 +99,11 @@ class Session {
         branchId: json['branchId'] as String?,
         branchName: json['branchName'] as String?,
         phone: json['phone'] as String?,
+        company: json['company'] == null
+            ? null
+            : CompanyInfo.fromJson(json['company'] as Map<String, dynamic>),
+        etimsEnabled: json['etimsEnabled'] as bool? ?? false,
+        etimsEnvironment: json['etimsEnvironment'] as String? ?? 'SANDBOX',
       );
 }
 
@@ -188,6 +217,12 @@ class AuthService extends ChangeNotifier {
         companyName: company['name'] as String,
         modules: (data['modules'] as List).cast<String>(),
         permissions: (data['permissions'] as List? ?? const []).cast<String>(),
+        company: CompanyInfo.fromJson(company),
+        etimsEnabled:
+            (data['etims'] as Map<String, dynamic>?)?['enabled'] as bool? ?? false,
+        etimsEnvironment:
+            (data['etims'] as Map<String, dynamic>?)?['environment'] as String? ??
+                'SANDBOX',
       );
 
       await _persistSession(
@@ -227,6 +262,12 @@ class AuthService extends ChangeNotifier {
         companyName: company['name'] as String,
         modules: (data['modules'] as List).cast<String>(),
         permissions: (data['permissions'] as List? ?? const []).cast<String>(),
+        company: CompanyInfo.fromJson(company),
+        etimsEnabled:
+            (data['etims'] as Map<String, dynamic>?)?['enabled'] as bool? ?? false,
+        etimsEnvironment:
+            (data['etims'] as Map<String, dynamic>?)?['environment'] as String? ??
+                'SANDBOX',
       );
 
       final prefs = await SharedPreferences.getInstance();

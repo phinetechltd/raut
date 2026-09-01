@@ -104,6 +104,7 @@ const ROLES = [
       "/reports/stock-valuation",
       "/reports/trial-balance",
       "/etims/config",
+      "/etims/submissions",
     ],
     // No stock-write rights and no platform reach.
     apiDeny: ["/platform/companies"],

@@ -374,6 +374,11 @@ class SyncService extends ChangeNotifier {
       'taxRateBp', 'categoryId', 'active', 'updatedAt',
     ]);
 
+    await mirror('variants', 'product_variants', const [
+      'id', 'productId', 'name', 'sku', 'barcode', 'unitsPerVariant',
+      'sellPriceCents', 'isDefault', 'active', 'updatedAt',
+    ]);
+
     await mirror('territories', 'territories', const [
       'id', 'name', 'code', 'colour', 'boundary', 'centerLat', 'centerLng',
       'radiusM', 'updatedAt',
@@ -392,8 +397,40 @@ class SyncService extends ChangeNotifier {
 
     await mirror('invoices', 'invoices', const [
       'id', 'number', 'customerId', 'status', 'issueDate', 'dueDate',
-      'totalCents', 'paidCents', 'updatedAt',
+      'subtotalCents', 'discountCents', 'taxCents', 'totalCents', 'paidCents',
+      // The result of filing. Mirrored so a receipt prints with the control
+      // code and QR on it while the handset is offline, which is the only
+      // state a van actually operates in.
+      'etimsStatus', 'etimsControlCode', 'etimsInvoiceNumber',
+      'etimsSerialNumber', 'etimsQrUrl',
+      'updatedAt',
     ]);
+
+    // Lines arrive nested on the invoice rather than as their own entity, so
+    // they are flattened here instead of going through `mirror`.
+    final invoiceRows =
+        (entities['invoices'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    final lineRows = <Map<String, Object?>>[];
+    for (final inv in invoiceRows) {
+      for (final l in (inv['lines'] as List?) ?? const []) {
+        final line = l as Map<String, dynamic>;
+        lineRows.add({
+          'id': line['id'],
+          'invoiceId': inv['id'],
+          'productId': line['productId'],
+          'description': line['description'],
+          'variantId': line['variantId'],
+          'variantName': line['variantName'],
+          'quantity': line['quantity'],
+          'baseQuantity': line['baseQuantity'],
+          'unitPriceCents': line['unitPriceCents'],
+          'discountCents': line['discountCents'],
+          'taxRateBp': line['taxRateBp'],
+          'lineTotalCents': line['lineTotalCents'],
+        });
+      }
+    }
+    if (lineRows.isNotEmpty) await _db.upsertAll('invoice_lines', lineRows);
 
     await mirror('payments', 'payments', const [
       'id', 'number', 'customerId', 'amountCents', 'method', 'reference',
@@ -480,4 +517,18 @@ class SyncService extends ChangeNotifier {
     await prefs.remove(_lastSyncKey);
     _set(const SyncStatus());
   }
+  /// Asks the server to file one invoice with KRA now.
+  ///
+  /// Online-only, and that is not a shortcut: transmission happens on the
+  /// server under the company's own Digitax credentials, which the handset
+  /// never holds and must never hold. With no signal there is nothing to queue
+  /// here — the invoice is already marked for filing server-side and the
+  /// scheduled sweep will pick it up.
+  Future<void> pushEtims(String invoiceId) async {
+    await _api.post('/etims/transmit', {
+      'docType': 'SALE',
+      'docId': invoiceId,
+    });
+  }
+
 }

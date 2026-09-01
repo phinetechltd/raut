@@ -339,20 +339,30 @@ export async function transmitInvoice(
   const items: SaleLine[] = invoice.lines.map((l) => {
     const net = l.lineTotalCents - l.discountCents;
     const tax = Math.round((net * l.taxRateBp) / (10_000 + l.taxRateBp));
+
+    // Filed in **base units**, not in cartons. eTIMS deducts stock from the
+    // item it registered, and that item is the product; sending two cartons
+    // would take two units off KRA's pool while twenty-four left the shelf,
+    // and the difference compounds until a stock take cannot be explained.
+    // The line total is authoritative, so the unit price is derived back from
+    // it rather than the other way round.
+    const units = l.baseQuantity || l.quantity;
+    const unitPrice = units > 0 ? l.lineTotalCents / units / 100 : 0;
+
     return {
       id: l.product.etimsItemCode ?? l.productId,
       itemName: l.product.name,
       itemClassCode: l.product.etimsItemClassCode ?? ctx.config.defaultItemClassCode,
       itemBarCode: l.product.barcode ?? l.product.sku,
       taxTypeCode: l.product.etimsTaxTypeCode ?? taxTypeForRate(l.taxRateBp),
-      quantity: l.quantity,
-      unitPrice: l.unitPriceCents / 100,
+      quantity: units,
+      unitPrice,
       totalAmount: l.lineTotalCents / 100,
       taxableAmount: (net - tax) / 100,
       taxAmount: tax / 100,
       discountAmount: l.discountCents ? l.discountCents / 100 : undefined,
       isStockable: l.product.trackStock,
-      description: l.description,
+      description: l.variantName ? `${l.description} (${l.variantName})` : l.description,
     };
   });
 

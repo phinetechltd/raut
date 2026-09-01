@@ -347,6 +347,11 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "field:self",
     "report:read",
     "creditnote:read",
+    // Submit only, not read. A rep at a counter is the person who discovers a
+    // stuck filing and needs to push it, but the transmission log carries every
+    // customer and amount in the company and is none of their business. Their
+    // pending list is built from the invoices they already sync.
+    "etims:submit",
   ],
 };
 

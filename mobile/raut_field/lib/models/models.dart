@@ -268,56 +268,246 @@ class InvoiceSummary {
     required this.status,
     required this.totalCents,
     required this.paidCents,
+    this.subtotalCents = 0,
+    this.discountCents = 0,
+    this.taxCents = 0,
     this.dueDate,
     this.issueDate,
+    this.etimsStatus,
+    this.etimsControlCode,
+    this.etimsInvoiceNumber,
+    this.etimsSerialNumber,
+    this.etimsQrUrl,
   });
 
   final String id;
   final String number;
   final String customerId;
   final String status;
+  final int subtotalCents;
+  final int discountCents;
+  final int taxCents;
   final int totalCents;
   final int paidCents;
   final DateTime? dueDate;
   final DateTime? issueDate;
 
+  /// NOT_APPLICABLE | QUEUED | SUBMITTED | ACCEPTED | REJECTED
+  final String? etimsStatus;
+  final String? etimsControlCode;
+  final String? etimsInvoiceNumber;
+  final String? etimsSerialNumber;
+  final String? etimsQrUrl;
+
   int get outstandingCents => totalCents - paidCents;
   bool get isOverdue => status == 'OVERDUE';
+
+  /// Only a document KRA has accepted is a tax invoice. The control code is
+  /// checked as well as the status because one without the other is a state
+  /// that should not exist, and printing it as valid would be worse than
+  /// admitting we do not have it.
+  bool get isFiled =>
+      etimsStatus == 'ACCEPTED' && (etimsControlCode?.isNotEmpty ?? false);
+
+  /// Waiting on KRA, or refused by it. Either way the rep owes a reprint.
+  bool get needsFiling =>
+      etimsStatus == 'QUEUED' ||
+      etimsStatus == 'REJECTED' ||
+      etimsStatus == 'SUBMITTED';
 
   factory InvoiceSummary.fromRow(Map<String, Object?> r) => InvoiceSummary(
         id: _str(r['id']),
         number: _str(r['number']),
         customerId: _str(r['customerId']),
         status: _str(r['status']),
+        subtotalCents: _int(r['subtotalCents']),
+        discountCents: _int(r['discountCents']),
+        taxCents: _int(r['taxCents']),
         totalCents: _int(r['totalCents']),
         paidCents: _int(r['paidCents']),
         dueDate: _date(r['dueDate']),
         issueDate: _date(r['issueDate']),
+        etimsStatus: r['etimsStatus'] as String?,
+        etimsControlCode: r['etimsControlCode'] as String?,
+        etimsInvoiceNumber: r['etimsInvoiceNumber'] as String?,
+        etimsSerialNumber: r['etimsSerialNumber'] as String?,
+        etimsQrUrl: r['etimsQrUrl'] as String?,
       );
 }
 
+/// One line on an invoice, mirrored so a receipt can be reprinted offline.
+class InvoiceLine {
+  InvoiceLine({
+    required this.id,
+    required this.invoiceId,
+    required this.productId,
+    required this.description,
+    required this.quantity,
+    required this.unitPriceCents,
+    required this.lineTotalCents,
+    this.discountCents = 0,
+    this.taxRateBp = 1600,
+    this.variantName,
+    this.baseQuantity = 0,
+  });
+
+  final String id;
+  final String invoiceId;
+  final String productId;
+  final String description;
+  final int quantity;
+  final int unitPriceCents;
+  final int discountCents;
+  final int taxRateBp;
+  final int lineTotalCents;
+
+  /// The selling unit as it was at the time of sale, snapshotted server-side.
+  final String? variantName;
+
+  /// The line in base units. Zero on lines written before variants existed.
+  final int baseQuantity;
+
+  factory InvoiceLine.fromRow(Map<String, Object?> r) => InvoiceLine(
+        id: _str(r['id']),
+        invoiceId: _str(r['invoiceId']),
+        productId: _str(r['productId']),
+        description: _str(r['description']),
+        quantity: _int(r['quantity']),
+        unitPriceCents: _int(r['unitPriceCents']),
+        discountCents: _int(r['discountCents']),
+        taxRateBp: _int(r['taxRateBp']),
+        lineTotalCents: _int(r['lineTotalCents']),
+        variantName: r['variantName'] as String?,
+        baseQuantity: _int(r['baseQuantity']),
+      );
+}
+
+/// A way of selling a product.
+///
+/// One product, one stock pool held in base units, and several selling units
+/// on top of it. Two cartons of twelve take twenty-four units off the shelf —
+/// which is the whole of stock splitting, and why nothing has to be converted.
+class ProductVariant {
+  const ProductVariant({
+    required this.id,
+    required this.productId,
+    required this.name,
+    required this.sku,
+    required this.unitsPerVariant,
+    required this.sellPriceCents,
+    this.barcode,
+    this.isDefault = false,
+  });
+
+  final String id;
+  final String productId;
+  final String name;
+  final String sku;
+  final String? barcode;
+  final int unitsPerVariant;
+  final int sellPriceCents;
+  final bool isDefault;
+
+  /// What one base unit works out at when bought this way. Shown so a rep can
+  /// answer "is the carton actually cheaper" without doing it in their head.
+  int get perBaseUnitCents =>
+      unitsPerVariant > 0 ? (sellPriceCents / unitsPerVariant).round() : sellPriceCents;
+
+  factory ProductVariant.fromRow(Map<String, Object?> r) => ProductVariant(
+        id: _str(r['id']),
+        productId: _str(r['productId']),
+        name: _str(r['name']),
+        sku: _str(r['sku']),
+        barcode: r['barcode'] as String?,
+        unitsPerVariant: _int(r['unitsPerVariant']) == 0 ? 1 : _int(r['unitsPerVariant']),
+        sellPriceCents: _int(r['sellPriceCents']),
+        isDefault: _int(r['isDefault']) == 1,
+      );
+}
+
+/// The seller's details, for the top of a receipt.
+///
+/// Comes from the login response rather than being configured on the handset:
+/// a PIN typed into a device by a rep is a PIN that will eventually be typed
+/// in wrong, and it is the one field on the receipt that must be right.
+class CompanyInfo {
+  const CompanyInfo({
+    required this.id,
+    required this.name,
+    this.taxPin,
+    this.address,
+    this.phone,
+    this.email,
+  });
+
+  final String id;
+  final String name;
+  final String? taxPin;
+  final String? address;
+  final String? phone;
+  final String? email;
+
+  factory CompanyInfo.fromJson(Map<String, dynamic> j) => CompanyInfo(
+        id: j['id'] as String? ?? '',
+        name: j['name'] as String? ?? '',
+        taxPin: j['taxPin'] as String?,
+        address: j['address'] as String?,
+        phone: j['phone'] as String?,
+        email: j['email'] as String?,
+      );
+
+  Map<String, Object?> toJson() => {
+        'id': id,
+        'name': name,
+        'taxPin': taxPin,
+        'address': address,
+        'phone': phone,
+        'email': email,
+      };
+}
+
 /// A line being built on the order screen, before it becomes an outbox payload.
+///
+/// `quantity` counts the unit being sold — two cartons is two, not twenty-four.
+/// The server multiplies by the variant to move stock, and doing that
+/// arithmetic here as well would give two places for it to disagree.
 class CartLine {
   CartLine({
     required this.product,
     required this.quantity,
+    this.variant,
     this.discountCents = 0,
   });
 
   final Product product;
+
+  /// The selling unit. Null means the product's base unit, which is what the
+  /// screen used before variants existed.
+  final ProductVariant? variant;
+
   int quantity;
   int discountCents;
 
-  int get grossCents => quantity * product.sellPriceCents;
+  /// Price of one of whatever is being sold.
+  int get unitPriceCents => variant?.sellPriceCents ?? product.sellPriceCents;
+
+  /// What comes off the shelf. The server recomputes this rather than trusting
+  /// it; it is here so the van-stock warning is honest at the point of sale.
+  int get baseQuantity => quantity * (variant?.unitsPerVariant ?? 1);
+
+  String get label => variant == null ? product.name : '${product.name} - ${variant!.name}';
+
+  int get grossCents => quantity * unitPriceCents;
   int get netCents => grossCents - discountCents;
   int get taxCents => (netCents * product.taxRateBp / 10000).round();
   int get totalCents => netCents + taxCents;
 
   Map<String, dynamic> toPayload() => {
         'productId': product.id,
+        if (variant != null) 'variantId': variant!.id,
         'quantity': quantity,
-        'unitPriceCents': product.sellPriceCents,
+        'unitPriceCents': unitPriceCents,
         if (discountCents > 0) 'discountCents': discountCents,
-        'description': product.name,
+        'description': label,
       };
 }

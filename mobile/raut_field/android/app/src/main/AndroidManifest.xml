@@ -70,5 +70,9 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- Android 11+ hides other packages by default, so binding to Sunmi's
+             printer service fails silently without this: bindService returns
+             false and no exception is thrown. -->
+        <package android:name="woyou.aidlservice.jiuiv5" />
     </queries>
 </manifest>

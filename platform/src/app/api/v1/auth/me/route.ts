@@ -20,6 +20,13 @@ export const GET = handler({ allowPlatform: true }, async ({ principal }) => {
 
   const modules = [...principal.enabledModules];
 
+  const etimsConfig = user.companyId
+    ? await db.etimsConfig.findUnique({
+        where: { companyId: user.companyId },
+        select: { enabled: true, environment: true },
+      })
+    : null;
+
   return {
     user: {
       id: user.id,
@@ -39,11 +46,21 @@ export const GET = handler({ allowPlatform: true }, async ({ principal }) => {
           slug: user.company.slug,
           currency: user.company.currency,
           taxPin: user.company.taxPin,
+          // The rest of the receipt header. This endpoint refreshes the
+          // session in the background, so anything the login returns and this
+          // does not gets silently wiped on the next refresh.
+          address: user.company.address,
+          phone: user.company.phone,
+          email: user.company.email,
           latitude: user.company.latitude,
           longitude: user.company.longitude,
           seats: await seatUsage(user.company.id),
         }
       : null,
+    etims: {
+      enabled: etimsConfig?.enabled ?? false,
+      environment: etimsConfig?.environment ?? "SANDBOX",
+    },
     modules,
     moduleDetails: modules.map((k) => ({
       key: k,

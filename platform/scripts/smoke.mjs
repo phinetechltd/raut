@@ -637,6 +637,90 @@ async function main() {
     (csv.headers?.get("content-type") ?? "").includes("text/csv"),
   );
 
+  console.log("\nSelling units");
+
+  const variants = await api(`/products/variants?productId=${productA.id}`, {
+    token: adminToken,
+  });
+  check("Selling units are listed", variants.status === 200);
+
+  const dozen = (variants.json?.data?.variants ?? []).find(
+    (v) => v.unitsPerVariant === 12,
+  );
+  check("A multi-unit selling unit exists", Boolean(dozen), `${dozen?.name}`);
+
+  // The whole of stock splitting: one pool in base units, and a dozen is
+  // twelve of it. If this is wrong the shelf and the invoice disagree, and
+  // nothing downstream notices until a stock take.
+  // Stock only moves when a location is named — consumeForSale returns early
+  // without one, which is correct for an office invoice with no goods behind
+  // it and would otherwise make this assertion pass for the wrong reason.
+  const stockLocation = (await api("/stock", { token: adminToken })).json?.data?.locations?.find(
+    (l) => l.type === "WAREHOUSE",
+  );
+
+  const onHand = async () => {
+    const res = await api("/stock", { token: adminToken });
+    const level = (res.json?.data?.levels ?? []).find((l) => l.productId === productA.id);
+    return level?.totalQuantity ?? 0;
+  };
+  const onHandBefore = await onHand();
+
+  const dozenSale = await api("/invoices", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      customerId: customerForOrder.id,
+      issue: true,
+      locationId: stockLocation?.id,
+      clientUuid: uuid(),
+      lines: [{ productId: productA.id, variantId: dozen?.id, quantity: 2 }],
+    },
+  });
+  check("A dozen can be sold", dozenSale.status === 201 || dozenSale.status === 200);
+
+  const dozenId = dozenSale.json?.data?.invoice?.id ?? dozenSale.json?.data?.id;
+  const dozenInvoice = (await api(`/invoices/${dozenId}`, { token: adminToken })).json?.data
+    ?.invoice;
+  const dozenLine = dozenInvoice?.lines?.[0];
+
+  check("The line is stored in the unit sold", dozenLine?.quantity === 2, `qty ${dozenLine?.quantity}`);
+  check(
+    "And in base units for stock",
+    dozenLine?.baseQuantity === 24,
+    `base ${dozenLine?.baseQuantity}`,
+  );
+  check("The selling unit is snapshotted onto the line", Boolean(dozenLine?.variantName));
+  check(
+    "It is priced per unit sold, not per base unit",
+    dozenLine?.unitPriceCents === dozen?.sellPriceCents,
+    `${dozenLine?.unitPriceCents} vs ${dozen?.sellPriceCents}`,
+  );
+
+  const onHandAfter = await onHand();
+  check(
+    "Two dozen took 24 off the shelf, not 2",
+    onHandBefore - onHandAfter === 24,
+    `${onHandBefore} -> ${onHandAfter}`,
+  );
+
+  // A variant belonging to another product would price one thing and ship
+  // another.
+  const wrongVariant = await api("/invoices", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      customerId: customerForOrder.id,
+      clientUuid: uuid(),
+      lines: [{ productId: productB.id, variantId: dozen?.id, quantity: 1 }],
+    },
+  });
+  check(
+    "A selling unit from another product is refused",
+    wrongVariant.status >= 400,
+    `HTTP ${wrongVariant.status}`,
+  );
+
   console.log("\neTIMS");
 
   const cfg = await api("/etims/config", { token: adminToken });

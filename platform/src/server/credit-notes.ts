@@ -82,11 +82,16 @@ export async function createCreditNote(input: CreateCreditNoteInput) {
     const lineTotal = unitNet * req.quantity;
     const tax = Math.round((lineTotal * line.taxRateBp) / (10_000 + line.taxRateBp));
 
+    // Base units per unit sold, so returning one carton puts twelve bottles
+    // back rather than one.
+    const perUnit = line.quantity > 0 ? (line.baseQuantity || line.quantity) / line.quantity : 1;
+
     return {
       invoiceLineId: line.id,
       productId: line.productId,
       description: line.description,
       quantity: req.quantity,
+      baseQuantity: Math.round(req.quantity * perUnit),
       unitPriceCents: line.unitPriceCents,
       taxRateBp: line.taxRateBp,
       lineTotalCents: lineTotal,
@@ -139,7 +144,7 @@ export async function createCreditNote(input: CreateCreditNoteInput) {
         await returnFromSale(tx, {
           companyId: input.companyId,
           locationId: invoice.locationId,
-          lines: prepared.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+          lines: prepared.map((l) => ({ productId: l.productId, quantity: l.baseQuantity })),
           refType: "CREDIT_NOTE",
           refId: note.id,
           createdById: input.createdById,

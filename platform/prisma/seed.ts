@@ -355,6 +355,40 @@ async function main() {
   });
   console.log("✓ eTIMS (sandbox, console adapter)");
 
+  // Selling units. A distributor buys cartons and sells cartons, dozens and
+  // singles out of the same stock, so these are multipliers onto one pool
+  // rather than three products anyone has to keep in step.
+  //
+  // Priced per unit sold, not derived: a carton is cheaper per bottle than a
+  // bottle is, which is the entire reason a shopkeeper buys one.
+  for (const product of products) {
+    const single = product.sellPriceCents;
+    await db.productVariant.createMany({
+      data: [
+        {
+          companyId: zamar.id,
+          productId: product.id,
+          name: `Single ${product.unit}`,
+          sku: `${product.sku}-1`,
+          unitsPerVariant: 1,
+          sellPriceCents: single,
+          isDefault: true,
+        },
+        {
+          companyId: zamar.id,
+          productId: product.id,
+          name: "Dozen",
+          sku: `${product.sku}-12`,
+          unitsPerVariant: 12,
+          // About 4% off for taking twelve.
+          sellPriceCents: Math.round(single * 12 * 0.96),
+          etimsPackageUnit: "CT",
+        },
+      ],
+    });
+  }
+  console.log("✓ Selling units (single, dozen)");
+
   // Customers from the proposal mockups, with real coordinates.
   const customerSpecs = [
     { code: "CUS-0001", name: "Nairobi Fresh Traders", town: "Nairobi CBD", lat: -1.28472, lng: 36.82361, terr: nboT.id, rep: repJames.id, seg: "A", terms: 30, credit: 500_000_00, type: "WHOLESALE" },

@@ -27,6 +27,12 @@ class _OrderScreenState extends State<OrderScreen> {
   final _note = TextEditingController();
   final Map<String, CartLine> _cart = {};
 
+  /// Selling units by product id.
+  Map<String, List<ProductVariant>> _variants = const {};
+
+  /// Which unit the rep has picked, per product, for this visit.
+  final Map<String, String> _chosenVariant = {};
+
   List<Product> _products = const [];
   bool _loading = true;
   bool _saving = false;
@@ -45,11 +51,14 @@ class _OrderScreenState extends State<OrderScreen> {
   }
 
   Future<void> _loadProducts() async {
-    final products =
-        await context.read<FieldRepository>().products(search: _search.text);
+    final repo = context.read<FieldRepository>();
+    final products = await repo.products(search: _search.text);
+    // Loaded once for the whole catalogue rather than per row.
+    final variants = await repo.variantsByProduct();
     if (!mounted) return;
     setState(() {
       _products = products;
+      _variants = variants;
       _loading = false;
     });
   }
@@ -58,19 +67,44 @@ class _OrderScreenState extends State<OrderScreen> {
   int get _tax => _cart.values.fold(0, (s, l) => s + l.taxCents);
   int get _total => _cart.values.fold(0, (s, l) => s + l.totalCents);
 
-  void _setQuantity(Product product, int quantity) {
+  /// Cart key. A product sold two ways is two lines: a customer taking a
+  /// carton and two singles has bought them at different prices, and merging
+  /// them would silently reprice one.
+  String _key(Product product, ProductVariant? variant) =>
+      variant == null ? product.id : '${product.id}:${variant.id}';
+
+  void _setQuantity(Product product, ProductVariant? variant, int quantity) {
+    final key = _key(product, variant);
     setState(() {
       if (quantity <= 0) {
-        _cart.remove(product.id);
+        _cart.remove(key);
       } else {
-        final existing = _cart[product.id];
+        final existing = _cart[key];
         if (existing != null) {
           existing.quantity = quantity;
         } else {
-          _cart[product.id] = CartLine(product: product, quantity: quantity);
+          _cart[key] = CartLine(product: product, variant: variant, quantity: quantity);
         }
       }
     });
+  }
+
+  /// Which selling unit is showing for a product. Defaults to the one marked
+  /// default, then to the smallest, so a rep who never touches the selector
+  /// still sells singles rather than whatever the query returned first.
+  ProductVariant? _selected(Product product) {
+    final options = _variants[product.id] ?? const <ProductVariant>[];
+    if (options.isEmpty) return null;
+    final chosen = _chosenVariant[product.id];
+    if (chosen != null) {
+      for (final v in options) {
+        if (v.id == chosen) return v;
+      }
+    }
+    for (final v in options) {
+      if (v.isDefault) return v;
+    }
+    return options.first;
   }
 
   Future<void> _save() async {
@@ -198,11 +232,21 @@ class _OrderScreenState extends State<OrderScreen> {
                           separatorBuilder: (_, __) => const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final product = _products[index];
-                            final line = _cart[product.id];
+                            final variant = _selected(product);
+                            final line = _cart[_key(product, variant)];
                             return _ProductRow(
                               product: product,
+                              variants: _variants[product.id] ?? const [],
+                              selected: variant,
                               quantity: line?.quantity ?? 0,
-                              onChanged: (q) => _setQuantity(product, q),
+                              onVariantChanged: (v) => setState(() {
+                                if (v == null) {
+                                  _chosenVariant.remove(product.id);
+                                } else {
+                                  _chosenVariant[product.id] = v.id;
+                                }
+                              }),
+                              onChanged: (q) => _setQuantity(product, variant, q),
                             );
                           },
                         ),
@@ -264,18 +308,29 @@ class _OrderScreenState extends State<OrderScreen> {
 class _ProductRow extends StatelessWidget {
   const _ProductRow({
     required this.product,
+    required this.variants,
+    required this.selected,
     required this.quantity,
     required this.onChanged,
+    required this.onVariantChanged,
   });
 
   final Product product;
+  final List<ProductVariant> variants;
+  final ProductVariant? selected;
   final int quantity;
   final ValueChanged<int> onChanged;
+  final ValueChanged<ProductVariant?> onVariantChanged;
 
   @override
   Widget build(BuildContext context) {
     final van = product.vanQuantity;
-    final short = van != null && quantity > van;
+    final perUnit = selected?.unitsPerVariant ?? 1;
+    // Compared in base units. Two cartons of twelve against a van holding
+    // twenty is short, and comparing 2 against 20 would say it was fine.
+    final short = van != null && quantity * perUnit > van;
+    final price = selected?.sellPriceCents ?? product.sellPriceCents;
+    final unitLabel = selected?.name ?? product.unit;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -293,7 +348,7 @@ class _ProductRow extends StatelessWidget {
                 Row(
                   children: [
                     Text(
-                      '${Money.format(product.sellPriceCents)} / ${product.unit}',
+                      '${Money.format(price)} / $unitLabel',
                       style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
                     ),
                     if (van != null) ...[
@@ -317,6 +372,45 @@ class _ProductRow extends StatelessWidget {
                     'More than you are carrying — it will still be ordered',
                     style: TextStyle(fontSize: 11, color: RautTheme.warning),
                   ),
+
+                // Only where there is a choice to make. A product sold one way
+                // does not need a selector that has one option in it.
+                if (variants.length > 1) ...[
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    height: 32,
+                    child: ListView.separated(
+                      scrollDirection: Axis.horizontal,
+                      itemCount: variants.length,
+                      separatorBuilder: (_, __) => const SizedBox(width: 6),
+                      itemBuilder: (context, i) {
+                        final v = variants[i];
+                        final on = v.id == selected?.id;
+                        return ChoiceChip(
+                          label: Text(
+                            v.unitsPerVariant == 1
+                                ? v.name
+                                : '${v.name} (${v.unitsPerVariant})',
+                            style: const TextStyle(fontSize: 11.5),
+                          ),
+                          selected: on,
+                          visualDensity: VisualDensity.compact,
+                          onSelected: (_) => onVariantChanged(v),
+                        );
+                      },
+                    ),
+                  ),
+                  if (selected != null && selected!.unitsPerVariant > 1)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text(
+                        // The number a shopkeeper actually wants: what one
+                        // bottle costs if they take the whole dozen.
+                        '${Money.format(selected!.perBaseUnitCents)} per ${product.unit}',
+                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                      ),
+                    ),
+                ],
               ],
             ),
           ),

@@ -21,7 +21,13 @@ import { queueInvoice } from "./etims";
 
 export interface DraftLine {
   productId: string;
+  /** Quantity in the unit being sold — cartons, not bottles. */
   quantity: number;
+  /**
+   * The selling unit. Omitted means the base unit, which is what every caller
+   * written before variants existed sends.
+   */
+  variantId?: string | null;
   unitPriceCents?: number;
   discountCents?: number;
   description?: string;
@@ -36,20 +42,54 @@ async function resolveLines(companyId: string, lines: DraftLine[]) {
   });
   const byId = new Map(products.map((p) => [p.id, p]));
 
+  // Variants are looked up scoped to the company, so an id from another tenant
+  // resolves to nothing and is rejected rather than silently priced.
+  const variantIds = lines
+    .map((l) => l.variantId)
+    .filter((v): v is string => typeof v === "string" && v.length > 0);
+  const variants = variantIds.length
+    ? await db.productVariant.findMany({ where: { companyId, id: { in: variantIds } } })
+    : [];
+  const variantById = new Map(variants.map((v) => [v.id, v]));
+
   return lines.map((line) => {
     const product = byId.get(line.productId);
     if (!product) throw new Error(`Unknown product ${line.productId}`);
     if (line.quantity <= 0) throw new Error(`Quantity must be positive for ${product.name}`);
 
-    const unitPriceCents = line.unitPriceCents ?? product.sellPriceCents;
+    const variant = line.variantId ? variantById.get(line.variantId) : undefined;
+    if (line.variantId && !variant) {
+      throw new Error(`Unknown selling unit for ${product.name}`);
+    }
+    if (variant && variant.productId !== product.id) {
+      // A variant of a different product would price one thing and take another
+      // off the shelf.
+      throw new Error(`That selling unit does not belong to ${product.name}`);
+    }
+
+    // Price per unit sold. A carton has its own price rather than twelve times
+    // a bottle, because it is cheaper by the carton and deriving it would both
+    // lose that and round badly.
+    const unitPriceCents =
+      line.unitPriceCents ?? variant?.sellPriceCents ?? product.sellPriceCents;
     const discountCents = line.discountCents ?? 0;
     const taxRateBp = product.taxRateBp;
     const totals = computeLine({ quantity: line.quantity, unitPriceCents, discountCents, taxRateBp });
 
+    // Stock and cost of sales move in base units. This multiplication is the
+    // whole of "stock splitting": there is one pool, and a carton is twelve of
+    // it, so nothing has to be converted.
+    const perVariant = variant?.unitsPerVariant ?? 1;
+
     return {
       productId: product.id,
-      description: line.description ?? product.name,
+      variantId: variant?.id ?? null,
+      // Snapshotted: renaming the variant later must not rewrite an invoice
+      // that has been printed and filed.
+      variantName: variant?.name ?? null,
+      description: line.description ?? (variant ? `${product.name} - ${variant.name}` : product.name),
       quantity: line.quantity,
+      baseQuantity: line.quantity * perVariant,
       unitPriceCents,
       discountCents,
       taxRateBp,
@@ -199,7 +239,13 @@ export async function createInvoice(input: CreateInvoiceInput) {
       await consumeForSale(tx, {
         companyId: input.companyId,
         locationId: input.locationId ?? null,
-        lines: created.lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+        // baseQuantity, not quantity: two cartons of twelve take twenty-four
+        // units off the shelf. Falling back to quantity keeps lines written
+        // before variants existed correct.
+        lines: created.lines.map((l) => ({
+          productId: l.productId,
+          quantity: l.baseQuantity || l.quantity,
+        })),
         refType: "INVOICE",
         refId: created.id,
         createdById: input.createdById,
@@ -256,7 +302,10 @@ export async function issueInvoice(invoiceId: string, userId: string) {
     await consumeForSale(tx, {
       companyId: invoice.companyId,
       locationId: invoice.locationId,
-      lines: invoice.lines.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+      lines: invoice.lines.map((l) => ({
+        productId: l.productId,
+        quantity: l.baseQuantity || l.quantity,
+      })),
       refType: "INVOICE",
       refId: invoice.id,
       createdById: userId,

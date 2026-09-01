@@ -32,6 +32,8 @@ export const dynamic = "force-dynamic";
 
 const lineSchema = z.object({
   productId: z.string(),
+  /// The selling unit, so a carton sold in the field stays a carton.
+  variantId: z.string().optional(),
   quantity: z.number().int().positive(),
   unitPriceCents: z.number().int().nonnegative().optional(),
   discountCents: z.number().int().nonnegative().optional(),

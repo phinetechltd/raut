@@ -48,6 +48,7 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
   const [
     customers,
     products,
+    variants,
     territories,
     stock,
     visits,
@@ -72,6 +73,17 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
         id: true, sku: true, name: true, unit: true, unitsPerPack: true,
         barcode: true, sellPriceCents: true, taxRateBp: true,
         categoryId: true, active: true, imageUrl: true, updatedAt: true,
+      },
+    }),
+
+    // Selling units. The POS needs these offline or a rep cannot sell a carton
+    // in a shop with no signal, which is most shops.
+    db.productVariant.findMany({
+      where: { companyId, active: true, ...(newer ? { updatedAt: newer } : {}) },
+      select: {
+        id: true, productId: true, name: true, sku: true, barcode: true,
+        unitsPerVariant: true, sellPriceCents: true, isDefault: true,
+        active: true, updatedAt: true,
       },
     }),
 
@@ -208,6 +220,7 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
     entities: {
       customers,
       products,
+      variants,
       territories,
       stock,
       visits,
