@@ -432,6 +432,37 @@ class SyncService extends ChangeNotifier {
     }
     if (lineRows.isNotEmpty) await _db.upsertAll('invoice_lines', lineRows);
 
+    await mirror('creditNotes', 'credit_notes', const [
+      'id', 'number', 'invoiceId', 'customerId', 'status', 'reason',
+      'issueDate', 'subtotalCents', 'taxCents', 'totalCents', 'restock',
+      'etimsStatus', 'etimsControlCode', 'etimsInvoiceNumber',
+      'etimsSerialNumber', 'etimsQrUrl', 'clientUuid', 'updatedAt',
+    ]);
+
+    // Nested on the note, like invoice lines.
+    final noteRows =
+        (entities['creditNotes'] as List?)?.cast<Map<String, dynamic>>() ?? const [];
+    final noteLines = <Map<String, Object?>>[];
+    for (final n in noteRows) {
+      for (final l in (n['lines'] as List?) ?? const []) {
+        final line = l as Map<String, dynamic>;
+        noteLines.add({
+          'id': line['id'],
+          'creditNoteId': n['id'],
+          'invoiceLineId': line['invoiceLineId'],
+          'productId': line['productId'],
+          'variantName': line['variantName'],
+          'description': line['description'],
+          'quantity': line['quantity'],
+          'baseQuantity': line['baseQuantity'],
+          'unitPriceCents': line['unitPriceCents'],
+          'taxRateBp': line['taxRateBp'],
+          'lineTotalCents': line['lineTotalCents'],
+        });
+      }
+    }
+    if (noteLines.isNotEmpty) await _db.upsertAll('credit_note_lines', noteLines);
+
     await mirror('payments', 'payments', const [
       'id', 'number', 'customerId', 'amountCents', 'method', 'reference',
       'paidAt', 'updatedAt', 'clientUuid',
@@ -524,6 +555,37 @@ class SyncService extends ChangeNotifier {
   /// never holds and must never hold. With no signal there is nothing to queue
   /// here — the invoice is already marked for filing server-side and the
   /// scheduled sweep will pick it up.
+  /// Raises a sales return against an invoice.
+  ///
+  /// Online-only, deliberately. A credit note has to reference the KRA sale id
+  /// of the original invoice, which only the server holds, and it moves the
+  /// customer's balance and the ledger. Queueing one offline would let a rep
+  /// promise a credit the server may refuse — the goods were already returned
+  /// on an earlier note, or the invoice was never issued.
+  Future<Map<String, dynamic>> raiseReturn({
+    required String invoiceId,
+    required String reason,
+    required bool restock,
+    required List<Map<String, Object?>> lines,
+    required String clientUuid,
+  }) async {
+    return _api.post('/credit-notes', {
+      'invoiceId': invoiceId,
+      'reason': reason,
+      'restock': restock,
+      'clientUuid': clientUuid,
+      'lines': lines,
+    });
+  }
+
+  /// Pushes one document at KRA now.
+  Future<void> pushReturn(String creditNoteId) async {
+    await _api.post('/etims/transmit', {
+      'docType': 'CREDIT_NOTE',
+      'docId': creditNoteId,
+    });
+  }
+
   Future<void> pushEtims(String invoiceId) async {
     await _api.post('/etims/transmit', {
       'docType': 'SALE',

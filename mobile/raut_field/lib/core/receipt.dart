@@ -2,6 +2,47 @@ import 'money.dart';
 import 'printer_service.dart';
 import '../models/models.dart';
 
+/// One line as it appears on paper.
+///
+/// Invoices and credit notes are mapped into this rather than the receipt
+/// knowing about either. Two layouts would drift, and the day they do is the
+/// day a return prints differently from the sale it reverses.
+class ReceiptLine {
+  const ReceiptLine({
+    required this.description,
+    required this.quantity,
+    required this.unitPriceCents,
+    required this.lineTotalCents,
+    this.variantName,
+  });
+
+  final String description;
+  final int quantity;
+  final int unitPriceCents;
+  final int lineTotalCents;
+  final String? variantName;
+
+  /// "Detergent 10kg - Dozen", so the customer can see what unit was sold.
+  String get label =>
+      variantName == null || variantName!.isEmpty ? description : '$description - $variantName';
+
+  factory ReceiptLine.fromInvoice(InvoiceLine l) => ReceiptLine(
+        description: l.description,
+        quantity: l.quantity,
+        unitPriceCents: l.unitPriceCents,
+        lineTotalCents: l.lineTotalCents,
+        variantName: l.variantName,
+      );
+
+  factory ReceiptLine.fromRow(Map<String, Object?> r) => ReceiptLine(
+        description: (r['description'] as String?) ?? '',
+        quantity: (r['quantity'] as num?)?.toInt() ?? 0,
+        unitPriceCents: (r['unitPriceCents'] as num?)?.toInt() ?? 0,
+        lineTotalCents: (r['lineTotalCents'] as num?)?.toInt() ?? 0,
+        variantName: r['variantName'] as String?,
+      );
+}
+
 /// What goes on the paper.
 ///
 /// One source for the printed receipt and the on-screen preview, so a rep can
@@ -13,20 +54,67 @@ import '../models/models.dart';
 /// "TAX INVOICE" over a document that was never filed would be a small lie
 /// with a large consequence — it is the buyer who gets refused the input VAT,
 /// months later, with our paper in their hand.
+///
+/// A **sales return** prints through the same builder with its own control
+/// code. It is its own document, not an annotation on the invoice: the original
+/// sale happened, KRA has it, and it is not being rewritten.
 class Receipt {
-  const Receipt({
+  /// A sale.
+  Receipt({
     required this.company,
-    required this.invoice,
-    required this.lines,
+    required InvoiceSummary invoice,
+    required List<InvoiceLine> lines,
     this.customerName,
     this.customerPin,
     this.servedBy,
     this.copy = false,
-  });
+  })  : isReturn = false,
+        number = invoice.number,
+        date = invoice.issueDate,
+        subtotalCents = invoice.subtotalCents,
+        discountCents = invoice.discountCents,
+        taxCents = invoice.taxCents,
+        totalCents = invoice.totalCents,
+        paidCents = invoice.paidCents,
+        outstandingCents = invoice.outstandingCents,
+        etimsStatus = invoice.etimsStatus,
+        etimsControlCode = invoice.etimsControlCode,
+        etimsInvoiceNumber = invoice.etimsInvoiceNumber,
+        etimsSerialNumber = invoice.etimsSerialNumber,
+        etimsQrUrl = invoice.etimsQrUrl,
+        reference = null,
+        reason = null,
+        lines = lines.map(ReceiptLine.fromInvoice).toList();
+
+  /// A return, credited against an invoice.
+  Receipt.forReturn({
+    required this.company,
+    required CreditNoteSummary note,
+    required this.lines,
+    required String invoiceNumber,
+    this.customerName,
+    this.customerPin,
+    this.servedBy,
+    this.copy = false,
+  })  : isReturn = true,
+        number = note.number,
+        date = note.issueDate,
+        subtotalCents = note.subtotalCents,
+        discountCents = 0,
+        taxCents = note.taxCents,
+        totalCents = note.totalCents,
+        paidCents = 0,
+        outstandingCents = 0,
+        etimsStatus = note.etimsStatus,
+        etimsControlCode = note.etimsControlCode,
+        etimsInvoiceNumber = note.etimsInvoiceNumber,
+        etimsSerialNumber = note.etimsSerialNumber,
+        etimsQrUrl = note.etimsQrUrl,
+        reference = invoiceNumber,
+        reason = note.reason;
 
   final CompanyInfo company;
-  final InvoiceSummary invoice;
-  final List<InvoiceLine> lines;
+  final List<ReceiptLine> lines;
   final String? customerName;
   final String? customerPin;
   final String? servedBy;
@@ -35,16 +123,38 @@ class Receipt {
   /// customer ends up believing they were charged twice.
   final bool copy;
 
+  final bool isReturn;
+  final String number;
+  final DateTime? date;
+  final int subtotalCents;
+  final int discountCents;
+  final int taxCents;
+  final int totalCents;
+  final int paidCents;
+  final int outstandingCents;
+
+  /// The invoice this return credits. Null on a sale.
+  final String? reference;
+  final String? reason;
+
+  final String? etimsStatus;
+  final String? etimsControlCode;
+  final String? etimsInvoiceNumber;
+  final String? etimsSerialNumber;
+  final String? etimsQrUrl;
+
   bool get isTaxInvoice =>
-      invoice.etimsStatus == 'ACCEPTED' &&
-      (invoice.etimsControlCode?.isNotEmpty ?? false);
+      etimsStatus == 'ACCEPTED' && (etimsControlCode?.isNotEmpty ?? false);
 
   /// 58mm paper at the default font is 32 characters. Everything below is laid
   /// out against that, because a column that overruns wraps and destroys the
   /// alignment of every row after it.
   static const int width = 32;
 
-  String get heading => isTaxInvoice ? 'TAX INVOICE' : 'SALES RECEIPT';
+  String get heading {
+    if (isReturn) return isTaxInvoice ? 'CREDIT NOTE' : 'RETURN NOTE';
+    return isTaxInvoice ? 'TAX INVOICE' : 'SALES RECEIPT';
+  }
 
   List<Map<String, Object?>> build() {
     final ops = <Map<String, Object?>>[];
@@ -67,10 +177,15 @@ class Receipt {
     }
     ops.add(Op.text(_rule(), size: 20));
 
-    ops.add(Op.columns(['No.', invoice.number], const [10, 22],
-        aligns: const [0, 2]));
-    ops.add(Op.columns(['Date', _stamp(invoice.issueDate)], const [10, 22],
-        aligns: const [0, 2]));
+    ops.add(Op.columns(['No.', number], const [10, 22], aligns: const [0, 2]));
+    ops.add(Op.columns(['Date', _stamp(date)], const [10, 22], aligns: const [0, 2]));
+
+    // A return without the invoice it credits is unusable to anyone: the
+    // customer cannot match it, and neither can an auditor.
+    if (reference != null && reference!.isNotEmpty) {
+      ops.add(Op.columns(['Against', reference!], const [10, 22], aligns: const [0, 2]));
+    }
+
     if (customerName != null && customerName!.isNotEmpty) {
       // A trading name rarely fits the 22 columns left beside the label, and a
       // receipt that reads "Rift Valley Distributo" looks like a fault rather
@@ -94,11 +209,15 @@ class Receipt {
 
     ops.add(Op.text(_rule(), size: 20));
 
+    if (isReturn) {
+      ops.add(Op.text('RETURNED', size: 22, bold: true));
+    }
+
     for (final l in lines) {
       // Description on its own line: product names run past 32 characters far
       // more often than they fit, and truncating them to keep a single row
       // makes the receipt useless for identifying what was bought.
-      ops.add(Op.text(l.description, size: 22));
+      ops.add(Op.text(l.label, size: 22));
       ops.add(Op.columns(
         [
           '${l.quantity} x ${Money.format(l.unitPriceCents, decimals: true)}',
@@ -109,39 +228,40 @@ class Receipt {
       ));
     }
 
+    if (isReturn && reason != null && reason!.isNotEmpty) {
+      ops.add(Op.text('Reason: $reason', size: 20));
+    }
+
     ops.add(Op.text(_rule(), size: 20));
 
-    ops.add(_amount('Subtotal', invoice.subtotalCents));
-    if (invoice.discountCents > 0) {
-      ops.add(_amount('Discount', -invoice.discountCents));
-    }
-    ops.add(_amount('VAT', invoice.taxCents));
+    ops.add(_amount('Subtotal', subtotalCents));
+    if (discountCents > 0) ops.add(_amount('Discount', -discountCents));
+    ops.add(_amount('VAT', taxCents));
     ops.add(Op.columns(
-      ['TOTAL', Money.format(invoice.totalCents, decimals: true)],
+      [isReturn ? 'CREDITED' : 'TOTAL', Money.format(totalCents, decimals: true)],
       const [16, 16],
       aligns: const [0, 2],
     ));
-    if (invoice.paidCents > 0) {
-      ops.add(_amount('Paid', invoice.paidCents));
-      ops.add(_amount('Balance', invoice.outstandingCents));
+    if (!isReturn && paidCents > 0) {
+      ops.add(_amount('Paid', paidCents));
+      ops.add(_amount('Balance', outstandingCents));
     }
 
     ops.add(Op.text(_rule(), size: 20));
 
     if (isTaxInvoice) {
       ops.add(Op.text('CONTROL CODE', align: 'center', size: 20));
-      ops.add(Op.text(invoice.etimsControlCode!,
-          align: 'center', size: 26, bold: true));
-      if (invoice.etimsInvoiceNumber != null) {
-        ops.add(Op.text('KRA Invoice No: ${invoice.etimsInvoiceNumber}',
+      ops.add(Op.text(etimsControlCode!, align: 'center', size: 26, bold: true));
+      if (etimsInvoiceNumber != null) {
+        ops.add(Op.text('KRA Invoice No: $etimsInvoiceNumber',
             align: 'center', size: 20));
       }
-      if (invoice.etimsSerialNumber != null) {
-        ops.add(Op.text(invoice.etimsSerialNumber!, align: 'center', size: 18));
+      if (etimsSerialNumber != null) {
+        ops.add(Op.text(etimsSerialNumber!, align: 'center', size: 18));
       }
-      if (invoice.etimsQrUrl != null && invoice.etimsQrUrl!.isNotEmpty) {
+      if (etimsQrUrl != null && etimsQrUrl!.isNotEmpty) {
         ops.add(Op.feed());
-        ops.add(Op.qr(invoice.etimsQrUrl!));
+        ops.add(Op.qr(etimsQrUrl!));
       }
       ops.add(Op.feed());
       ops.add(Op.text('Scan to verify with KRA', align: 'center', size: 18));
@@ -149,11 +269,18 @@ class Receipt {
       // Said plainly rather than hidden. The customer needs to know this is
       // not yet the document they can claim VAT against, and the rep needs to
       // know a reprint is owed.
-      ops.add(Op.text('NOT A TAX INVOICE', align: 'center', size: 24, bold: true));
       ops.add(Op.text(
-        invoice.etimsStatus == 'REJECTED'
-            ? 'KRA rejected this sale. Ask the office.'
-            : 'Awaiting KRA. A tax invoice follows.',
+        isReturn ? 'NOT A CREDIT NOTE' : 'NOT A TAX INVOICE',
+        align: 'center',
+        size: 24,
+        bold: true,
+      ));
+      ops.add(Op.text(
+        etimsStatus == 'REJECTED'
+            ? 'KRA rejected this. Ask the office.'
+            : isReturn
+                ? 'Awaiting KRA. A credit note follows.'
+                : 'Awaiting KRA. A tax invoice follows.',
         align: 'center',
         size: 18,
       ));

@@ -595,6 +595,82 @@ class FieldRepository extends ChangeNotifier {
     );
   }
 
+  /// The invoice number behind an id, for a credit note that has to name the
+  /// sale it credits. A return without it is unusable to the customer and to an
+  /// auditor alike.
+  Future<String?> invoiceNumberFor(String invoiceId) async {
+    final rows = await _db.query('invoices', where: 'id = ?', whereArgs: [invoiceId]);
+    return rows.isEmpty ? null : rows.first['number'] as String?;
+  }
+
+  /// Returns raised against one invoice, so a second credit cannot be raised
+  /// for goods already credited.
+  Future<List<CreditNoteSummary>> creditNotesFor(String invoiceId) async {
+    final rows = await _db.query(
+      'credit_notes',
+      where: 'invoiceId = ?',
+      whereArgs: [invoiceId],
+      orderBy: 'issueDate DESC',
+    );
+    return rows.map(CreditNoteSummary.fromRow).toList();
+  }
+
+  /// One return with its lines, for printing.
+  Future<(CreditNoteSummary, List<Map<String, Object?>>)?> creditNoteForPrinting(
+    String noteId,
+  ) async {
+    final rows = await _db.query('credit_notes', where: 'id = ?', whereArgs: [noteId]);
+    if (rows.isEmpty) return null;
+
+    final lines = await _db.query(
+      'credit_note_lines',
+      where: 'creditNoteId = ?',
+      whereArgs: [noteId],
+      orderBy: 'id ASC',
+    );
+    return (CreditNoteSummary.fromRow(rows.first), lines);
+  }
+
+  /// How much of each invoice line has already been credited.
+  ///
+  /// Read from the handset rather than asked of the server, because a rep
+  /// taking a return in a shop with no signal still must not over-credit. The
+  /// server refuses it either way; this stops the rep finding out at the counter.
+  Future<Map<String, int>> creditedQuantities(String invoiceId) async {
+    final notes = await _db.query(
+      'credit_notes',
+      where: "invoiceId = ? AND status != 'CANCELLED'",
+      whereArgs: [invoiceId],
+    );
+    if (notes.isEmpty) return const {};
+
+    final out = <String, int>{};
+    for (final n in notes) {
+      final lines = await _db.query(
+        'credit_note_lines',
+        where: 'creditNoteId = ?',
+        whereArgs: [n['id']],
+      );
+      for (final l in lines) {
+        final ref = l['invoiceLineId'] as String?;
+        if (ref == null) continue;
+        out[ref] = (out[ref] ?? 0) + ((l['quantity'] as num?)?.toInt() ?? 0);
+      }
+    }
+    return out;
+  }
+
+  /// Returns on this handset that KRA has not accepted.
+  Future<List<CreditNoteSummary>> returnsAwaitingEtims() async {
+    final rows = await _db.query(
+      'credit_notes',
+      where: "etimsStatus IN ('QUEUED','REJECTED','SUBMITTED')",
+      orderBy: 'issueDate DESC',
+      limit: 50,
+    );
+    return rows.map(CreditNoteSummary.fromRow).toList();
+  }
+
   /// Invoices this handset knows about that KRA has not accepted.
   ///
   /// Deliberately built from the rep's own mirrored invoices rather than the

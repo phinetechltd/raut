@@ -804,6 +804,59 @@ async function main() {
   const tbAfter = await api("/reports/trial-balance", { token: adminToken });
   check("The books still balance after a credit note", tbAfter.json?.data?.balanced === true);
 
+  // A return of a multi-unit line. The sale was filed in base units, so the
+  // credit has to be too — crediting two cartons against a sale KRA recorded as
+  // twenty-four bottles leaves twenty-two sold on their ledger for ever, and
+  // nothing on our side would ever show it.
+  const dozenInvoiceLine = dozenInvoice?.lines?.[0];
+  const returnNote = await api("/credit-notes", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      invoiceId: dozenId,
+      reason: "Customer returned one dozen",
+      restock: true,
+      lines: [{ invoiceLineId: dozenInvoiceLine?.id, quantity: 1 }],
+    },
+  });
+  check("A dozen can be returned", returnNote.status === 200 || returnNote.status === 201);
+
+  const noteId = returnNote.json?.data?.creditNote?.id;
+  const filedReturn = (await api("/etims/submissions", { token: adminToken })).json?.data?.rows
+    ?.find((r) => r.docType === "CREDIT_NOTE" && r.docId === noteId);
+
+  check("The return was filed with KRA", Boolean(filedReturn), `status ${filedReturn?.status}`);
+
+  const returnPayload = filedReturn?.request ? JSON.parse(filedReturn.request) : null;
+  check(
+    "It credits 12 base units, not 1 dozen",
+    returnPayload?.items?.[0]?.quantity === 12,
+    `quantity ${returnPayload?.items?.[0]?.quantity}`,
+  );
+  check(
+    "It references the original sale",
+    Boolean(returnPayload?.sale_id),
+    `${returnPayload?.sale_id}`,
+  );
+
+  // Twelve back on the shelf, not one.
+  const onHandAfterReturn = await onHand();
+  check(
+    "A returned dozen puts 12 back",
+    onHandAfterReturn - onHandAfter === 12,
+    `${onHandAfter} -> ${onHandAfterReturn}`,
+  );
+
+  // And the reversal has to move the books, not just the document.
+  const tbReturn = await api("/reports/trial-balance", { token: adminToken });
+  check("Still balanced after the return", tbReturn.json?.data?.balanced === true);
+  const returns = (tbReturn.json?.data?.rows ?? []).find((r) => r.code === "4100");
+  check(
+    "It lands in sales returns, not netted off sales",
+    (returns?.debitCents ?? 0) > 0,
+    `4100 debit ${returns?.debitCents}`,
+  );
+
   // The switch. Turning eTIMS off must never stop a company trading: the sale
   // still completes, the books still move, and nothing is queued. A tax
   // integration that can take the till down is worse than no integration.

@@ -89,6 +89,8 @@ export async function createCreditNote(input: CreateCreditNoteInput) {
     return {
       invoiceLineId: line.id,
       productId: line.productId,
+      variantId: line.variantId,
+      variantName: line.variantName,
       description: line.description,
       quantity: req.quantity,
       baseQuantity: Math.round(req.quantity * perUnit),
@@ -124,8 +126,11 @@ export async function createCreditNote(input: CreateCreditNoteInput) {
             create: prepared.map((l) => ({
               invoiceLineId: l.invoiceLineId,
               productId: l.productId,
+              variantId: l.variantId,
+              variantName: l.variantName,
               description: l.description,
               quantity: l.quantity,
+              baseQuantity: l.baseQuantity,
               unitPriceCents: l.unitPriceCents,
               taxRateBp: l.taxRateBp,
               lineTotalCents: l.lineTotalCents,

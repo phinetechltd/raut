@@ -167,6 +167,93 @@ void main() {
     });
   });
 
+  group('A return prints as its own document', () {
+    CreditNoteSummary note({String? etimsStatus, String? controlCode}) =>
+        CreditNoteSummary(
+          id: 'cn1',
+          number: 'CRN-0001',
+          invoiceId: 'inv1',
+          customerId: 'cus1',
+          status: 'ISSUED',
+          reason: 'Damaged in transit',
+          subtotalCents: 125000,
+          taxCents: 20000,
+          totalCents: 145000,
+          issueDate: DateTime.utc(2026, 9, 2, 9, 15),
+          etimsStatus: etimsStatus,
+          etimsControlCode: controlCode,
+        );
+
+    final returnedLines = [
+      const ReceiptLine(
+        description: 'Detergent 10kg',
+        quantity: 1,
+        unitPriceCents: 125000,
+        lineTotalCents: 145000,
+        variantName: 'Dozen',
+      ),
+    ];
+
+    test('an accepted return prints as a credit note with its own code', () {
+      final r = Receipt.forReturn(
+        company: company,
+        note: note(etimsStatus: 'ACCEPTED', controlCode: 'RETURNCODE123456'),
+        lines: returnedLines,
+        invoiceNumber: 'INV-0001',
+      );
+
+      expect(r.isTaxInvoice, isTrue);
+      expect(r.heading, 'CREDIT NOTE');
+
+      final text = r.asText();
+      expect(text, contains('RETURNCODE123456'));
+      // Naming the sale is what lets a customer and an auditor match the two.
+      expect(text, contains('INV-0001'));
+      expect(text, contains('Damaged in transit'));
+      expect(text, contains('CREDITED'));
+      expect(text, contains('Detergent 10kg - Dozen'));
+    });
+
+    test('an unfiled return says it is not a credit note yet', () {
+      final r = Receipt.forReturn(
+        company: company,
+        note: note(etimsStatus: 'QUEUED'),
+        lines: returnedLines,
+        invoiceNumber: 'INV-0001',
+      );
+
+      expect(r.isTaxInvoice, isFalse);
+      expect(r.heading, 'RETURN NOTE');
+      final text = r.asText();
+      expect(text, contains('NOT A CREDIT NOTE'));
+      // Not the sale's wording: a customer holding this is owed a credit note,
+      // not a tax invoice.
+      expect(text, isNot(contains('NOT A TAX INVOICE')));
+    });
+
+    test('a return never shows a balance owed', () {
+      // It reverses a debt rather than creating one, and printing "Balance"
+      // under a credit reads as though the customer still owes it.
+      final r = Receipt.forReturn(
+        company: company,
+        note: note(etimsStatus: 'ACCEPTED', controlCode: 'ABC'),
+        lines: returnedLines,
+        invoiceNumber: 'INV-0001',
+      );
+      expect(r.asText(), isNot(contains('Balance')));
+    });
+
+    test('the "Against" line is dropped rather than printed empty', () {
+      final r = Receipt.forReturn(
+        company: company,
+        note: note(etimsStatus: 'QUEUED'),
+        lines: returnedLines,
+        invoiceNumber: '',
+      );
+      expect(r.asText(), isNot(contains('Against')));
+    });
+  });
+
   group('Selling units take the right stock', () {
     final product = Product(
       id: 'p1',

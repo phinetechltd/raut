@@ -120,6 +120,21 @@ export interface SaleResult {
   status: string;
 }
 
+export interface CreditNoteInput {
+  saleId: string;
+  traderInvoiceNumber: string;
+  returnDate: string;
+  invoiceDetails?: string | null;
+  callbackUrl?: string | null;
+  items: Array<{
+    id: string;
+    quantity: number;
+    unitPrice: number;
+    totalAmount: number;
+    description?: string;
+  }>;
+}
+
 export interface RegisterItemInput {
   itemClassCode: string;
   itemTypeCode: string;
@@ -147,20 +162,7 @@ export interface EtimsAdapter {
   submitSale(c: EtimsCredentials, input: SubmitSaleInput): Promise<EtimsResult<SaleResult>>;
   submitCreditNote(
     c: EtimsCredentials,
-    input: {
-      saleId: string;
-      traderInvoiceNumber: string;
-      returnDate: string;
-      invoiceDetails?: string | null;
-      callbackUrl?: string | null;
-      items: Array<{
-        id: string;
-        quantity: number;
-        unitPrice: number;
-        totalAmount: number;
-        description?: string;
-      }>;
-    },
+    input: CreditNoteInput,
   ): Promise<EtimsResult<SaleResult>>;
   adjustStock(
     c: EtimsCredentials,
@@ -191,6 +193,79 @@ export function isRetryable(httpStatus?: number): boolean {
 
 export function isAlreadySubmitted(httpStatus?: number): boolean {
   return httpStatus === 409;
+}
+
+// ---------------------------------------------------------------------------
+// Wire bodies
+// ---------------------------------------------------------------------------
+
+/**
+ * The JSON Digitax actually receives.
+ *
+ * Shared by both adapters so the audit trail is the same shape whichever one
+ * ran. Recording the console adapter's own argument object instead would leave
+ * a log in camelCase that never crossed a wire — and the whole point of keeping
+ * the request verbatim is that someone can compare it against what KRA says it
+ * got.
+ */
+export function saleBody(input: SubmitSaleInput): Record<string, unknown> {
+  return {
+    sale_date: input.saleDate,
+    trader_invoice_number: input.traderInvoiceNumber,
+    payment_type_code: input.paymentTypeCode,
+    invoice_status_code: input.invoiceStatusCode,
+    ...(input.customerTin ? { customer_tin: input.customerTin } : {}),
+    ...(input.customerName ? { customer_name: input.customerName } : {}),
+    ...(input.invoiceDetails ? { invoice_details: input.invoiceDetails } : {}),
+    ...(input.callbackUrl ? { callback_url: input.callbackUrl } : {}),
+    items: input.items.map((i) => ({
+      id: i.id,
+      item_name: i.itemName,
+      item_class_code: i.itemClassCode,
+      item_bar_code: i.itemBarCode,
+      item_tax_type_code: i.taxTypeCode,
+      quantity: i.quantity,
+      unit_price: i.unitPrice,
+      total_amount: i.totalAmount,
+      ...(i.taxableAmount === undefined ? {} : { taxable_amount: i.taxableAmount }),
+      ...(i.taxAmount === undefined ? {} : { tax_amount: i.taxAmount }),
+      ...(i.discountAmount ? { discount_amount: i.discountAmount } : {}),
+      ...(i.description ? { item_description: i.description } : {}),
+      is_stockable: i.isStockable,
+    })),
+  };
+}
+
+export function creditNoteBody(input: CreditNoteInput): Record<string, unknown> {
+  return {
+    sale_id: input.saleId,
+    trader_invoice_number: input.traderInvoiceNumber,
+    return_date: input.returnDate,
+    ...(input.invoiceDetails ? { invoice_details: input.invoiceDetails } : {}),
+    ...(input.callbackUrl ? { callback_url: input.callbackUrl } : {}),
+    items: input.items.map((i) => ({
+      id: i.id,
+      quantity: i.quantity,
+      unit_price: i.unitPrice,
+      total_amount: i.totalAmount,
+      ...(i.description ? { item_description: i.description } : {}),
+    })),
+  };
+}
+
+export function itemBody(input: RegisterItemInput): Record<string, unknown> {
+  return {
+    item_class_code: input.itemClassCode,
+    item_type_code: input.itemTypeCode,
+    item_name: input.itemName,
+    origin_nation_code: input.originNationCode,
+    package_unit_code: input.packageUnitCode,
+    quantity_unit_code: input.quantityUnitCode,
+    tax_type_code: input.taxTypeCode,
+    default_unit_price: input.defaultUnitPrice,
+    ...(input.itemBarCode ? { item_bar_code: input.itemBarCode } : {}),
+    ...(input.callbackUrl ? { callback_url: input.callbackUrl } : {}),
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -229,28 +304,50 @@ export const consoleAdapter: EtimsAdapter = {
       ok: true,
       data: {
         id: `console-item-${crypto.randomUUID()}`,
-        etimsCode: undefined,
         etimsItemCode: `CONSOLE-${input.itemName.slice(0, 6).toUpperCase()}`,
         status: "COMPLETE",
       },
-      request: input,
+      request: itemBody(input),
     };
   },
 
   async registerCustomer(_c, input) {
-    return { ok: true, data: { id: `console-cust-${crypto.randomUUID()}` }, request: input };
+    return {
+      ok: true,
+      data: { id: `console-cust-${crypto.randomUUID()}` },
+      request: { customer_name: input.name, customer_tin: input.taxPin },
+    };
   },
 
   async submitSale(_c, input) {
-    return { ok: true, data: fakeSale(input.traderInvoiceNumber), request: input };
+    return {
+      ok: true,
+      data: fakeSale(input.traderInvoiceNumber),
+      request: saleBody(input),
+    };
   },
 
   async submitCreditNote(_c, input) {
-    return { ok: true, data: fakeSale(input.traderInvoiceNumber), request: input };
+    // Keyed on the sale id, not the invoice number: two returns against one
+    // invoice must not produce the same control code.
+    return {
+      ok: true,
+      data: fakeSale(`${input.saleId}:${input.traderInvoiceNumber}:${input.returnDate}`),
+      request: creditNoteBody(input),
+    };
   },
 
   async adjustStock(_c, input) {
-    return { ok: true, data: { stockQuantity: 0 }, request: input };
+    return {
+      ok: true,
+      data: { stockQuantity: 0 },
+      request: {
+        item_id: input.itemId,
+        quantity: input.quantity,
+        action: input.action,
+        movement_type: input.movementType,
+      },
+    };
   },
 
   async fetchSale(_c, saleId) {
@@ -363,28 +460,11 @@ export const digitaxAdapter: EtimsAdapter = {
   info: (c) => call(c, "GET", "/etims-info", undefined, (j) => j),
 
   registerItem: (c, input) =>
-    call(
-      c,
-      "POST",
-      "/items",
-      {
-        item_class_code: input.itemClassCode,
-        item_type_code: input.itemTypeCode,
-        item_name: input.itemName,
-        origin_nation_code: input.originNationCode,
-        package_unit_code: input.packageUnitCode,
-        quantity_unit_code: input.quantityUnitCode,
-        tax_type_code: input.taxTypeCode,
-        default_unit_price: input.defaultUnitPrice,
-        ...(input.itemBarCode ? { item_bar_code: input.itemBarCode } : {}),
-        ...(input.callbackUrl ? { callback_url: input.callbackUrl } : {}),
-      },
-      (j) => ({
-        id: String(j.id ?? ""),
-        etimsItemCode: (j.etims_item_code as string) ?? undefined,
-        status: String(j.status ?? "PENDING"),
-      }),
-    ),
+    call(c, "POST", "/items", itemBody(input), (j) => ({
+      id: String(j.id ?? ""),
+      etimsItemCode: (j.etims_item_code as string) ?? undefined,
+      status: String(j.status ?? "PENDING"),
+    })),
 
   registerCustomer: (c, input) =>
     call(
@@ -401,59 +481,10 @@ export const digitaxAdapter: EtimsAdapter = {
     ),
 
   submitSale: (c, input) =>
-    call(
-      c,
-      "POST",
-      "/sales-with-items",
-      {
-        sale_date: input.saleDate,
-        trader_invoice_number: input.traderInvoiceNumber,
-        payment_type_code: input.paymentTypeCode,
-        invoice_status_code: input.invoiceStatusCode,
-        ...(input.customerTin ? { customer_tin: input.customerTin } : {}),
-        ...(input.customerName ? { customer_name: input.customerName } : {}),
-        ...(input.invoiceDetails ? { invoice_details: input.invoiceDetails } : {}),
-        ...(input.callbackUrl ? { callback_url: input.callbackUrl } : {}),
-        items: input.items.map((i) => ({
-          id: i.id,
-          item_name: i.itemName,
-          item_class_code: i.itemClassCode,
-          item_bar_code: i.itemBarCode,
-          item_tax_type_code: i.taxTypeCode,
-          quantity: i.quantity,
-          unit_price: i.unitPrice,
-          total_amount: i.totalAmount,
-          ...(i.taxableAmount === undefined ? {} : { taxable_amount: i.taxableAmount }),
-          ...(i.taxAmount === undefined ? {} : { tax_amount: i.taxAmount }),
-          ...(i.discountAmount ? { discount_amount: i.discountAmount } : {}),
-          ...(i.description ? { item_description: i.description } : {}),
-          is_stockable: i.isStockable,
-        })),
-      },
-      asSale,
-    ),
+    call(c, "POST", "/sales-with-items", saleBody(input), asSale),
 
   submitCreditNote: (c, input) =>
-    call(
-      c,
-      "POST",
-      "/credit-notes",
-      {
-        sale_id: input.saleId,
-        trader_invoice_number: input.traderInvoiceNumber,
-        return_date: input.returnDate,
-        ...(input.invoiceDetails ? { invoice_details: input.invoiceDetails } : {}),
-        ...(input.callbackUrl ? { callback_url: input.callbackUrl } : {}),
-        items: input.items.map((i) => ({
-          id: i.id,
-          quantity: i.quantity,
-          unit_price: i.unitPrice,
-          total_amount: i.totalAmount,
-          ...(i.description ? { item_description: i.description } : {}),
-        })),
-      },
-      asSale,
-    ),
+    call(c, "POST", "/credit-notes", creditNoteBody(input), asSale),
 
   adjustStock: (c, input) =>
     call(

@@ -505,13 +505,20 @@ export async function transmitCreditNote(
     returnDate: note.issueDate.toISOString().slice(0, 10),
     invoiceDetails: note.reason,
     callbackUrl: callbackUrl(),
-    items: note.lines.map((l) => ({
-      id: l.product.etimsItemCode ?? l.productId,
-      quantity: l.quantity,
-      unitPrice: l.unitPriceCents / 100,
-      totalAmount: l.lineTotalCents / 100,
-      description: l.description,
-    })),
+    // Base units, matching how the sale was filed. Sending two cartons against
+    // a sale KRA recorded as twenty-four bottles would credit two units and
+    // leave twenty-two sold on their ledger for ever — the customer's return
+    // would be complete on our books and invisible on theirs.
+    items: note.lines.map((l) => {
+      const units = l.baseQuantity || l.quantity;
+      return {
+        id: l.product.etimsItemCode ?? l.productId,
+        quantity: units,
+        unitPrice: units > 0 ? l.lineTotalCents / units / 100 : 0,
+        totalAmount: l.lineTotalCents / 100,
+        description: l.variantName ? `${l.description} (${l.variantName})` : l.description,
+      };
+    }),
   });
 
   await record(ctx, "CREDIT_NOTE", note.id, "/credit-notes", result);

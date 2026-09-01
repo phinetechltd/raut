@@ -382,6 +382,77 @@ class InvoiceLine {
       );
 }
 
+/// A sales return, credited against an invoice.
+///
+/// Its own document with its own KRA control code, not an annotation on the
+/// invoice. That is what KRA requires, and it is also the only honest way to
+/// show it: the original sale happened and is not being rewritten.
+class CreditNoteSummary {
+  CreditNoteSummary({
+    required this.id,
+    required this.number,
+    required this.invoiceId,
+    required this.customerId,
+    required this.status,
+    required this.reason,
+    required this.subtotalCents,
+    required this.taxCents,
+    required this.totalCents,
+    this.issueDate,
+    this.restock = true,
+    this.etimsStatus,
+    this.etimsControlCode,
+    this.etimsInvoiceNumber,
+    this.etimsSerialNumber,
+    this.etimsQrUrl,
+  });
+
+  final String id;
+  final String number;
+  final String invoiceId;
+  final String customerId;
+  final String status;
+  final String reason;
+  final int subtotalCents;
+  final int taxCents;
+  final int totalCents;
+  final DateTime? issueDate;
+  final bool restock;
+
+  final String? etimsStatus;
+  final String? etimsControlCode;
+  final String? etimsInvoiceNumber;
+  final String? etimsSerialNumber;
+  final String? etimsQrUrl;
+
+  bool get isFiled =>
+      etimsStatus == 'ACCEPTED' && (etimsControlCode?.isNotEmpty ?? false);
+
+  bool get needsFiling =>
+      etimsStatus == 'QUEUED' ||
+      etimsStatus == 'REJECTED' ||
+      etimsStatus == 'SUBMITTED';
+
+  factory CreditNoteSummary.fromRow(Map<String, Object?> r) => CreditNoteSummary(
+        id: _str(r['id']),
+        number: _str(r['number']),
+        invoiceId: _str(r['invoiceId']),
+        customerId: _str(r['customerId']),
+        status: _str(r['status']),
+        reason: _str(r['reason']),
+        subtotalCents: _int(r['subtotalCents']),
+        taxCents: _int(r['taxCents']),
+        totalCents: _int(r['totalCents']),
+        issueDate: _date(r['issueDate']),
+        restock: _int(r['restock']) == 1,
+        etimsStatus: r['etimsStatus'] as String?,
+        etimsControlCode: r['etimsControlCode'] as String?,
+        etimsInvoiceNumber: r['etimsInvoiceNumber'] as String?,
+        etimsSerialNumber: r['etimsSerialNumber'] as String?,
+        etimsQrUrl: r['etimsQrUrl'] as String?,
+      );
+}
+
 /// A way of selling a product.
 ///
 /// One product, one stock pool held in base units, and several selling units

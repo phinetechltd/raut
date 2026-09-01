@@ -1725,8 +1725,16 @@ model CreditNoteLine {
   /// be matched back to what was sold.
   invoiceLineId String?
 
+  /// The selling unit credited, snapshotted like the invoice line it reverses.
+  variantId   String?
+  variantName String?
+
   description    String
+  /// Quantity in the unit sold: 2 means two cartons returned.
   quantity       Int
+  /// The same in base units. This is what goes back on the shelf and what is
+  /// filed with KRA, because the original sale was filed the same way.
+  baseQuantity   Int    @default(0)
   unitPriceCents Int
   taxRateBp      Int    @default(1600)
   lineTotalCents Int

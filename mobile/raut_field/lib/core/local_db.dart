@@ -41,7 +41,7 @@ class LocalDb {
     final path = _overridePath ?? p.join(await getDatabasesPath(), 'raut_field.db');
     return openDatabase(
       path,
-      version: 3,
+      version: 4,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -125,6 +125,52 @@ class LocalDb {
           await db.execute('ALTER TABLE invoice_lines ADD COLUMN $column');
         } catch (_) {}
       }
+    }
+
+    if (from < 4) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS credit_notes (
+          id TEXT PRIMARY KEY,
+          number TEXT,
+          invoiceId TEXT,
+          customerId TEXT,
+          status TEXT,
+          reason TEXT,
+          issueDate TEXT,
+          subtotalCents INTEGER,
+          taxCents INTEGER,
+          totalCents INTEGER,
+          restock INTEGER,
+          etimsStatus TEXT,
+          etimsControlCode TEXT,
+          etimsInvoiceNumber TEXT,
+          etimsSerialNumber TEXT,
+          etimsQrUrl TEXT,
+          clientUuid TEXT,
+          updatedAt TEXT
+        )
+      ''');
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS credit_note_lines (
+          id TEXT PRIMARY KEY,
+          creditNoteId TEXT,
+          invoiceLineId TEXT,
+          productId TEXT,
+          variantName TEXT,
+          description TEXT,
+          quantity INTEGER,
+          baseQuantity INTEGER,
+          unitPriceCents INTEGER,
+          taxRateBp INTEGER,
+          lineTotalCents INTEGER
+        )
+      ''');
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_cn_lines ON credit_note_lines(creditNoteId)',
+      );
+      await db.execute(
+        'CREATE INDEX IF NOT EXISTS idx_cn_invoice ON credit_notes(invoiceId)',
+      );
     }
   }
 
@@ -286,6 +332,50 @@ class LocalDb {
         updatedAt TEXT
       )
     ''');
+
+    // Returns, mirrored so a credit note reprints at a roadside stop with
+    // no signal, days after the goods came back.
+    await db.execute('''
+      CREATE TABLE credit_notes (
+        id TEXT PRIMARY KEY,
+        number TEXT,
+        invoiceId TEXT,
+        customerId TEXT,
+        status TEXT,
+        reason TEXT,
+        issueDate TEXT,
+        subtotalCents INTEGER,
+        taxCents INTEGER,
+        totalCents INTEGER,
+        restock INTEGER,
+        etimsStatus TEXT,
+        etimsControlCode TEXT,
+        etimsInvoiceNumber TEXT,
+        etimsSerialNumber TEXT,
+        etimsQrUrl TEXT,
+        clientUuid TEXT,
+        updatedAt TEXT
+      )
+    ''');
+
+    await db.execute('''
+      CREATE TABLE credit_note_lines (
+        id TEXT PRIMARY KEY,
+        creditNoteId TEXT,
+        invoiceLineId TEXT,
+        productId TEXT,
+        variantName TEXT,
+        description TEXT,
+        quantity INTEGER,
+        baseQuantity INTEGER,
+        unitPriceCents INTEGER,
+        taxRateBp INTEGER,
+        lineTotalCents INTEGER
+      )
+    ''');
+
+    await db.execute('CREATE INDEX idx_cn_lines ON credit_note_lines(creditNoteId)');
+    await db.execute('CREATE INDEX idx_cn_invoice ON credit_notes(invoiceId)');
 
     // Selling units. Kept as their own table rather than columns on
     // products, because one product has several and a rep picks between

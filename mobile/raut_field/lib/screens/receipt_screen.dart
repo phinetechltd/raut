@@ -10,6 +10,8 @@ import '../core/receipt.dart';
 import '../core/sync_service.dart';
 import '../data/field_repository.dart';
 import '../models/models.dart';
+import 'return_receipt_screen.dart';
+import 'return_screen.dart';
 
 /// The receipt for one sale.
 ///
@@ -55,6 +57,7 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
 
   InvoiceSummary? _invoice;
   List<InvoiceLine> _lines = const [];
+  List<CreditNoteSummary> _returns = const [];
   bool _loading = true;
   bool _waiting = false;
   int _secondsLeft = 0;
@@ -95,10 +98,12 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
   Future<void> _load() async {
     final repo = context.read<FieldRepository>();
     final found = await repo.invoiceForPrinting(widget.invoiceId);
+    final returns = await repo.creditNotesFor(widget.invoiceId);
     if (!mounted) return;
     setState(() {
       _invoice = found?.$1;
       _lines = found?.$2 ?? const [];
+      _returns = returns;
       _loading = false;
     });
   }
@@ -258,6 +263,47 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                       ),
                     ),
                     const SizedBox(height: 16),
+                    if (_returns.isNotEmpty) ...[
+                      Card(
+                        child: Column(
+                          children: [
+                            const ListTile(
+                              dense: true,
+                              title: Text(
+                                'Returns against this sale',
+                                style: TextStyle(fontWeight: FontWeight.w600),
+                              ),
+                            ),
+                            ..._returns.map(
+                              (n) => ListTile(
+                                dense: true,
+                                leading: Icon(
+                                  n.isFiled
+                                      ? Icons.verified_outlined
+                                      : Icons.schedule_outlined,
+                                ),
+                                title: Text(n.number),
+                                subtitle: Text(n.reason),
+                                trailing: Text(
+                                  Money.format(n.totalCents),
+                                  style: const TextStyle(fontWeight: FontWeight.w600),
+                                ),
+                                onTap: () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => ReturnReceiptScreen(
+                                      creditNoteId: n.id,
+                                      invoiceNumber: invoice.number,
+                                      customerName: widget.customerName,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ],
                     if (!printer.available && printer.checked)
                       const Card(
                         child: ListTile(
@@ -287,6 +333,28 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                       ),
                     if (invoice.needsFiling && (session?.canRetryEtims ?? false))
                       const SizedBox(width: 12),
+                    if (invoice.status != 'DRAFT' &&
+                        invoice.status != 'CANCELLED' &&
+                        _lines.isNotEmpty) ...[
+                      Expanded(
+                        child: OutlinedButton.icon(
+                          onPressed: _waiting
+                              ? null
+                              : () => Navigator.of(context).push(
+                                    MaterialPageRoute<void>(
+                                      builder: (_) => ReturnScreen(
+                                        invoice: invoice,
+                                        lines: _lines,
+                                        customerName: widget.customerName,
+                                      ),
+                                    ),
+                                  ),
+                          icon: const Icon(Icons.assignment_return_outlined),
+                          label: const Text('Return'),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                    ],
                     Expanded(
                       child: FilledButton.icon(
                         onPressed: printer.available && !printer.printing && !_waiting

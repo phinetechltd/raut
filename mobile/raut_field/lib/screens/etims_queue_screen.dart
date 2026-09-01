@@ -9,6 +9,7 @@ import '../core/sync_service.dart';
 import '../data/field_repository.dart';
 import '../models/models.dart';
 import 'receipt_screen.dart';
+import 'return_receipt_screen.dart';
 
 /// Sales this handset knows about that KRA has not accepted.
 ///
@@ -29,6 +30,9 @@ class EtimsQueueScreen extends StatefulWidget {
 
 class _EtimsQueueScreenState extends State<EtimsQueueScreen> {
   List<InvoiceSummary> _pending = const [];
+  List<CreditNoteSummary> _pendingReturns = const [];
+
+  int get _total => _pending.length + _pendingReturns.length;
   bool _loading = true;
   bool _pushing = false;
   String? _message;
@@ -42,9 +46,14 @@ class _EtimsQueueScreenState extends State<EtimsQueueScreen> {
   Future<void> _load() async {
     final repo = context.read<FieldRepository>();
     final rows = await repo.invoicesAwaitingEtims();
+    // Returns belong in the same queue. A credit note KRA never accepted is
+    // the more urgent of the two: the customer has their goods back and their
+    // money credited, and the revenue authority still shows the sale.
+    final returns = await repo.returnsAwaitingEtims();
     if (!mounted) return;
     setState(() {
       _pending = rows;
+      _pendingReturns = returns;
       _loading = false;
     });
   }
@@ -69,6 +78,18 @@ class _EtimsQueueScreenState extends State<EtimsQueueScreen> {
       }
     }
 
+    // Returns after sales, on purpose: a credit note references the KRA sale id
+    // of its invoice, so filing the invoice first is what lets the return go
+    // through on the same sweep instead of waiting for the next one.
+    for (final note in _pendingReturns) {
+      try {
+        await sync.pushReturn(note.id);
+        sent++;
+      } catch (_) {
+        failed++;
+      }
+    }
+
     await sync.sync(reason: 'etims-queue').catchError((_) => false);
     await _load();
     if (!mounted) return;
@@ -89,7 +110,7 @@ class _EtimsQueueScreenState extends State<EtimsQueueScreen> {
       appBar: AppBar(title: const Text('Awaiting KRA')),
       body: _loading
           ? const Center(child: CircularProgressIndicator())
-          : _pending.isEmpty
+          : _total == 0
               ? const _AllClear()
               : RefreshIndicator(
                   onRefresh: _load,
@@ -103,9 +124,9 @@ class _EtimsQueueScreenState extends State<EtimsQueueScreen> {
                       Padding(
                         padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                         child: Text(
-                          'These sales are complete and the customer has been '
-                          'served. Until KRA accepts them, the paper they were '
-                          'given is a receipt, not a tax invoice.',
+                          'These are complete and the customer has been served. '
+                          'Until KRA accepts them, the paper they were given is '
+                          'a receipt, not a tax invoice or a credit note.',
                           style: TextStyle(
                             fontSize: 12.5,
                             color: Theme.of(context).colorScheme.onSurfaceVariant,
@@ -113,6 +134,33 @@ class _EtimsQueueScreenState extends State<EtimsQueueScreen> {
                         ),
                       ),
                       const SizedBox(height: 8),
+                      ..._pendingReturns.map(
+                        (n) => ListTile(
+                          leading: Icon(
+                            n.etimsStatus == 'REJECTED'
+                                ? Icons.error_outline
+                                : Icons.assignment_return_outlined,
+                            color: n.etimsStatus == 'REJECTED'
+                                ? Theme.of(context).colorScheme.error
+                                : null,
+                          ),
+                          title: Text('${n.number} · return'),
+                          subtitle: Text(
+                            n.etimsStatus == 'REJECTED'
+                                ? 'Rejected by KRA'
+                                : 'Waiting for a control code',
+                          ),
+                          trailing: Text(
+                            Money.format(n.totalCents),
+                            style: const TextStyle(fontWeight: FontWeight.w600),
+                          ),
+                          onTap: () => Navigator.of(context).push(
+                            MaterialPageRoute<void>(
+                              builder: (_) => ReturnReceiptScreen(creditNoteId: n.id),
+                            ),
+                          ),
+                        ),
+                      ),
                       ..._pending.map(
                         (inv) => ListTile(
                           leading: Icon(
@@ -143,7 +191,7 @@ class _EtimsQueueScreenState extends State<EtimsQueueScreen> {
                     ],
                   ),
                 ),
-      bottomNavigationBar: _pending.isEmpty || !(session?.canRetryEtims ?? false)
+      bottomNavigationBar: _total == 0 || !(session?.canRetryEtims ?? false)
           ? null
           : SafeArea(
               child: Padding(
@@ -158,7 +206,7 @@ class _EtimsQueueScreenState extends State<EtimsQueueScreen> {
                         )
                       : const Icon(Icons.cloud_upload_outlined),
                   label: Text(
-                    _pushing ? 'Sending...' : 'Send all ${_pending.length} to KRA',
+                    _pushing ? 'Sending...' : 'Send all $_total to KRA',
                   ),
                 ),
               ),

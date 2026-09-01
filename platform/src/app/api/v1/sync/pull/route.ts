@@ -55,6 +55,7 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
     routes,
     orders,
     invoices,
+    creditNotes,
     payments,
     expenseCategories,
   ] = await Promise.all([
@@ -147,6 +148,18 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
       include: { lines: true },
     }),
 
+    // Returns. A rep who raised one needs to reprint its credit note days
+    // later, and the office needs it on the handset to stop a second credit
+    // being raised against the same delivery.
+    db.creditNote.findMany({
+      where: {
+        companyId,
+        ...(selfOnly ? { createdById: principal.userId } : {}),
+        ...(newer ? { updatedAt: newer } : { issueDate: { gte: horizon } }),
+      },
+      include: { lines: true },
+    }),
+
     db.payment.findMany({
       where: {
         companyId,
@@ -208,6 +221,7 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
     routes: routes.length,
     orders: orders.length,
     invoices: invoices.length,
+    creditNotes: creditNotes.length,
     payments: payments.length,
   };
 
@@ -227,6 +241,7 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
       routes,
       orders,
       invoices,
+      creditNotes,
       payments,
       expenseCategories,
     },
