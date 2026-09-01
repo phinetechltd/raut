@@ -361,6 +361,15 @@ async function main() {
   //
   // Priced per unit sold, not derived: a carton is cheaper per bottle than a
   // bottle is, which is the entire reason a shopkeeper buys one.
+  const UNIT_LABELS: Record<string, string> = {
+    PC: "Each",
+    CTN: "Carton",
+    BAG: "Bag",
+    KG: "Kilo",
+    L: "Litre",
+    DZ: "Dozen",
+  };
+
   for (const product of products) {
     const single = product.sellPriceCents;
     await db.productVariant.createMany({
@@ -368,7 +377,8 @@ async function main() {
         {
           companyId: zamar.id,
           productId: product.id,
-          name: `Single ${product.unit}`,
+          // The unit as a shopkeeper would say it, not the stock code.
+          name: UNIT_LABELS[product.unit] ?? product.unit,
           sku: `${product.sku}-1`,
           unitsPerVariant: 1,
           sellPriceCents: single,

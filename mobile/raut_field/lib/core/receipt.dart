@@ -72,8 +72,16 @@ class Receipt {
     ops.add(Op.columns(['Date', _stamp(invoice.issueDate)], const [10, 22],
         aligns: const [0, 2]));
     if (customerName != null && customerName!.isNotEmpty) {
-      ops.add(Op.columns(['Customer', customerName!], const [10, 22],
-          aligns: const [0, 2]));
+      // A trading name rarely fits the 22 columns left beside the label, and a
+      // receipt that reads "Rift Valley Distributo" looks like a fault rather
+      // than a layout. Long names get the full width of their own line.
+      if (customerName!.length <= 22) {
+        ops.add(Op.columns(['Customer', customerName!], const [10, 22],
+            aligns: const [0, 2]));
+      } else {
+        ops.add(Op.text('Customer', size: 22));
+        ops.add(Op.text(customerName!, size: 22));
+      }
     }
     if (customerPin != null && customerPin!.isNotEmpty) {
       ops.add(Op.columns(['Buyer PIN', customerPin!], const [10, 22],
