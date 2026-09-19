@@ -186,9 +186,7 @@ class _ReturnScreenState extends State<ReturnScreen> {
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            l.variantName == null
-                                ? l.description
-                                : '${l.description} · ${l.variantName}',
+                            l.label,
                             style: const TextStyle(fontWeight: FontWeight.w600),
                           ),
                           const SizedBox(height: 2),

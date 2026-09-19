@@ -22,9 +22,9 @@ class ReceiptLine {
   final int lineTotalCents;
   final String? variantName;
 
-  /// "Detergent 10kg - Dozen", so the customer can see what unit was sold.
-  String get label =>
-      variantName == null || variantName!.isEmpty ? description : '$description - $variantName';
+  /// What the customer sees for this line. Shared with the return screen, so
+  /// paper and screen cannot disagree about the name of what was sold.
+  String get label => lineLabel(description, variantName);
 
   factory ReceiptLine.fromInvoice(InvoiceLine l) => ReceiptLine(
         description: l.description,

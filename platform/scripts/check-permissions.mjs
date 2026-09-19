@@ -122,7 +122,10 @@ const ROLES = [
     email: "rep@zamarsolutions.co.ke",
     reach: ["/app", "/app/customers", "/app/field"],
     redirect: ["/admin"],
-    apiAllow: ["/visits", "/routes", "/customers"],
+    // A rep raises returns where the goods are handed back, which is the whole
+    // point of the flow. Withholding this left it unreachable by the only
+    // people who need it.
+    apiAllow: ["/visits", "/routes", "/customers", "/credit-notes"],
     hidden: ["/app/settings/payments", "/app/finance/reports", "/app/settings/etims"],
     // A rep holds report:read for their own numbers. The statutory statements
     // carry company margin, cash position and tax owed, and are not theirs.

@@ -268,6 +268,7 @@ class InvoiceSummary {
     required this.status,
     required this.totalCents,
     required this.paidCents,
+    this.creditedCents = 0,
     this.subtotalCents = 0,
     this.discountCents = 0,
     this.taxCents = 0,
@@ -299,8 +300,32 @@ class InvoiceSummary {
   final String? etimsSerialNumber;
   final String? etimsQrUrl;
 
-  int get outstandingCents => totalCents - paidCents;
+  /// Credited back on this invoice, from any returns raised against it.
+  final int creditedCents;
+
+  int get outstandingCents => totalCents - paidCents - creditedCents;
   bool get isOverdue => status == 'OVERDUE';
+
+  /// The same invoice with returns netted off what is still owed.
+  InvoiceSummary withCredits(int cents) => InvoiceSummary(
+        id: id,
+        number: number,
+        customerId: customerId,
+        status: status,
+        subtotalCents: subtotalCents,
+        discountCents: discountCents,
+        taxCents: taxCents,
+        totalCents: totalCents,
+        paidCents: paidCents,
+        creditedCents: cents,
+        dueDate: dueDate,
+        issueDate: issueDate,
+        etimsStatus: etimsStatus,
+        etimsControlCode: etimsControlCode,
+        etimsInvoiceNumber: etimsInvoiceNumber,
+        etimsSerialNumber: etimsSerialNumber,
+        etimsQrUrl: etimsQrUrl,
+      );
 
   /// Only a document KRA has accepted is a tax invoice. The control code is
   /// checked as well as the status because one without the other is a state
@@ -367,6 +392,9 @@ class InvoiceLine {
   /// The line in base units. Zero on lines written before variants existed.
   final int baseQuantity;
 
+  /// What the customer sees for this line.
+  String get label => lineLabel(description, variantName);
+
   factory InvoiceLine.fromRow(Map<String, Object?> r) => InvoiceLine(
         id: _str(r['id']),
         invoiceId: _str(r['invoiceId']),
@@ -380,6 +408,19 @@ class InvoiceLine {
         variantName: r['variantName'] as String?,
         baseQuantity: _int(r['baseQuantity']),
       );
+}
+
+/// How a sold line is named on screen and on paper.
+///
+/// The server already writes the selling unit into the description when it
+/// resolves a line, so appending it unconditionally produced
+/// 'Cooking Oil 2L - Dozen - Dozen'. One function, so the receipt, the return
+/// screen and anything added later cannot disagree about it.
+String lineLabel(String description, String? variantName) {
+  final v = variantName;
+  if (v == null || v.isEmpty) return description;
+  if (description.toLowerCase().contains(v.toLowerCase())) return description;
+  return '$description - $v';
 }
 
 /// A sales return, credited against an invoice.

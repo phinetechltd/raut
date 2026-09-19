@@ -75,7 +75,13 @@ class _ReturnReceiptScreenState extends State<ReturnReceiptScreen> {
     final session = context.read<AuthService>().session;
     if (_note == null) return;
 
-    if (session?.etimsEnabled != true || (_note?.isFiled ?? false)) {
+    // Only wait for a code that is actually coming — see the same guard on the
+    // sale receipt. A return against an invoice that was never filed is itself
+    // never filed, and waiting on it just holds the shop up.
+    final status = _note?.etimsStatus;
+    final willBeFiled = status != null && status != 'NOT_APPLICABLE';
+
+    if (session?.etimsEnabled != true || (_note?.isFiled ?? false) || !willBeFiled) {
       return;
     }
     await _awaitFiling();

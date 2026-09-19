@@ -569,7 +569,31 @@ class FieldRepository extends ChangeNotifier {
       whereArgs: [customerId],
       orderBy: 'dueDate ASC',
     );
-    return rows.map(InvoiceSummary.fromRow).toList();
+
+    // Net off what has been credited back.
+    //
+    // A credit note reduces the customer's balance but does not touch the
+    // invoice's paidCents, so an invoice that has been half returned still
+    // reads as fully outstanding. A rep working this list would chase money
+    // the customer has already been given back — in front of them, holding a
+    // credit note that says so.
+    final credited = <String, int>{};
+    final notes = await _db.query(
+      'credit_notes',
+      where: "customerId = ? AND status != 'CANCELLED'",
+      whereArgs: [customerId],
+    );
+    for (final n in notes) {
+      final ref = n['invoiceId'] as String?;
+      if (ref == null) continue;
+      credited[ref] = (credited[ref] ?? 0) + ((n['totalCents'] as num?)?.toInt() ?? 0);
+    }
+
+    return rows
+        .map((r) => InvoiceSummary.fromRow(r)
+            .withCredits(credited[r['id'] as String? ?? ''] ?? 0))
+        .where((i) => i.outstandingCents > 0)
+        .toList();
   }
 
   /// One invoice with its lines, for printing.

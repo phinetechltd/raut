@@ -85,9 +85,18 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
     final invoice = _invoice;
     if (invoice == null) return;
 
-    // Nothing to wait for: either the company does not file, or this sale is
-    // already filed.
-    if (session?.etimsEnabled != true || invoice.isFiled) {
+    // Only wait for something that is actually coming.
+    //
+    // The company not filing, or the sale already filed, are the obvious cases.
+    // The one that matters is the third: an invoice the server never marked for
+    // filing — raised before eTIMS was switched on, or before the start date —
+    // will never get a control code. Waiting on it held a rep at the counter
+    // for twenty-five seconds and then told them "a tax invoice follows", which
+    // is simply untrue.
+    final willBeFiled =
+        invoice.etimsStatus != null && invoice.etimsStatus != 'NOT_APPLICABLE';
+
+    if (session?.etimsEnabled != true || invoice.isFiled || !willBeFiled) {
       if (widget.autoPrint) unawaited(_print());
       return;
     }
@@ -333,7 +342,11 @@ class _ReceiptScreenState extends State<ReceiptScreen> {
                       ),
                     if (invoice.needsFiling && (session?.canRetryEtims ?? false))
                       const SizedBox(width: 12),
-                    if (invoice.status != 'DRAFT' &&
+                    // Hidden, not merely refused. A button that always fails
+                    // teaches people the app is broken; an absent one teaches
+                    // them the action is not theirs.
+                    if ((session?.can('creditnote:write') ?? false) &&
+                        invoice.status != 'DRAFT' &&
                         invoice.status != 'CANCELLED' &&
                         _lines.isNotEmpty) ...[
                       Expanded(

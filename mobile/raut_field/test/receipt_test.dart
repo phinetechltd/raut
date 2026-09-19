@@ -231,6 +231,30 @@ void main() {
       expect(text, isNot(contains('NOT A TAX INVOICE')));
     });
 
+    test('the selling unit is not printed twice', () {
+      // The server writes the unit into the description when it resolves the
+      // line, so a receipt that appends it again reads
+      // 'Cooking Oil 2L - Dozen - Dozen'. Seen on a real device, not in review.
+      const line = ReceiptLine(
+        description: 'Cooking Oil 2L - Dozen',
+        quantity: 2,
+        unitPriceCents: 783360,
+        lineTotalCents: 1817395,
+        variantName: 'Dozen',
+      );
+      expect(line.label, 'Cooking Oil 2L - Dozen');
+
+      // And it is still added when the description does not carry it.
+      const plain = ReceiptLine(
+        description: 'Cooking Oil 2L',
+        quantity: 1,
+        unitPriceCents: 68000,
+        lineTotalCents: 78880,
+        variantName: 'Dozen',
+      );
+      expect(plain.label, 'Cooking Oil 2L - Dozen');
+    });
+
     test('a return never shows a balance owed', () {
       // It reverses a debt rather than creating one, and printing "Balance"
       // under a credit reads as though the customer still owes it.
@@ -307,6 +331,29 @@ void main() {
 
       expect(dozen.perBaseUnitCents, 240000);
       expect(dozen.perBaseUnitCents, lessThan(product.sellPriceCents));
+    });
+  });
+
+  group('What a customer still owes', () {
+    test('a credited invoice is not chased for the credited part', () {
+      // A credit note reduces the customer balance but never touches the
+      // invoice's paidCents, so without netting it off a half-returned invoice
+      // reads as fully outstanding — and a rep chases money the customer was
+      // given back, in front of them, holding the credit note.
+      final invoice = InvoiceSummary(
+        id: 'inv1',
+        number: 'INV-0213',
+        customerId: 'c1',
+        status: 'ISSUED',
+        totalCents: 2054035,
+        paidCents: 0,
+      );
+      expect(invoice.outstandingCents, 2054035);
+
+      final afterReturn = invoice.withCredits(908698);
+      expect(afterReturn.outstandingCents, 2054035 - 908698);
+      // And the invoice itself is untouched: it was issued and filed as it is.
+      expect(afterReturn.totalCents, 2054035);
     });
   });
 

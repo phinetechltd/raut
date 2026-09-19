@@ -347,6 +347,12 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "field:self",
     "report:read",
     "creditnote:read",
+    // A rep is the person the goods are handed back to, so a return has to be
+    // possible where they are standing. It reduces what a customer owes, which
+    // is the same power `payment:write` above already gives them, and the
+    // server refuses an over-credit either way. Withholding it would have left
+    // the return flow unreachable by the only people who need it.
+    "creditnote:write",
     // Submit only, not read. A rep at a counter is the person who discovers a
     // stuck filing and needs to push it, but the transmission log carries every
     // customer and amount in the company and is none of their business. Their
