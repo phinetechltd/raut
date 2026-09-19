@@ -15,7 +15,11 @@
  * already been posted for that kind — so it is safe to re-run, and safe to run
  * while the system is live.
  *
- *   npx tsx scripts/backfill-ledger.ts [--company <slug>] [--dry]
+ *   npm run ledger:backfill -- [--company <slug>] [--dry]
+ *
+ * The seed runs it too: seeded invoices, payments and stock are written
+ * straight to their tables, and without a replay a fresh environment has
+ * documents that its books know nothing about.
  */
 import { PrismaClient } from "@prisma/client";
 

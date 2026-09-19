@@ -550,8 +550,13 @@ async function main() {
 
   // Revenue is booked net of tax. Booking the tax as income is the commonest
   // way a small system overstates profit and under-reports what it owes KRA.
-  const sales = tbRows.find((r) => r.code === "4000");
-  const vat = tbRows.find((r) => r.code === "2100");
+  //
+  // Read from the balance taken *after* the invoice above. The earlier snapshot
+  // only passed while the database happened to hold older postings; on a fresh
+  // seed it had no sales at all and the check said nothing about this invoice.
+  const afterRows = after.json?.data?.rows ?? [];
+  const sales = afterRows.find((r) => r.code === "4000");
+  const vat = afterRows.find((r) => r.code === "2100");
   check(
     "Tax is held apart from revenue",
     Boolean(sales) && Boolean(vat) && vat.creditCents > 0,
