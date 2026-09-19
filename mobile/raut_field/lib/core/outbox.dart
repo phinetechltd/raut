@@ -101,6 +101,19 @@ class Outbox {
   final LocalDb _db;
   static const _uuid = Uuid();
 
+  /// Fired whenever the pending set changes.
+  ///
+  /// Without this the rep is told "Everything synced" the moment they go
+  /// offline and keep working: the count is only re-read after a *successful*
+  /// sync, so an outbox filling up in a dead spot reports as empty. A rep who
+  /// believes their orders reached the office does not go back for them.
+  ///
+  /// The callback goes this way round on purpose — the outbox does not know
+  /// what a SyncService is, and should not.
+  void Function()? onChanged;
+
+  void _changed() => onChanged?.call();
+
   /// Enqueues an operation and returns the UUID that identifies it forever.
   Future<String> enqueue(
     String type,
@@ -115,6 +128,7 @@ class Outbox {
       'createdAt': (at ?? DateTime.now()).toIso8601String(),
       'attempts': 0,
     });
+    _changed();
     return uuid;
   }
 
@@ -150,6 +164,7 @@ class Outbox {
       where: 'uuid = ?',
       whereArgs: [uuid],
     );
+    _changed();
   }
 
   /// Rewrites a placeholder id to the one the server issued, across every
@@ -199,6 +214,7 @@ class Outbox {
       'UPDATE outbox SET attempts = attempts + 1, lastError = ? WHERE uuid = ?',
       [error, uuid],
     );
+    _changed(); // an entry crossing the stuck threshold changes stuckCount
   }
 
   /// Drops acknowledged entries older than a week. Recent ones are retained so
@@ -210,10 +226,12 @@ class Outbox {
       where: 'syncedAt IS NOT NULL AND syncedAt < ?',
       whereArgs: [cutoff.toIso8601String()],
     );
+    _changed();
   }
 
   /// Clears a stuck entry after the rep has acknowledged it cannot be applied.
   Future<void> discard(String uuid) async {
     await _db.delete('outbox', where: 'uuid = ?', whereArgs: [uuid]);
+    _changed();
   }
 }

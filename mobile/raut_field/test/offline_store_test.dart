@@ -590,6 +590,41 @@ void main() {
     });
   });
 
+  group('The queue announces itself', () {
+    // The count on the More screen was only re-read after a *successful* sync.
+    // A rep working in a dead spot therefore saw "Everything synced" with a
+    // full outbox, and had no reason to go back for the orders that never left
+    // the handset. The outbox now says when it changes.
+    test('an enqueue while offline notifies immediately', () async {
+      var notifications = 0;
+      outbox.onChanged = () => notifications++;
+
+      await repo.createOrder(
+        customerId: 'cust-1',
+        lines: [CartLine(product: (await repo.products()).first, quantity: 1)],
+      );
+
+      expect(notifications, greaterThan(0));
+      expect(await outbox.pendingCount(), 1);
+    });
+
+    test('clearing an entry notifies too, so the count can fall back to zero',
+        () async {
+      await repo.createOrder(
+        customerId: 'cust-1',
+        lines: [CartLine(product: (await repo.products()).first, quantity: 1)],
+      );
+      final entry = (await outbox.pending()).single;
+
+      var notifications = 0;
+      outbox.onChanged = () => notifications++;
+      await outbox.markSynced(entry.uuid, serverId: 'srv-1');
+
+      expect(notifications, greaterThan(0));
+      expect(await outbox.pendingCount(), 0);
+    });
+  });
+
   group('Sign-out safety', () {
     test('wipe clears the mirror and the queue together', () async {
       await repo.createOrder(

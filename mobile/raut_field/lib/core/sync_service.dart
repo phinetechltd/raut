@@ -81,12 +81,28 @@ class SyncService extends ChangeNotifier {
   bool _running = false;
 
   Future<void> start() async {
+    // Every write the rep makes lands in the outbox, and the count on screen
+    // has to follow it there and then — not at the next successful sync, which
+    // in a dead spot may be hours away.
+    _outbox.onChanged = () => unawaited(refreshCounts());
+
     await refreshCounts();
 
     final prefs = await SharedPreferences.getInstance();
     final stored = prefs.getString(_lastSyncKey);
     if (stored != null) {
       _set(_status.copyWith(lastSyncedAt: DateTime.tryParse(stored)));
+    }
+
+    // The stream only fires on a *change*, so a handset that is already on a
+    // network when the app opens is never told about it. Read the current state
+    // once first, or the app spends the whole round on a guess.
+    try {
+      final now = await Connectivity().checkConnectivity();
+      _set(_status.copyWith(online: !now.contains(ConnectivityResult.none)));
+    } catch (_) {
+      // The platform can refuse this on some devices. The periodic sync below
+      // corrects the flag either way.
     }
 
     _connectivity = Connectivity().onConnectivityChanged.listen((results) {
@@ -101,9 +117,18 @@ class SyncService extends ChangeNotifier {
       }
     });
 
-    _periodic = Timer.periodic(AppConfig.syncInterval, (_) {
-      if (_status.online) sync(reason: 'scheduled');
-    });
+    // Deliberately NOT gated on `_status.online`.
+    //
+    // It used to be, and that made the flag self-latching: once it went false,
+    // the only thing that could clear it was a sync, and the flag was what
+    // stopped the sync from running. A rep whose signal dropped and came back
+    // without the platform emitting an event stayed "offline" for the rest of
+    // the day — collections by card refused, nothing pushed — until they
+    // noticed and synced by hand.
+    //
+    // An attempt with no signal costs one failed request and sets the flag
+    // honestly. That is far cheaper than being wrong for a day.
+    _periodic = Timer.periodic(AppConfig.syncInterval, (_) => sync(reason: 'scheduled'));
   }
 
   @override
@@ -123,6 +148,11 @@ class SyncService extends ChangeNotifier {
     _set(_status.copyWith(
       pendingCount: await _outbox.pendingCount(),
       stuckCount: await _outbox.stuckCount(),
+      // `copyWith` drops the message when it is not passed — transient by
+      // design. This call is about the counts and nothing else, so the message
+      // is carried over explicitly; otherwise refreshing counts after a failed
+      // sync would erase the very error that explains it.
+      message: _status.message,
     ));
   }
 
@@ -172,6 +202,9 @@ class SyncService extends ChangeNotifier {
       return false;
     } finally {
       _running = false;
+      // A partial drain still moves the count, and a failed one must not leave
+      // the last successful sync's number on screen.
+      await refreshCounts();
     }
   }
 
@@ -192,18 +225,23 @@ class SyncService extends ChangeNotifier {
         'uuid': 'pings-$deviceId-${DateTime.now().millisecondsSinceEpoch}',
         'type': 'location.batch',
         'payload': {
-          'pings': pings
-              .map((p) => {
-                    'latitude': p['latitude'],
-                    'longitude': p['longitude'],
-                    'accuracyM': p['accuracyM'],
-                    'speedMps': p['speedMps'],
-                    'heading': p['heading'],
-                    'batteryPct': p['batteryPct'],
-                    'isMoving': (p['isMoving'] as int? ?? 1) == 1,
-                    'recordedAt': p['recordedAt'],
-                  })
-              .toList(),
+          // Null-valued keys are dropped rather than sent. A stationary handset
+          // has no speed or heading, and a payload carrying explicit nulls was
+          // rejected wholesale by the server's validator — silently, every
+          // sync, so background tracking never arrived at all.
+          'pings': pings.map((p) {
+            final ping = <String, dynamic>{
+              'latitude': p['latitude'],
+              'longitude': p['longitude'],
+              'isMoving': (p['isMoving'] as int? ?? 1) == 1,
+              'recordedAt': p['recordedAt'],
+            };
+            for (final key in const ['accuracyM', 'speedMps', 'heading', 'batteryPct']) {
+              final value = p[key];
+              if (value != null) ping[key] = value;
+            }
+            return ping;
+          }).toList(),
         },
       });
     }
@@ -234,6 +272,13 @@ class SyncService extends ChangeNotifier {
           }
           applied++;
         }
+      } else if (uuid.startsWith('pings-')) {
+        // The ping batch is synthesised per push and is not an outbox row, so
+        // `markFailed` would silently match nothing. The buffer is deliberately
+        // kept — unsent breadcrumbs are not thrown away — but the rejection has
+        // to leave a trace, or a permanently failing batch looks exactly like a
+        // working one.
+        debugPrint('Location batch rejected: ${result['error'] ?? 'Rejected'}');
       } else {
         await _outbox.markFailed(uuid, (result['error'] ?? 'Rejected').toString());
       }
