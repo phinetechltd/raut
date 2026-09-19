@@ -225,6 +225,46 @@ async function main() {
     replay.json?.data?.results?.find((r) => r.uuid === ids.order)?.entityId === orderId,
   );
 
+  // ── 5b. Background breadcrumbs, shaped the way the handset sends them ──
+  //
+  // The app reads these straight out of SQLite columns that are routinely
+  // NULL — a stationary phone reports no speed and no heading — and serialises
+  // them as explicit nulls. The validator used `optional()`, which accepts a
+  // *missing* key but rejects `null`, so every batch was refused. Nothing
+  // surfaced: the ping buffer is not an outbox row, so the rejection was not
+  // counted, not retried differently, and not shown. A licensed tracking
+  // feature quietly delivered nothing at all.
+  console.log("\n5b. Location breadcrumbs with null speed/heading");
+  const pingBatch = {
+    deviceId,
+    operations: [
+      {
+        uuid: `pings-${deviceId}-${Date.now()}`,
+        type: "location.batch",
+        payload: {
+          pings: [
+            {
+              latitude: customer.latitude,
+              longitude: customer.longitude,
+              accuracyM: null,
+              speedMps: null,
+              heading: null,
+              batteryPct: null,
+              isMoving: true,
+              recordedAt: new Date(t0 + 30_000).toISOString(),
+            },
+          ],
+        },
+      },
+    ],
+  };
+  const pingPush = await api("/sync/push", { method: "POST", token, body: pingBatch });
+  check(
+    "A ping batch with null speed and heading is accepted",
+    pingPush.json?.data?.summary?.applied === 1,
+    JSON.stringify(pingPush.json?.data?.results?.[0]?.error ?? pingPush.json?.data?.summary),
+  );
+
   // ── 6. Server-side effects ──────────────────────────────────────────
   console.log("\n6. Server state reflects the field work");
   const visitAfter = await api(`/visits?customerId=${customer.id}&limit=100`, { token });

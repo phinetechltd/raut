@@ -367,16 +367,22 @@ async function applyOperation(
     case "location.batch": {
       // Background breadcrumbs arrive in bulk; a whole batch is one operation
       // so a day of tracking does not exhaust the 200-op batch limit.
+      // `nullish`, not `optional`. A handset reads these from SQLite columns
+      // that are frequently NULL — a stationary phone reports no speed or
+      // heading — and serialises them as explicit nulls. `optional()` accepts
+      // a missing key but rejects `null`, so every batch failed validation and
+      // the whole day's breadcrumbs were refused, over and over, with nothing
+      // on screen to say so.
       const pings = z
         .array(
           z.object({
             latitude: z.number(),
             longitude: z.number(),
-            accuracyM: z.number().optional(),
-            speedMps: z.number().optional(),
-            heading: z.number().optional(),
-            batteryPct: z.number().optional(),
-            isMoving: z.boolean().optional(),
+            accuracyM: z.number().nullish(),
+            speedMps: z.number().nullish(),
+            heading: z.number().nullish(),
+            batteryPct: z.number().nullish(),
+            isMoving: z.boolean().nullish(),
             recordedAt: z.string(),
           }),
         )
