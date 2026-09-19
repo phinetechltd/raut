@@ -1,0 +1,21 @@
+# Binary files must never have their line endings rewritten. With
+# core.autocrlf=true, Git sniffs some binaries (PDFs especially) as text and
+# would convert LF to CRLF on checkout, silently corrupting them.
+*.pdf     binary
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.webp    binary
+*.ico     binary
+*.ttf     binary
+*.otf     binary
+*.woff    binary
+*.woff2   binary
+*.jar     binary
+*.jks     binary
+*.keystore binary
+*.apk     binary
+*.aab     binary
+*.zip     binary
+*.db      binary
