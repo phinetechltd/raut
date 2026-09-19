@@ -862,6 +862,128 @@ async function main() {
     `4100 debit ${returns?.debitCents}`,
   );
 
+  // ── a discounted sale, returned in pieces ─────────────────────────────
+  // The line total already has the discount off. Credits used to take it off
+  // again — a full return credited less than was charged, cancelled the
+  // invoice, and left the difference on the customer's balance — and the sale
+  // was filed with KRA on an understated taxable base.
+  console.log("\nDiscounted sale, returned in pieces");
+  const balanceOf = async () =>
+    (await api(`/customers/${customerForOrder.id}`, { token: adminToken })).json?.data?.balanceCents;
+  const balanceBeforeSale = await balanceOf();
+
+  const discountedSale = await api("/invoices", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      customerId: customerForOrder.id,
+      issue: true,
+      clientUuid: uuid(),
+      lines: [{ productId: productA.id, quantity: 10, unitPriceCents: 10000, discountCents: 10000 }],
+    },
+  });
+  const discountedId = discountedSale.json?.data?.invoice?.id ?? discountedSale.json?.data?.id;
+  const discounted = (await api(`/invoices/${discountedId}`, { token: adminToken })).json?.data;
+  const discountedInvoice = discounted?.invoice ?? discounted;
+  const discountedLine = discountedInvoice?.lines?.[0];
+  check("A discounted sale can be raised", Boolean(discountedLine), `line total ${discountedLine?.lineTotalCents}`);
+
+  const saleFiling = (await api("/etims/submissions", { token: adminToken })).json?.data?.rows
+    ?.find((r) => r.docType === "SALE" && r.docId === discountedId);
+  const saleItem = saleFiling?.request ? JSON.parse(saleFiling.request)?.items?.[0] : null;
+  check(
+    "KRA is filed a taxable amount and VAT that add up to the total",
+    saleItem != null &&
+      Math.round((saleItem.taxable_amount + saleItem.tax_amount) * 100) ===
+        Math.round(saleItem.total_amount * 100),
+    saleItem ? `${saleItem.taxable_amount} + ${saleItem.tax_amount} vs ${saleItem.total_amount}` : "not filed",
+  );
+  check(
+    "The discount is not sent a second time on top of the discounted price",
+    saleItem != null && saleItem.discount_amount === undefined,
+    `discount_amount ${saleItem?.discount_amount}`,
+  );
+
+  const creditOf = (quantity) =>
+    api("/credit-notes", {
+      method: "POST",
+      token: adminToken,
+      body: {
+        invoiceId: discountedId,
+        reason: "Smoke test: discounted return",
+        restock: true,
+        lines: [{ invoiceLineId: discountedLine?.id, quantity }],
+      },
+    });
+
+  const doubled = await api("/credit-notes", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      invoiceId: discountedId,
+      reason: "Smoke test: one line listed twice",
+      lines: [
+        { invoiceLineId: discountedLine?.id, quantity: 6 },
+        { invoiceLineId: discountedLine?.id, quantity: 6 },
+      ],
+    },
+  });
+  check(
+    "The same line twice in one return is refused, with the reason",
+    doubled.status === 400,
+    `HTTP ${doubled.status}: ${doubled.json?.error?.message ?? ""}`,
+  );
+
+  const firstReturn = await creditOf(3);
+  const firstNote = firstReturn.json?.data?.creditNote;
+  check("Three of ten can be returned", Boolean(firstNote), `credited ${firstNote?.totalCents}`);
+
+  const noteFiling = (await api("/etims/submissions", { token: adminToken })).json?.data?.rows
+    ?.find((r) => r.docType === "CREDIT_NOTE" && r.docId === firstNote?.id);
+  const notePayload = noteFiling?.request ? JSON.parse(noteFiling.request) : null;
+  check(
+    "The return is filed under its own number, not the invoice's",
+    notePayload?.trader_invoice_number === firstNote?.number &&
+      notePayload?.trader_invoice_number !== discountedInvoice?.number,
+    `${notePayload?.trader_invoice_number} (invoice ${discountedInvoice?.number})`,
+  );
+
+  // The last seven, sent twice at the same moment. Only one may land: the
+  // check used to run outside the transaction, so both passed and the
+  // customer was credited, and the goods restocked, twice.
+  const race = await Promise.all([creditOf(7), creditOf(7)]);
+  const landed = race.filter((r) => r.status === 200 || r.status === 201);
+  check(
+    "Two simultaneous returns of the same goods: exactly one lands",
+    landed.length === 1,
+    race.map((r) => r.status).join(" / "),
+  );
+  // Refused as a conflict the rep can read — not a server fault. Every return
+  // refusal used to surface as "Something went wrong on our side".
+  check(
+    "The other is refused as a conflict, with the reason",
+    race.some((r) => r.status === 409),
+    race.map((r) => `${r.status} ${r.json?.error?.message ?? ""}`).join(" / "),
+  );
+
+  const credited = (firstNote?.totalCents ?? 0) + (landed[0]?.json?.data?.creditNote?.totalCents ?? 0);
+  check(
+    "A full return credits back exactly what was charged",
+    credited === discountedLine?.lineTotalCents,
+    `${credited} of ${discountedLine?.lineTotalCents}`,
+  );
+
+  const afterFull = (await api(`/invoices/${discountedId}`, { token: adminToken })).json?.data;
+  check(
+    "The fully returned invoice is cancelled",
+    (afterFull?.invoice ?? afterFull)?.status === "CANCELLED",
+  );
+  check(
+    "The customer's balance is back exactly where it was",
+    (await balanceOf()) === balanceBeforeSale,
+    `${balanceBeforeSale} -> ${await balanceOf()}`,
+  );
+
   // The switch. Turning eTIMS off must never stop a company trading: the sale
   // still completes, the books still move, and nothing is queued. A tax
   // integration that can take the till down is worse than no integration.

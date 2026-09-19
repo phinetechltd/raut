@@ -1,6 +1,8 @@
 import "server-only";
 
+import { badRequest, conflict, notFound } from "@/lib/api";
 import { db } from "@/lib/db";
+import { creditLineAmounts } from "@/lib/money";
 import { nextNumber } from "@/lib/numbering";
 import { returnFromSale } from "./inventory";
 import { postCreditNote } from "./posting";
@@ -31,83 +33,108 @@ export interface CreateCreditNoteInput {
 
 export async function createCreditNote(input: CreateCreditNoteInput) {
   if (input.lines.length === 0) {
-    throw new Error("A credit note must credit at least one line");
+    throw badRequest("A credit note must credit at least one line");
   }
   if (!input.reason?.trim()) {
-    throw new Error("A credit note needs a reason");
+    throw badRequest("A credit note needs a reason");
   }
 
-  const invoice = await db.invoice.findFirst({
-    where: { id: input.invoiceId, companyId: input.companyId },
-    include: { lines: true },
-  });
-  if (!invoice) throw new Error("Invoice not found");
-  if (invoice.status === "DRAFT") {
-    throw new Error("A draft invoice can be edited; it does not need a credit note");
-  }
-  if (invoice.status === "CANCELLED") {
-    throw new Error("This invoice is already cancelled");
-  }
-
-  // How much of each line has already been credited. Without this, three
-  // separate notes could each credit the full quantity and the customer would
-  // be refunded three times for one return.
-  const priorLines = await db.creditNoteLine.findMany({
-    where: {
-      creditNote: { companyId: input.companyId, invoiceId: invoice.id, status: { not: "CANCELLED" } },
-    },
-    select: { invoiceLineId: true, quantity: true },
-  });
-  const alreadyCredited = new Map<string, number>();
-  for (const l of priorLines) {
-    if (!l.invoiceLineId) continue;
-    alreadyCredited.set(l.invoiceLineId, (alreadyCredited.get(l.invoiceLineId) ?? 0) + l.quantity);
-  }
-
-  const prepared = input.lines.map((req) => {
-    const line = invoice.lines.find((l) => l.id === req.invoiceLineId);
-    if (!line) throw new Error("That line is not on this invoice");
-    if (req.quantity <= 0) throw new Error("Credited quantity must be positive");
-
-    const remaining = line.quantity - (alreadyCredited.get(line.id) ?? 0);
-    if (req.quantity > remaining) {
-      throw new Error(
-        `Cannot credit ${req.quantity} of ${line.description}: only ${remaining} remain uncredited`,
-      );
+  // One entry per line. Each entry is checked against earlier notes, not
+  // against its siblings, so the same line twice in one request would credit
+  // both halves of a quantity that was only sold once.
+  const seen = new Set<string>();
+  for (const l of input.lines) {
+    if (seen.has(l.invoiceLineId)) {
+      throw badRequest("Each invoice line can appear only once in a credit note");
     }
-
-    // Credit at the price actually charged, not today's price. A price rise
-    // between sale and return would otherwise refund more than was taken.
-    const unitNet = Math.round((line.lineTotalCents - line.discountCents) / line.quantity);
-    const lineTotal = unitNet * req.quantity;
-    const tax = Math.round((lineTotal * line.taxRateBp) / (10_000 + line.taxRateBp));
-
-    // Base units per unit sold, so returning one carton puts twelve bottles
-    // back rather than one.
-    const perUnit = line.quantity > 0 ? (line.baseQuantity || line.quantity) / line.quantity : 1;
-
-    return {
-      invoiceLineId: line.id,
-      productId: line.productId,
-      variantId: line.variantId,
-      variantName: line.variantName,
-      description: line.description,
-      quantity: req.quantity,
-      baseQuantity: Math.round(req.quantity * perUnit),
-      unitPriceCents: line.unitPriceCents,
-      taxRateBp: line.taxRateBp,
-      lineTotalCents: lineTotal,
-      taxCents: tax,
-    };
-  });
-
-  const totalCents = prepared.reduce((n, l) => n + l.lineTotalCents, 0);
-  const taxCents = prepared.reduce((n, l) => n + l.taxCents, 0);
-
-  const number = await nextNumber(input.companyId, "CREDIT_NOTE");
+    seen.add(l.invoiceLineId);
+  }
 
   return db.$transaction(
     async (tx) => {
+      // Take the write lock before reading anything. Two returns against the
+      // same invoice at the same moment used to read the same "already
+      // credited", both pass, and both credit the customer and restock the
+      // goods. Touching the invoice first serialises them — SQLite has one
+      // writer, and Postgres would lock the row — so the second sees the first.
+      const locked = await tx.invoice.updateMany({
+        where: { id: input.invoiceId, companyId: input.companyId },
+        data: { updatedAt: new Date() },
+      });
+      if (locked.count === 0) throw notFound("Invoice not found");
+
+      const invoice = await tx.invoice.findFirstOrThrow({
+        where: { id: input.invoiceId, companyId: input.companyId },
+        include: { lines: true },
+      });
+      if (invoice.status === "DRAFT") {
+        throw conflict("A draft invoice can be edited; it does not need a credit note");
+      }
+      if (invoice.status === "CANCELLED") {
+        throw conflict("This invoice is already cancelled");
+      }
+
+      // What each line has already had credited. Without this, three separate
+      // notes could each credit the full quantity and the customer would be
+      // refunded three times for one return.
+      const priorLines = await tx.creditNoteLine.findMany({
+        where: {
+          creditNote: { companyId: input.companyId, invoiceId: invoice.id, status: { not: "CANCELLED" } },
+        },
+        select: { invoiceLineId: true, quantity: true, lineTotalCents: true },
+      });
+      const prior = new Map<string, Array<{ quantity: number; lineTotalCents: number }>>();
+      for (const l of priorLines) {
+        if (!l.invoiceLineId) continue;
+        prior.set(l.invoiceLineId, [...(prior.get(l.invoiceLineId) ?? []), l]);
+      }
+      const creditedQuantity = (lineId: string) =>
+        (prior.get(lineId) ?? []).reduce((n, l) => n + l.quantity, 0);
+
+      const prepared = input.lines.map((req) => {
+        const line = invoice.lines.find((l) => l.id === req.invoiceLineId);
+        if (!line) throw badRequest("That line is not on this invoice");
+        if (!Number.isInteger(req.quantity) || req.quantity <= 0) {
+          throw badRequest("Credited quantity must be a positive whole number");
+        }
+
+        const remaining = line.quantity - creditedQuantity(line.id);
+        if (req.quantity > remaining) {
+          throw conflict(
+            `Cannot credit ${req.quantity} of ${line.description}: only ${remaining} remain uncredited`,
+          );
+        }
+
+        // Credited at the price actually charged, discount and all, and to the
+        // cent once the whole line has come back.
+        const amounts = creditLineAmounts(line, prior.get(line.id) ?? [], req.quantity);
+
+        // Base units per unit sold, so returning one carton puts twelve bottles
+        // back rather than one.
+        const perUnit = line.quantity > 0 ? (line.baseQuantity || line.quantity) / line.quantity : 1;
+
+        return {
+          invoiceLineId: line.id,
+          productId: line.productId,
+          variantId: line.variantId,
+          variantName: line.variantName,
+          description: line.description,
+          quantity: req.quantity,
+          baseQuantity: Math.round(req.quantity * perUnit),
+          unitPriceCents: line.unitPriceCents,
+          taxRateBp: line.taxRateBp,
+          lineTotalCents: amounts.totalCents,
+          taxCents: amounts.taxCents,
+        };
+      });
+
+      const totalCents = prepared.reduce((n, l) => n + l.lineTotalCents, 0);
+      const taxCents = prepared.reduce((n, l) => n + l.taxCents, 0);
+
+      // Numbered inside the transaction, so a note that fails validation or
+      // rolls back does not burn a CRN number.
+      const number = await nextNumber(input.companyId, "CREDIT_NOTE", tx);
+
       const note = await tx.creditNote.create({
         data: {
           companyId: input.companyId,
@@ -171,11 +198,10 @@ export async function createCreditNote(input: CreateCreditNoteInput) {
 
       // A fully credited invoice is cancelled; a partly credited one is not,
       // because the balance of it is still owed.
-      const creditedNow = new Map(alreadyCredited);
-      for (const l of prepared) {
-        creditedNow.set(l.invoiceLineId, (creditedNow.get(l.invoiceLineId) ?? 0) + l.quantity);
-      }
-      const fully = invoice.lines.every((l) => (creditedNow.get(l.id) ?? 0) >= l.quantity);
+      const creditingNow = new Map(prepared.map((l) => [l.invoiceLineId, l.quantity]));
+      const fully = invoice.lines.every(
+        (l) => creditedQuantity(l.id) + (creditingNow.get(l.id) ?? 0) >= l.quantity,
+      );
       if (fully) {
         await tx.invoice.update({
           where: { id: invoice.id },

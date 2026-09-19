@@ -1,6 +1,7 @@
 import "server-only";
 
 import { db } from "@/lib/db";
+import { chargedLine } from "@/lib/money";
 import {
   adapterFor,
   credentialFingerprint,
@@ -337,8 +338,11 @@ export async function transmitInvoice(
   });
 
   const items: SaleLine[] = invoice.lines.map((l) => {
-    const net = l.lineTotalCents - l.discountCents;
-    const tax = Math.round((net * l.taxRateBp) / (10_000 + l.taxRateBp));
+    // The stored line total is already net of the discount. This used to take
+    // the discount off again, so every discounted sale reached KRA with its
+    // taxable amount and VAT understated — and a taxable + VAT that no longer
+    // added up to the total it was filed with.
+    const charged = chargedLine(l);
 
     // Filed in **base units**, not in cartons. eTIMS deducts stock from the
     // item it registered, and that item is the product; sending two cartons
@@ -357,10 +361,13 @@ export async function transmitInvoice(
       taxTypeCode: l.product.etimsTaxTypeCode ?? taxTypeForRate(l.taxRateBp),
       quantity: units,
       unitPrice,
-      totalAmount: l.lineTotalCents / 100,
-      taxableAmount: (net - tax) / 100,
-      taxAmount: tax / 100,
-      discountAmount: l.discountCents ? l.discountCents / 100 : undefined,
+      totalAmount: charged.lineTotalCents / 100,
+      taxableAmount: charged.netCents / 100,
+      taxAmount: charged.taxCents / 100,
+      // No discount_amount. The unit price and total above are what the
+      // customer paid, discount already applied; Digitax defines the discount
+      // against total_amount, so sending it as well invites it to be taken
+      // off a second time. KRA is filed the consideration actually charged.
       isStockable: l.product.trackStock,
       description: l.variantName ? `${l.description} (${l.variantName})` : l.description,
     };
@@ -500,8 +507,13 @@ export async function transmitCreditNote(
   }
 
   const result = await ctx.adapter.submitCreditNote(ctx.creds, {
+    // The original sale is identified by sale_id. trader_invoice_number is
+    // this document's own reference: Digitax stores a credit note as a sale in
+    // its own right, looked up by business and trader invoice number. Sending
+    // the invoice's number here gave the sale and every return against it the
+    // same key, so the second partial return collided with the first.
     saleId: note.invoice.etimsSaleId,
-    traderInvoiceNumber: note.invoice.number,
+    traderInvoiceNumber: note.number,
     returnDate: note.issueDate.toISOString().slice(0, 10),
     invoiceDetails: note.reason,
     callbackUrl: callbackUrl(),

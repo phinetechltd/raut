@@ -93,6 +93,104 @@ export function computeTotals(lines: LineInput[]): DocumentTotals {
   return { subtotalCents, discountCents, taxCents, totalCents };
 }
 
+/** The VAT inside a tax-inclusive amount, rounded the way KRA derives it. */
+export function inclusiveTax(totalCents: number, taxRateBp: number): number {
+  return Math.round((totalCents * taxRateBp) / (10_000 + taxRateBp));
+}
+
+/** A line as stored on an invoice — what the customer was actually charged. */
+export interface ChargedLine {
+  quantity: number;
+  unitPriceCents: number;
+  discountCents: number;
+  taxRateBp: number;
+  lineTotalCents: number;
+}
+
+/**
+ * Splits a stored invoice line into its charged components.
+ *
+ * `lineTotalCents` already has the discount taken off and VAT added — it is
+ * `computeLine`'s output. Two separate bugs came from subtracting the discount
+ * from it a second time: returns credited less than was charged, and discounted
+ * sales were filed with KRA on an understated taxable base. Anything that needs
+ * the parts of a charged line gets them here, not by re-deriving them.
+ */
+export function chargedLine(line: ChargedLine): LineTotals {
+  const computed = computeLine(line);
+  if (computed.lineTotalCents === line.lineTotalCents) return computed;
+
+  // A stored total the formula does not reproduce — written before computeLine
+  // was the only engine. What the customer paid wins; VAT is split out of it.
+  const taxCents = inclusiveTax(line.lineTotalCents, line.taxRateBp);
+  const netCents = line.lineTotalCents - taxCents;
+  return {
+    grossCents: netCents + computed.discountCents,
+    discountCents: computed.discountCents,
+    netCents,
+    taxCents,
+    lineTotalCents: line.lineTotalCents,
+  };
+}
+
+export interface CreditAmounts {
+  totalCents: number;
+  taxCents: number;
+  netCents: number;
+}
+
+/**
+ * What to credit when `quantity` units of a sold line come back.
+ *
+ * Credited at the price actually charged, discount and all — never today's
+ * price, which would refund more than was taken after a price rise. A partial
+ * return takes its proportional share; the return that completes the line takes
+ * exactly what is left. However the line is returned, the credits add up to the
+ * cent to what was charged, so a full return leaves nothing on the customer's
+ * balance — including a line part-credited by the old formula, whose shortfall
+ * the completing return makes good.
+ *
+ * VAT on a partial return is extracted from its tax-inclusive total, which is
+ * how KRA derives it from the filed amounts; the completing return takes the
+ * remainder of the line's VAT so the reversal matches what was charged.
+ *
+ * @param prior the line's earlier, uncancelled credits
+ */
+export function creditLineAmounts(
+  line: ChargedLine,
+  prior: ReadonlyArray<{ quantity: number; lineTotalCents: number }>,
+  quantity: number,
+): CreditAmounts {
+  if (!Number.isInteger(quantity) || quantity <= 0) {
+    throw new Error("Credited quantity must be a positive whole number");
+  }
+
+  let creditedQuantity = 0;
+  let creditedTotal = 0;
+  let creditedTax = 0;
+  for (const p of prior) {
+    creditedQuantity += p.quantity;
+    creditedTotal += p.lineTotalCents;
+    creditedTax += inclusiveTax(p.lineTotalCents, line.taxRateBp);
+  }
+
+  const remaining = line.quantity - creditedQuantity;
+  if (quantity > remaining) {
+    throw new Error(`Cannot credit ${quantity}: only ${remaining} remain uncredited`);
+  }
+
+  const charged = chargedLine(line);
+  if (quantity === remaining) {
+    const totalCents = charged.lineTotalCents - creditedTotal;
+    const taxCents = charged.taxCents - creditedTax;
+    return { totalCents, taxCents, netCents: totalCents - taxCents };
+  }
+
+  const totalCents = Math.round((charged.lineTotalCents * quantity) / line.quantity);
+  const taxCents = inclusiveTax(totalCents, line.taxRateBp);
+  return { totalCents, taxCents, netCents: totalCents - taxCents };
+}
+
 /**
  * Invoice status derived from what has been paid and when it fell due.
  * Kept in one place so the console, the API and the SMS reminder job cannot

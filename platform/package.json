@@ -14,6 +14,7 @@
     "db:migrate": "prisma migrate dev",
     "db:seed": "tsx prisma/seed.ts && npm run ledger:backfill",
     "ledger:backfill": "tsx --tsconfig scripts/tsconfig.json scripts/backfill-ledger.ts",
+    "audit:credit-notes": "tsx --tsconfig scripts/tsconfig.json scripts/audit-credit-notes.ts",
     "db:reset": "prisma db push --force-reset && npm run db:seed",
     "db:studio": "prisma studio",
     "test:unit": "tsx --tsconfig scripts/tsconfig.json --test \"src/**/*.test.ts\"",
