@@ -52,6 +52,33 @@ async function page(cookie, path) {
   return { status: res.status, html, location: res.headers.get("location") };
 }
 
+/**
+ * Pushes one operation through the offline sync endpoint and returns its result.
+ *
+ * The payload names ids that do not exist, so an operation the role is allowed
+ * to perform gets past the permission gate and then fails on its data: nothing
+ * is written either way. A refusal carries `code`; anything else means the gate
+ * let it through.
+ */
+async function pushProbe(token, type) {
+  const res = await fetch(`${BASE}/api/v1/sync/push`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      deviceId: "permission-probe",
+      operations: [
+        {
+          uuid: `probe-${type}-${Date.now()}-${Math.random().toString(36).slice(2)}`,
+          type,
+          payload: { customerId: "permission-probe", visitId: "permission-probe", id: "permission-probe" },
+        },
+      ],
+    }),
+  });
+  const body = await res.json().catch(() => null);
+  return body?.data?.results?.[0] ?? { status: `HTTP ${res.status}` };
+}
+
 async function api(token, path, method = "GET") {
   const res = await fetch(`${BASE}/api/v1${path}`, {
     method,
@@ -87,6 +114,7 @@ const ROLES = [
     redirect: ["/admin"],
     apiAllow: ["/customers", "/invoices", "/expenses", "/users", "/settings/credentials"],
     apiDeny: ["/platform/companies", "/platform/overview"],
+    syncAllow: ["invoice.create", "payment.create", "order.create", "customer.update", "expense.create"],
   },
   {
     label: "Accountant",
@@ -108,6 +136,8 @@ const ROLES = [
     ],
     // No stock-write rights and no platform reach.
     apiDeny: ["/platform/companies"],
+    syncAllow: ["invoice.create", "payment.create"],
+    syncDeny: ["customer.update", "order.create", "visit.create"],
   },
   {
     label: "Storekeeper",
@@ -116,6 +146,17 @@ const ROLES = [
     redirect: ["/admin"],
     apiAllow: ["/stock", "/products", "/suppliers"],
     apiDeny: ["/platform/companies", "/reports/balance-sheet", "/reports/stock-valuation"],
+    // The escalation the sync endpoint used to allow: a storekeeper raising
+    // invoices, recording payments against balances and moving shop pins.
+    syncDeny: [
+      "invoice.create",
+      "payment.create",
+      "customer.create",
+      "customer.update",
+      "order.create",
+      "expense.create",
+      "visit.create",
+    ],
   },
   {
     label: "Field Rep",
@@ -140,6 +181,21 @@ const ROLES = [
       "/reports/stock-valuation",
       "/reports/trial-balance",
     ],
+    // Everything the field app actually sends is allowed. invoice.create is
+    // not: field reps hold no invoice:write, and the app never queues it.
+    syncAllow: [
+      "visit.create",
+      "visit.checkin",
+      "visit.checkout",
+      "order.create",
+      "payment.create",
+      "customer.create",
+      "customer.update",
+      "activity.create",
+      "expense.create",
+      "location.batch",
+    ],
+    syncDeny: ["invoice.create"],
   },
   {
     label: "Core-only Admin (no modules)",
@@ -150,6 +206,8 @@ const ROLES = [
     gated: ["/app/customers", "/app/sales", "/app/inventory", "/app/field", "/app/finance"],
     apiAllow: ["/customers"],
     apiDeny: ["/invoices", "/visits", "/stock", "/expenses"],
+    // The paywall must hold on the sync path too, and say it is the licence.
+    syncUnlicensed: ["invoice.create", "payment.create", "order.create"],
   },
 ];
 
@@ -213,6 +271,21 @@ async function main() {
       // 402 = module not licensed, 403 = role forbidden. Both are correct
       // refusals; a 200 here would mean the boundary leaks.
       check(`API ${path} refused`, s === 402 || s === 403 || s === 404, `HTTP ${s}`);
+    }
+
+    for (const type of role.syncAllow ?? []) {
+      const r = await pushProbe(session.token, type);
+      check(`sync ${type} passes the gate`, r.status === "failed" && !r.code, r.code ?? r.status);
+    }
+
+    for (const type of role.syncDeny ?? []) {
+      const r = await pushProbe(session.token, type);
+      check(`sync ${type} refused`, r.code === "FORBIDDEN", r.code ?? `${r.status}: ${r.error ?? ""}`);
+    }
+
+    for (const type of role.syncUnlicensed ?? []) {
+      const r = await pushProbe(session.token, type);
+      check(`sync ${type} refused as unlicensed`, r.code === "MODULE_NOT_LICENSED", r.code ?? r.status);
     }
   }
 

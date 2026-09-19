@@ -4,6 +4,7 @@ import { handler, parseBody } from "@/lib/api";
 import { auditAs } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { nextNumber } from "@/lib/numbering";
+import { denialReason, type Permission } from "@/lib/rbac";
 import { companyIdOf } from "@/lib/tenant";
 import { checkIn, checkOut } from "@/server/field";
 import { createInvoice, createSalesOrder, notifyPayment, recordPayment } from "@/server/sales";
@@ -72,7 +73,36 @@ interface OpResult {
   entityId?: string;
   entityType?: string;
   error?: string;
+  /**
+   * Set when the operation was refused rather than broken. A handset treats
+   * these as permanent — retrying cannot help until someone changes the role
+   * or the licence — and shows them to the rep instead of silently retrying.
+   */
+  code?: "FORBIDDEN" | "MODULE_NOT_LICENSED";
 }
+
+/**
+ * The permission each operation needs — the same one its REST twin demands.
+ *
+ * This endpoint used to check only that the caller was signed in, so every
+ * role could push every operation: a storekeeper could raise invoices, record
+ * payments against a customer's balance and move a shop's GPS pin, and a
+ * company that had not licensed Sales could invoice through sync. `can` checks
+ * the role and the owning module together, which closes both.
+ */
+const OPERATION_PERMISSION: Record<z.infer<typeof operationSchema>["type"], Permission> = {
+  "visit.create": "visit:write",
+  "visit.checkin": "visit:write",
+  "visit.checkout": "visit:write",
+  "order.create": "order:write",
+  "invoice.create": "invoice:write",
+  "payment.create": "payment:write",
+  "customer.create": "customer:write",
+  "customer.update": "customer:write",
+  "activity.create": "activity:write",
+  "expense.create": "expense:write",
+  "location.batch": "field:self",
+};
 
 export const POST = handler({}, async ({ principal, request }) => {
   const companyId = companyIdOf(principal);
@@ -89,6 +119,22 @@ export const POST = handler({}, async ({ principal, request }) => {
         status: "duplicate",
         entityId: seen.entityId ?? undefined,
         entityType: seen.entityType ?? undefined,
+      });
+      continue;
+    }
+
+    // After the idempotency check, not before: work that was accepted must
+    // still resolve on replay even if the rep's role has changed since.
+    const denied = denialReason(principal, OPERATION_PERMISSION[op.type]);
+    if (denied) {
+      results.push({
+        uuid: op.uuid,
+        status: "failed",
+        code: denied === "module" ? "MODULE_NOT_LICENSED" : "FORBIDDEN",
+        error:
+          denied === "module"
+            ? "Your company's subscription does not include this"
+            : "Your role does not permit this action",
       });
       continue;
     }
@@ -126,13 +172,14 @@ export const POST = handler({}, async ({ principal, request }) => {
 
   const applied = results.filter((r) => r.status === "applied").length;
   const failed = results.filter((r) => r.status === "failed").length;
+  const refused = results.filter((r) => r.code).length;
 
   await auditAs(
     principal,
     "SYNC",
     "SyncBatch",
     body.deviceId ?? null,
-    { total: results.length, applied, failed },
+    { total: results.length, applied, failed, refused },
     request,
   );
 
@@ -158,6 +205,26 @@ export const POST = handler({}, async ({ principal, request }) => {
  * pin. Scoping the lookup by companyId makes a foreign id indistinguishable
  * from a missing one, which is the same stance the REST layer takes.
  */
+/**
+ * The same rule for optional references: a territory or expense category named
+ * by a handset must belong to the caller's company. Absent stays absent; a
+ * foreign or unknown id is refused rather than silently linked.
+ */
+async function idInTenant(
+  model: "territory" | "expenseCategory",
+  companyId: string,
+  id: string | undefined,
+): Promise<string | null> {
+  if (!id) return null;
+  const where = { id, companyId };
+  const found =
+    model === "territory"
+      ? await db.territory.findFirst({ where, select: { id: true } })
+      : await db.expenseCategory.findFirst({ where, select: { id: true } });
+  if (!found) throw new Error(`${model === "territory" ? "Territory" : "Expense category"} ${id} not found`);
+  return found.id;
+}
+
 async function customerInTenant(companyId: string, id: unknown): Promise<string> {
   const customerId = String(id ?? "");
   const found = await db.customer.findFirst({
@@ -286,12 +353,16 @@ async function applyOperation(
     }
 
     case "customer.create": {
+      // Validated before anything is written or numbered. `String(p.name)` on
+      // a payload without a name created a customer called "undefined".
+      const name = z.string().trim().min(1, "A customer needs a name").parse(p.name);
+      const territoryId = await idInTenant("territory", companyId, str("territoryId"));
       const code = str("code") ?? (await nextNumber(companyId, "CUSTOMER"));
       const customer = await db.customer.create({
         data: {
           companyId,
           code,
-          name: String(p.name),
+          name,
           type: str("type") ?? "RETAIL",
           phone: str("phone") ?? null,
           email: str("email") ?? null,
@@ -299,7 +370,7 @@ async function applyOperation(
           town: str("town") ?? null,
           latitude: num("latitude") ?? null,
           longitude: num("longitude") ?? null,
-          territoryId: str("territoryId") ?? null,
+          territoryId,
           assignedRepId: principal.userId,
           notes: str("notes") ?? null,
           createdById: principal.userId,
@@ -343,16 +414,29 @@ async function applyOperation(
     }
 
     case "expense.create": {
+      const description = z
+        .string()
+        .trim()
+        .min(1, "An expense needs a description")
+        .parse(p.description);
+      const amountCents = z
+        .number()
+        .int()
+        .positive("An expense needs an amount above zero")
+        .parse(p.amountCents);
+      // The category decides which ledger account the expense posts to, so a
+      // foreign id would book this company's spend against another's chart.
+      const categoryId = await idInTenant("expenseCategory", companyId, str("categoryId"));
       const number = await nextNumber(companyId, "EXPENSE");
       const expense = await db.expense.create({
         data: {
           companyId,
           branchId: principal.branchId ?? null,
-          categoryId: str("categoryId") ?? null,
+          categoryId,
           userId: principal.userId,
           number,
-          description: String(p.description),
-          amountCents: Number(p.amountCents),
+          description,
+          amountCents,
           status: "SUBMITTED",
           incurredAt: at ?? new Date(),
           paymentMethod: str("paymentMethod") ?? "CASH",
