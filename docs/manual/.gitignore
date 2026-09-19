@@ -1,0 +1,8 @@
+# Page renders from preview.py — regenerated on every check.
+preview/
+# Scratch capture used while lining up a shot.
+shots/tmp.png
+# Captured by the scripts but not used by the build.
+shots/01-login.png
+shots/10-pos.png
+shots/13-order.png
