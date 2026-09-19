@@ -47,7 +47,7 @@ class OutboxEntry {
 
   /// An entry the server has repeatedly refused. Kept, not deleted, so the rep
   /// can see what did not go through rather than losing the work silently.
-  bool get isStuck => syncedAt == null && attempts >= 5;
+  bool get isStuck => syncedAt == null && attempts >= Outbox.stuckAfter;
 
   factory OutboxEntry.fromRow(Map<String, Object?> row) => OutboxEntry(
         uuid: row['uuid'] as String,
@@ -101,6 +101,9 @@ class Outbox {
   final LocalDb _db;
   static const _uuid = Uuid();
 
+  /// Failed attempts after which an entry is shown to the rep as stuck.
+  static const stuckAfter = 5;
+
   /// Fired whenever the pending set changes.
   ///
   /// Without this the rep is told "Everything synced" the moment they go
@@ -151,7 +154,7 @@ class Outbox {
       _db.count('outbox', where: 'syncedAt IS NULL');
 
   Future<int> stuckCount() =>
-      _db.count('outbox', where: 'syncedAt IS NULL AND attempts >= 5');
+      _db.count('outbox', where: 'syncedAt IS NULL AND attempts >= $stuckAfter');
 
   Future<void> markSynced(String uuid, {String? serverId}) async {
     await _db.update(
@@ -215,6 +218,18 @@ class Outbox {
       [error, uuid],
     );
     _changed(); // an entry crossing the stuck threshold changes stuckCount
+  }
+
+  /// Marks an entry the server refused outright — the rep's role or the
+  /// company's licence does not allow it. Retries cannot fix that, so it goes
+  /// straight to stuck, where the sync queue shows it, instead of spending
+  /// four more cycles failing quietly first.
+  Future<void> markRefused(String uuid, String error) async {
+    await _db.execute(
+      'UPDATE outbox SET attempts = MAX(attempts, ?), lastError = ? WHERE uuid = ?',
+      [stuckAfter, error, uuid],
+    );
+    _changed();
   }
 
   /// Drops acknowledged entries older than a week. Recent ones are retained so

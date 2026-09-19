@@ -254,16 +254,32 @@ class SyncService extends ChangeNotifier {
     final results = (response['results'] as List?) ?? const [];
     var applied = 0;
 
+    // Only the breadcrumbs this batch carried. The push sends at most 400, and
+    // clearing the whole buffer on success threw away everything after them —
+    // a rep offline for an afternoon lost most of the day's trail.
+    final sentPingIds = pings.map((p) => p['id'] as int).toList();
+    Future<void> clearSentPings() async {
+      if (sentPingIds.isEmpty) return;
+      await _db.delete(
+        'location_buffer',
+        where: 'id IN (${List.filled(sentPingIds.length, '?').join(',')})',
+        whereArgs: sentPingIds,
+      );
+    }
+
     for (final raw in results) {
       final result = raw as Map<String, dynamic>;
       final uuid = result['uuid'] as String;
       final status = result['status'] as String;
+      // Set when the server refused the operation outright — the role or the
+      // licence does not allow it — rather than failing to apply it.
+      final refused = result['code'] != null;
 
       if (status == 'applied' || status == 'duplicate') {
         // A duplicate means an earlier attempt already landed — treat it as
         // success, which is the entire point of the idempotency key.
         if (uuid.startsWith('pings-')) {
-          await _db.delete('location_buffer');
+          await clearSentPings();
         } else {
           final serverId = result['entityId'] as String?;
           await _outbox.markSynced(uuid, serverId: serverId);
@@ -274,11 +290,18 @@ class SyncService extends ChangeNotifier {
         }
       } else if (uuid.startsWith('pings-')) {
         // The ping batch is synthesised per push and is not an outbox row, so
-        // `markFailed` would silently match nothing. The buffer is deliberately
-        // kept — unsent breadcrumbs are not thrown away — but the rejection has
-        // to leave a trace, or a permanently failing batch looks exactly like a
-        // working one.
+        // `markFailed` would silently match nothing. A batch that failed to
+        // apply is kept for the next cycle — unsent breadcrumbs are not thrown
+        // away. One the server refused outright will be refused every time;
+        // holding it would only grow the buffer, so it is dropped.
         debugPrint('Location batch rejected: ${result['error'] ?? 'Rejected'}');
+        if (refused) await clearSentPings();
+      } else if (refused) {
+        // Retrying cannot change a refusal; only an admin can. Marked stuck at
+        // once so the rep sees it in the sync queue instead of it retrying in
+        // silence. It is still sent each cycle, so it goes through on its own
+        // if the role or the licence is put right.
+        await _outbox.markRefused(uuid, (result['error'] ?? 'Refused').toString());
       } else {
         await _outbox.markFailed(uuid, (result['error'] ?? 'Rejected').toString());
       }
