@@ -20,17 +20,22 @@ export function Card({
   className,
   padded = true,
   as: Tag = "div",
+  interactive = false,
 }: {
   children: ReactNode;
   className?: string;
   padded?: boolean;
   as?: "div" | "section" | "article";
+  /** Hover lift for cards that are links or open a detail. */
+  interactive?: boolean;
 }) {
   return (
     <Tag
       className={cx(
-        "rounded-lg border border-border bg-surface shadow-sm",
+        "rounded-xl border border-border bg-surface shadow-sm",
         padded && "p-5",
+        interactive &&
+          "transition-[border-color,box-shadow,transform] hover:-translate-y-px hover:border-border-strong hover:shadow-md",
         className,
       )}
     >
@@ -328,7 +333,7 @@ export function Field({
   children,
   required,
 }: {
-  label: string;
+  label?: string;
   hint?: string;
   error?: string;
   htmlFor?: string;
@@ -337,10 +342,12 @@ export function Field({
 }) {
   return (
     <div>
-      <label htmlFor={htmlFor} className="mb-1 block text-sm font-medium">
-        {label}
-        {required ? <span className="ml-0.5 text-danger">*</span> : null}
-      </label>
+      {label ? (
+        <label htmlFor={htmlFor} className="mb-1 block text-sm font-medium">
+          {label}
+          {required ? <span className="ml-0.5 text-danger">*</span> : null}
+        </label>
+      ) : null}
       {children}
       {error ? (
         <p className="mt-1 text-sm text-danger">{error}</p>

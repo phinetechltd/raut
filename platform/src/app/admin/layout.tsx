@@ -5,9 +5,10 @@ export const dynamic = "force-dynamic";
 
 const NAV: NavItem[] = [
   { href: "/admin", label: "Platform Overview" },
-  { href: "/admin/companies", label: "Companies" },
-  { href: "/admin/modules", label: "Module Catalogue" },
-  { href: "/admin/audit", label: "Audit Log" },
+  { href: "/admin/companies", label: "Companies", group: "Tenants" },
+  { href: "/admin/companies/new", label: "Onboard a company", group: "Tenants" },
+  { href: "/admin/modules", label: "Module Catalogue", group: "Governance" },
+  { href: "/admin/audit", label: "Audit Log", group: "Governance" },
 ];
 
 export default async function AdminLayout({

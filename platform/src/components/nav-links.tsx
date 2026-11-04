@@ -2,14 +2,50 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import type { ReactNode } from "react";
 
 import type { NavItem } from "./shell";
+import {
+  CustomersIcon,
+  DashboardIcon,
+  FieldIcon,
+  FinanceIcon,
+  InventoryIcon,
+  PlatformIcon,
+  ProcurementIcon,
+  ReportsIcon,
+  RoutesIcon,
+  SalesIcon,
+  SettingsIcon,
+  SmsIcon,
+} from "./ui/icons";
 
 function isActive(pathname: string, href: string): boolean {
   // "/app" must not light up for "/app/customers", but "/app/customers/abc"
   // should keep "/app/customers" highlighted.
   if (href === "/app" || href === "/admin") return pathname === href;
   return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+/** Icon per section, keyed by href so layouts stay declarative. */
+const ICONS: Array<[prefix: string, icon: ReactNode]> = [
+  ["/admin", <PlatformIcon key="p" />],
+  ["/app/customers", <CustomersIcon key="c" />],
+  ["/app/sales", <SalesIcon key="s" />],
+  ["/app/inventory", <InventoryIcon key="i" />],
+  ["/app/procurement", <ProcurementIcon key="pr" />],
+  ["/app/finance", <FinanceIcon key="f" />],
+  ["/app/field", <FieldIcon key="fd" />],
+  ["/app/routes", <RoutesIcon key="r" />],
+  ["/app/sms", <SmsIcon key="sms" />],
+  ["/app/reports", <ReportsIcon key="rep" />],
+  ["/app/settings", <SettingsIcon key="set" />],
+];
+
+function iconFor(href: string): ReactNode {
+  const found = ICONS.find(([prefix]) => href === prefix || href.startsWith(`${prefix}/`));
+  if (found) return found[1];
+  return href === "/app" ? <DashboardIcon /> : <PlatformIcon />;
 }
 
 export function NavLinks({
@@ -44,9 +80,16 @@ export function NavLinks({
               key={item.href}
               title="Not included in your subscription"
               aria-disabled="true"
-              className="flex cursor-not-allowed items-center justify-between rounded px-2.5 py-1.5 text-base text-content-muted opacity-55"
+              className={
+                variant === "strip"
+                  ? "flex cursor-not-allowed items-center justify-between whitespace-nowrap rounded px-2.5 py-1 text-sm text-content-muted opacity-55"
+                  : "flex cursor-not-allowed items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13.5px] text-sidebar-subtle opacity-55"
+              }
             >
-              <span className="truncate">{item.label}</span>
+              <span className="flex min-w-0 items-center gap-2.5">
+                {variant === "sidebar" ? <span className="shrink-0 opacity-80">{iconFor(item.href)}</span> : null}
+                <span className="truncate">{item.label}</span>
+              </span>
               <LockIcon />
             </span>
           );
@@ -74,23 +117,16 @@ export function NavLinks({
             key={item.href}
             href={item.href}
             aria-current={active ? "page" : undefined}
-            className={`relative flex items-center justify-between gap-2 rounded px-2.5 py-1.5 text-base transition-colors ${
+            className={`relative flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13.5px] transition-colors ${
               active
-                ? "bg-accent-subtle font-medium text-accent"
-                : "text-content-secondary hover:bg-surface-hover hover:text-content"
+                ? "bg-sidebar-active font-medium text-sidebar-activetext"
+                : "text-sidebar-muted hover:bg-sidebar-hover hover:text-sidebar-content"
             }`}
           >
-            {/* Active rail — a second signal beside colour, for the same reason
-                charts direct-label rather than relying on hue alone. */}
-            {active ? (
-              <span
-                className="absolute left-0 top-1/2 h-4 w-0.5 -translate-y-1/2 rounded-r bg-accent"
-                aria-hidden="true"
-              />
-            ) : null}
+            <span className="shrink-0 opacity-90">{iconFor(item.href)}</span>
             <span className="truncate">{item.label}</span>
             {item.badge ? (
-              <span className="shrink-0 rounded-full bg-surface-sunken px-1.5 text-xs tabular text-content-secondary">
+              <span className="ms-auto shrink-0 rounded-full px-1.5 text-xs tabular bg-white/10 text-sidebar-content">
                 {item.badge}
               </span>
             ) : null}

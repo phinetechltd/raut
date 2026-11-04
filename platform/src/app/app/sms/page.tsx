@@ -1,28 +1,65 @@
 ﻿
 import {
+  DataTable,
+  CellStack,
+  FilterBar,
+  FilterSearch,
+  FilterSelect,
   ModuleLocked,
   Money,
   SectionHeading,
   StatCard,
+  StatGrid,
   StatusBadge,
+  type Column,
 } from "@/components/ui";
 import { db } from "@/lib/db";
 import { requireTenant } from "@/lib/session";
+import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
 
 export const dynamic = "force-dynamic";
 
 /** Module 09 · SMS Communication. */
-export default async function SmsPage() {
+export default async function SmsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
   const { companyId, principal } = await requireTenant();
   if (!principal.enabledModules.has("SMS")) return <ModuleLocked module="SMS" />;
 
-  const [messages, templates, byStatus, spend] = await Promise.all([
+  const params = await searchParams;
+  const ts = tableState(params, {
+    prefix: "sms",
+    allowed: ["created", "status"],
+    defaultSort: "created",
+    defaultDir: "desc",
+    limit: 20,
+  });
+
+  const where = {
+    companyId,
+    ...(params.q
+      ? {
+          OR: [
+            { body: { contains: params.q } },
+            { toPhone: { contains: params.q } },
+            { customer: { name: { contains: params.q } } },
+          ],
+        }
+      : {}),
+    ...(params.status ? { status: params.status } : {}),
+  };
+
+  const [messages, messageCount, templates, byStatus, spend] = await Promise.all([
     db.smsMessage.findMany({
-      where: { companyId },
+      where,
       include: { customer: { select: { name: true } } },
-      orderBy: { createdAt: "desc" },
-      take: 50,
+      orderBy: { [ts.sort === "status" ? "status" : "createdAt"]: ts.dir } as Record<string, string>,
+      take: ts.limit,
+      skip: (ts.page - 1) * ts.limit,
     }),
+    db.smsMessage.count({ where }),
     db.smsTemplate.findMany({ where: { companyId }, orderBy: { key: "asc" } }),
     db.smsMessage.groupBy({ by: ["status"], where: { companyId }, _count: true }),
     db.smsMessage.aggregate({
@@ -58,8 +95,8 @@ export default async function SmsPage() {
         </div>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard label="Messages" value={String(messages.length)} hint="Most recent 50" />
+      <StatGrid>
+        <StatCard label="Messages" value={messageCount.toLocaleString("en-KE")} hint="Matching filters" />
         <StatCard label="Sent" value={String(count("SENT") + count("DELIVERED"))} tone="success" />
         <StatCard
           label="Failed"
@@ -71,7 +108,7 @@ export default async function SmsPage() {
           value={<Money cents={spend._sum.costCents ?? 0} />}
           hint={`Provider: ${provider}`}
         />
-      </div>
+      </StatGrid>
 
       <div>
         <SectionHeading
@@ -97,58 +134,98 @@ export default async function SmsPage() {
       </div>
 
       <div>
-        <SectionHeading title="Message log" />
-        <div className="scroll-x rounded-lg border border-border bg-surface shadow-sm">
-          <table className="w-full border-collapse text-base">
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>To</th>
-                <th>Customer</th>
-                <th>Template</th>
-                <th>Message</th>
-                <th>Status</th>
-                <th>Cost</th>
-              </tr>
-            </thead>
-            <tbody>
-              {messages.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className="text-content-muted py-10 text-center">
-                    No messages sent yet. Confirmations are triggered automatically
-                    when orders and payments are recorded.
-                  </td>
-                </tr>
-              ) : (
-                messages.map((m) => (
-                  <tr key={m.id}>
-                    <td className="text-content-muted text-xs">
-                      {m.createdAt.toLocaleString("en-KE", {
-                        day: "2-digit", month: "short",
-                        hour: "2-digit", minute: "2-digit",
-                      })}
-                    </td>
-                    <td className="font-mono text-xs">{m.toPhone}</td>
-                    <td className="text-xs">{m.customer?.name ?? "—"}</td>
-                    <td className="text-content-muted text-[11px]">{m.templateKey ?? "custom"}</td>
-                    <td className="max-w-md truncate text-xs" title={m.body}>
-                      {m.body}
-                    </td>
-                    <td>
-                      <StatusBadge status={m.status} />
-                      {m.error ? (
-                        <span className="text-content-muted block text-[10px]">{m.error}</span>
-                      ) : null}
-                    </td>
-                    <td className="text-content-muted text-xs">
-                      <Money cents={m.costCents} />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <SectionHeading title="Message log" description={`${messageCount.toLocaleString("en-KE")} messages`} />
+        <FilterBar action="/app/sms" preserve={preserved(params, ["q", "status", "sms_page"])}>
+          <FilterSearch name="q" value={params.q} placeholder="Search messages, numbers, customers…" />
+          <FilterSelect
+            name="status"
+            value={params.status}
+            allLabel="Any status"
+            options={["SENT", "DELIVERED", "QUEUED", "FAILED"].map((s) => ({ value: s, label: s.toLowerCase() }))}
+          />
+        </FilterBar>
+        <DataTable
+          columns={[
+            {
+              key: "when",
+              header: "When",
+              sortKey: "created",
+              cell: (m) => (
+                <span className="text-content-muted text-xs">
+                  {m.createdAt.toLocaleString("en-KE", {
+                    day: "2-digit", month: "short",
+                    hour: "2-digit", minute: "2-digit",
+                  })}
+                </span>
+              ),
+            },
+            { key: "to", header: "To", cell: (m) => <span className="tabular text-xs">{m.toPhone}</span> },
+            {
+              key: "customer",
+              header: "Customer",
+              hideBelow: "md",
+              cell: (m) => <CellStack primary={<span className="text-xs">{m.customer?.name ?? "—"}</span>} secondary="" />,
+            },
+            {
+              key: "template",
+              header: "Template",
+              hideBelow: "lg",
+              cell: (m) => <span className="text-content-muted text-[11px]">{m.templateKey ?? "custom"}</span>,
+            },
+            {
+              key: "message",
+              header: "Message",
+              cell: (m) => (
+                <span className="block max-w-md truncate text-xs" title={m.body}>
+                  {m.body}
+                </span>
+              ),
+            },
+            {
+              key: "status",
+              header: "Status",
+              sortKey: "status",
+              align: "right",
+              cell: (m) => (
+                <div>
+                  <StatusBadge status={m.status} />
+                  {m.error ? (
+                    <span className="text-content-muted block text-[10px]">{m.error}</span>
+                  ) : null}
+                </div>
+              ),
+            },
+            {
+              key: "cost",
+              header: "Cost",
+              align: "right",
+              cell: (m) => (
+                <span className="text-content-muted text-xs">
+                  <Money cents={m.costCents} />
+                </span>
+              ),
+            },
+          ]}
+          rows={messages}
+          getRowKey={(m) => m.id}
+          caption="SMS message log"
+          sort={{ key: ts.sort, dir: ts.dir }}
+          sortHrefFor={(key) => {
+            const next = toggleSort(ts, key);
+            return tableHref("/app/sms", params, { sms_sort: next.sort, sms_dir: next.dir }, "sms");
+          }}
+          pagination={{
+            page: ts.page,
+            pages: Math.max(1, Math.ceil(messageCount / ts.limit)),
+            total: messageCount,
+            limit: ts.limit,
+            hrefFor: (p) => tableHref("/app/sms", params, { sms_page: p }),
+          }}
+          empty={{
+            title: "No messages sent yet",
+            description: "Confirmations are triggered automatically when orders and payments are recorded.",
+          }}
+        />
       </div>
     </div>
   );

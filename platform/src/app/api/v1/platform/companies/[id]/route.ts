@@ -4,7 +4,7 @@ import { forbidden, handler, notFound, parseBody } from "@/lib/api";
 import { auditAs } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { setCompanyStatus } from "@/server/provisioning";
-import { tenantDashboard } from "@/server/analytics";
+import { daysAgo, tenantDashboard } from "@/server/analytics";
 
 export const dynamic = "force-dynamic";
 
@@ -34,7 +34,7 @@ export const GET = handler<{ id: string }>(
       ...company,
       // Cross-tenant read; permitted only because the guard above restricts
       // this route to SUPER_ADMIN, and the access is audited on mutations.
-      metrics: await tenantDashboard(company.id, 30),
+      metrics: await tenantDashboard(company.id, { from: daysAgo(29), to: new Date() }),
     };
   },
 );

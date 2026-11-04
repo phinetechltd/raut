@@ -1,14 +1,21 @@
 ﻿
 import {
-  GeoMap,
   ModuleLocked,
+  PageHeader,
   SectionHeading,
   StatCard,
+  StatGrid,
   StatusBadge,
+  TileMap,
 } from "@/components/ui";
 import { db } from "@/lib/db";
 import { parseBoundary } from "@/lib/geo";
+import { toClientConfig } from "@/lib/maps";
+import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
+import { mapConfigFor } from "@/server/maps";
+
+import { RoutePlanDialog } from "./route-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +36,7 @@ export default async function RoutingPage() {
   const tomorrow = new Date(today.getTime() + 86_400_000);
 
   const selfScope = principal.role === "FIELD_REP" ? { repId: principal.userId } : {};
+  const maps = await mapConfigFor(companyId);
 
   const [routes, territories, events, pings] = await Promise.all([
     db.route.findMany({
@@ -73,16 +81,28 @@ export default async function RoutingPage() {
     (e) => e.type === "VISIT_REJECTED" || e.type === "OUT_OF_ZONE",
   ).length;
 
+  const reps = await db.user.findMany({
+    where: { companyId, status: "ACTIVE", role: "FIELD_REP" },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Routing &amp; Geofencing</h1>
-        <p className="text-content-muted text-sm">
-          Distance-based route sequencing, daily itineraries and territory verification.
-        </p>
-      </div>
+      <PageHeader
+        title="Routing & Geofencing"
+        description="Distance-based route sequencing, daily itineraries and territory verification."
+        actions={
+          can(principal, "route:write") ? (
+            <RoutePlanDialog
+              reps={reps}
+              territories={territories.map((t) => ({ id: t.id, name: t.name }))}
+            />
+          ) : null
+        }
+      />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid>
         <StatCard label="Routes today" value={String(routes.length)} />
         <StatCard
           label="Planned distance"
@@ -100,7 +120,7 @@ export default async function RoutingPage() {
           hint={geofencing ? "Rejected check-ins or out-of-zone" : "Background breadcrumbs"}
           tone={geofencing && rejected > 0 ? "warning" : "neutral"}
         />
-      </div>
+      </StatGrid>
 
       {routes.length === 0 ? (
         <div className="rounded-lg border border-border bg-surface shadow-sm p-10 text-center">
@@ -120,7 +140,8 @@ export default async function RoutingPage() {
 
             <div className="grid gap-6 lg:grid-cols-5">
               <div className="lg:col-span-3">
-                <GeoMap
+                <TileMap
+                  map={toClientConfig(maps)}
                   points={route.stops
                     .filter((s) => s.customer.latitude != null)
                     .map((s) => ({
@@ -131,12 +152,12 @@ export default async function RoutingPage() {
                       sequence: s.sequence,
                       tone:
                         s.status === "DONE"
-                          ? "success"
+                          ? ("success" as const)
                           : s.status === "ARRIVED"
-                            ? "warning"
+                            ? ("warning" as const)
                             : s.status === "SKIPPED"
-                              ? "danger"
-                              : "neutral",
+                              ? ("danger" as const)
+                              : ("neutral" as const),
                     }))}
                   path={route.stops.map((s) => s.customerId)}
                   polygons={

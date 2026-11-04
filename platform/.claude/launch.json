@@ -5,7 +5,13 @@
       "name": "raut-platform",
       "runtimeExecutable": "npm",
       "runtimeArgs": ["run", "dev"],
-      "port": 3000
+      "port": 3200
+    },
+    {
+      "name": "raut-platform-verify",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": ["next", "dev", "-p", "3210"],
+      "port": 3210
     }
   ]
 }

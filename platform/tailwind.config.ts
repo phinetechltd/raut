@@ -70,6 +70,18 @@ export default {
           4: "var(--chart-4)", 5: "var(--chart-5)", 6: "var(--chart-6)",
           grid: "var(--chart-grid)",
         },
+
+        sidebar: {
+          bg1: "var(--sidebar-bg-1)",
+          bg2: "var(--sidebar-bg-2)",
+          content: "var(--sidebar-text)",
+          muted: "var(--sidebar-muted)",
+          subtle: "var(--sidebar-subtle)",
+          hover: "var(--sidebar-hover)",
+          active: "var(--sidebar-active)",
+          activetext: "var(--sidebar-active-text)",
+          border: "var(--sidebar-border)",
+        },
       },
 
       borderRadius: {

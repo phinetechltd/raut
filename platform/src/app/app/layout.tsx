@@ -11,16 +11,16 @@ export const dynamic = "force-dynamic";
  */
 const NAV: NavItem[] = [
   { href: "/app", label: "Dashboard" },
-  { href: "/app/customers", label: "Customers", module: "CRM" },
-  { href: "/app/sales", label: "Sales & POS", module: "SALES_POS" },
-  { href: "/app/inventory", label: "Inventory", module: "INVENTORY" },
-  { href: "/app/procurement", label: "Procurement", module: "PROCUREMENT" },
-  { href: "/app/finance", label: "Finance", module: "FINANCE" },
-  { href: "/app/field", label: "Field Sales", module: "FIELD_SALES" },
-  { href: "/app/routes", label: "Routing & Geofencing", module: "ROUTING" },
-  { href: "/app/sms", label: "SMS", module: "SMS" },
-  { href: "/app/reports", label: "Reports", module: "ANALYTICS" },
-  { href: "/app/settings", label: "Settings" },
+  { href: "/app/customers", label: "Customers", module: "CRM", group: "Sell" },
+  { href: "/app/sales", label: "Sales & POS", module: "SALES_POS", group: "Sell" },
+  { href: "/app/inventory", label: "Inventory", module: "INVENTORY", group: "Sell" },
+  { href: "/app/procurement", label: "Procurement", module: "PROCUREMENT", group: "Sell" },
+  { href: "/app/finance", label: "Finance", module: "FINANCE", group: "Sell" },
+  { href: "/app/field", label: "Field Sales", module: "FIELD_SALES", group: "Field" },
+  { href: "/app/routes", label: "Routing & Geofencing", module: "ROUTING", group: "Field" },
+  { href: "/app/sms", label: "SMS", module: "SMS", group: "Engage" },
+  { href: "/app/reports", label: "Reports", module: "ANALYTICS", group: "Insight" },
+  { href: "/app/settings", label: "Settings", group: "Insight" },
 ];
 
 export default async function TenantLayout({

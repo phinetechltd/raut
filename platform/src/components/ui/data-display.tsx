@@ -52,29 +52,49 @@ export function StatCard({
     success: "text-success", warning: "text-warning", danger: "text-danger",
   }[tone];
 
+  const iconWell = {
+    neutral: "bg-surface-sunken text-content-muted",
+    accent: "bg-accent-subtle text-accent",
+    info: "bg-info-bg text-info",
+    success: "bg-success-bg text-success",
+    warning: "bg-warning-bg text-warning",
+    danger: "bg-danger-bg text-danger",
+  }[tone];
+
   return (
-    <Card className="flex flex-col gap-1">
+    <Card className="flex flex-col gap-1.5 p-5">
       <div className="flex items-start justify-between gap-2">
         <p className="text-xs font-medium uppercase tracking-wide text-content-muted">
           {label}
         </p>
-        {icon ? <span className="text-content-muted">{icon}</span> : null}
+        {icon ? (
+          <span
+            className={cx(
+              "grid h-8 w-8 shrink-0 place-items-center rounded-lg",
+              iconWell,
+            )}
+            aria-hidden="true"
+          >
+            {icon}
+          </span>
+        ) : null}
       </div>
 
-      <p className={cx("text-2xl font-semibold tracking-tight tabular", valueTone)}>
+      <p className={cx("text-2xl font-semibold leading-none tracking-tight tabular", valueTone)}>
         {value}
       </p>
 
-      {trend ? (
-        <p className={cx("text-sm font-medium", TREND_TONE[trend.direction])}>
-          <span aria-hidden="true">
-            {trend.direction === "up" ? "↑" : trend.direction === "down" ? "↓" : "→"}
-          </span>{" "}
-          {trend.label}
-        </p>
-      ) : null}
-
-      {hint ? <p className="text-sm text-content-muted">{hint}</p> : null}
+      <div className="flex items-baseline gap-2">
+        {trend ? (
+          <p className={cx("text-sm font-medium", TREND_TONE[trend.direction])}>
+            <span aria-hidden="true">
+              {trend.direction === "up" ? "↑" : trend.direction === "down" ? "↓" : "→"}
+            </span>{" "}
+            {trend.label}
+          </p>
+        ) : null}
+        {hint ? <p className="text-sm text-content-muted">{hint}</p> : null}
+      </div>
     </Card>
   );
 }

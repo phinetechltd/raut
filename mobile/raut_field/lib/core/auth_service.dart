@@ -26,6 +26,7 @@ class Session {
     this.company,
     this.etimsEnabled = false,
     this.etimsEnvironment = 'SANDBOX',
+    this.mapProvider = 'OSM',
   });
 
   final String userId;
@@ -50,6 +51,11 @@ class Session {
   /// and still have transmission switched off.
   final bool etimsEnabled;
   final String etimsEnvironment;
+
+  /// Which maps app the Directions buttons open: `GOOGLE` or `OSM`. Decided by
+  /// the company's administrator in the console, not on the handset, so every
+  /// rep in a company is sent to the same app. See `core/map_links.dart`.
+  final String mapProvider;
 
   bool hasModule(String key) => modules.contains(key);
   bool can(String permission) => permissions.contains(permission);
@@ -85,6 +91,7 @@ class Session {
         'company': company?.toJson(),
         'etimsEnabled': etimsEnabled,
         'etimsEnvironment': etimsEnvironment,
+        'mapProvider': mapProvider,
       };
 
   factory Session.fromJson(Map<String, dynamic> json) => Session(
@@ -104,7 +111,14 @@ class Session {
             : CompanyInfo.fromJson(json['company'] as Map<String, dynamic>),
         etimsEnabled: json['etimsEnabled'] as bool? ?? false,
         etimsEnvironment: json['etimsEnvironment'] as String? ?? 'SANDBOX',
+        mapProvider: json['mapProvider'] as String? ?? 'OSM',
       );
+
+  /// The `maps` block the server sends on login and `/auth/me`.
+  static String mapProviderFrom(Map<String, dynamic> data) =>
+      ((data['maps'] as Map<String, dynamic>?)?['provider'] as String?)
+          ?.toUpperCase() ??
+      'OSM';
 }
 
 /// Authentication and session persistence.
@@ -223,6 +237,7 @@ class AuthService extends ChangeNotifier {
         etimsEnvironment:
             (data['etims'] as Map<String, dynamic>?)?['environment'] as String? ??
                 'SANDBOX',
+        mapProvider: Session.mapProviderFrom(data),
       );
 
       await _persistSession(
@@ -268,6 +283,7 @@ class AuthService extends ChangeNotifier {
         etimsEnvironment:
             (data['etims'] as Map<String, dynamic>?)?['environment'] as String? ??
                 'SANDBOX',
+        mapProvider: Session.mapProviderFrom(data),
       );
 
       final prefs = await SharedPreferences.getInstance();

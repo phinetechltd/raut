@@ -1,16 +1,26 @@
 ﻿
 import {
-  GeoMap,
+  CellStack,
+  DataTable,
   Meter,
   ModuleLocked,
   Money,
+  PageHeader,
   SectionHeading,
   StatCard,
+  StatGrid,
   StatusBadge,
+  TileMap,
+  type Column,
 } from "@/components/ui";
 import { db } from "@/lib/db";
+import { MAP_PROVIDER_LABELS, toClientConfig } from "@/lib/maps";
+import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
 import { repPerformance } from "@/server/field";
+import { mapConfigFor } from "@/server/maps";
+
+import { VisitDialog } from "./visit-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -29,6 +39,7 @@ export default async function FieldSalesPage() {
   const monthAgo = new Date(Date.now() - 30 * 86_400_000);
 
   const selfScope = principal.role === "FIELD_REP" ? { repId: principal.userId } : {};
+  const maps = await mapConfigFor(companyId);
 
   const [todayVisits, reps, targets, recentVisits] = await Promise.all([
     db.visit.findMany({
@@ -64,16 +75,28 @@ export default async function FieldSalesPage() {
 
   const targetByRep = new Map(targets.filter((t) => t.repId).map((t) => [t.repId!, t]));
 
+  const canVisitWrite = can(principal, "visit:write");
+  const repUsers = await db.user.findMany({
+    where: { companyId, status: "ACTIVE", role: "FIELD_REP" },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+  });
+  const customers = await db.customer.findMany({
+    where: { companyId, status: "ACTIVE", ...(principal.role === "FIELD_REP" ? { assignedRepId: principal.userId } : {}) },
+    select: { id: true, name: true },
+    orderBy: { name: "asc" },
+    take: 300,
+  });
+
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Field Sales</h1>
-        <p className="text-content-muted text-sm">
-          Visit scheduling and check-in, field order capture, targets and performance.
-        </p>
-      </div>
+      <PageHeader
+        title="Field Sales"
+        description="Visit scheduling and check-in, field order capture, targets and performance."
+        actions={canVisitWrite ? <VisitDialog customers={customers} reps={repUsers} selfIsRep={principal.role === "FIELD_REP"} /> : null}
+      />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <StatGrid>
         <StatCard label="Scheduled today" value={String(todayVisits.length)} />
         <StatCard label="In progress" value={String(inProgress)} tone="warning" />
         <StatCard label="Completed today" value={String(completedToday)} tone="success" />
@@ -87,113 +110,116 @@ export default async function FieldSalesPage() {
           }
           tone={geofencing ? (verifiedToday === completedToday ? "success" : "warning") : "neutral"}
         />
-      </div>
+      </StatGrid>
 
       <div>
         <SectionHeading
           title="Today in the field"
-          description="Live positions of scheduled and completed visits"
+          description={`Live positions of scheduled and completed visits — pings from the field app, on ${MAP_PROVIDER_LABELS[maps.provider]}`}
         />
-        <GeoMap
+        <TileMap
+          map={toClientConfig(maps)}
           points={todayVisits
             .filter((v) => v.customer.latitude != null)
             .map((v, i) => ({
               id: v.id,
               lat: v.customer.latitude!,
               lng: v.customer.longitude!,
-              label: v.customer.name,
+              label: `${i + 1} — ${v.customer.name} (${v.customer.town ?? ""})`,
               sequence: i + 1,
               tone:
                 v.status === "COMPLETED"
-                  ? "success"
+                  ? ("success" as const)
                   : v.status === "IN_PROGRESS"
-                    ? "warning"
+                    ? ("warning" as const)
                     : v.status === "MISSED"
-                      ? "danger"
-                      : "neutral",
+                      ? ("danger" as const)
+                      : ("neutral" as const),
             }))}
-          height={380}
+          height={400}
         />
       </div>
 
       <div>
         <SectionHeading title="Today's visits" />
-        <div className="scroll-x rounded-lg border border-border bg-surface shadow-sm">
-          <table className="w-full border-collapse text-base">
-            <thead>
-              <tr>
-                <th>Time</th>
-                <th>Customer</th>
-                <th>Rep</th>
-                <th>Status</th>
-                <th>Checked in</th>
-                <th>Verified</th>
-                <th>Distance</th>
-                <th>Order</th>
-              </tr>
-            </thead>
-            <tbody>
-              {todayVisits.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="text-content-muted py-10 text-center">
-                    No visits scheduled for today
-                  </td>
-                </tr>
-              ) : (
-                todayVisits.map((v) => (
-                  <tr key={v.id}>
-                    <td className="font-medium">
-                      {v.scheduledAt.toLocaleTimeString("en-KE", {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
-                    </td>
-                    <td>
-                      {v.customer.name}
-                      <span className="text-content-muted block text-xs">{v.customer.town}</span>
-                    </td>
-                    <td className="text-xs">{v.rep.name}</td>
-                    <td>
-                      <StatusBadge status={v.status} />
-                    </td>
-                    <td className="text-content-muted text-xs">
-                      {v.checkInAt
-                        ? v.checkInAt.toLocaleTimeString("en-KE", {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })
-                        : "—"}
-                    </td>
-                    <td>
-                      {v.geofenceVerified ? (
-                        <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-success-bg text-success">yes</span>
-                      ) : v.checkInAt ? (
-                        <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-danger-bg text-danger">no</span>
-                      ) : (
-                        <span className="text-content-muted text-xs">—</span>
-                      )}
-                    </td>
-                    <td className="text-content-muted text-xs">
-                      {v.distanceFromCustomerM != null ? `${v.distanceFromCustomerM}m` : "—"}
-                    </td>
-                    <td className="text-xs">
-                      {v.order ? (
-                        <>
-                          {v.order.number}
-                          <span className="text-content-muted block">
-                            <Money cents={v.order.totalCents} compact />
-                          </span>
-                        </>
-                      ) : (
-                        <span className="text-content-text-content-muted">—</span>
-                      )}
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={[
+            {
+              key: "time",
+              header: "Time",
+              cell: (v) => (
+                <span className="font-medium tabular">
+                  {v.scheduledAt.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })}
+                </span>
+              ),
+            },
+            {
+              key: "customer",
+              header: "Customer",
+              cell: (v) => (
+                <CellStack primary={v.customer.name} secondary={v.customer.town ?? ""} />
+              ),
+            },
+            { key: "rep", header: "Rep", hideBelow: "sm", cell: (v) => <span className="text-xs">{v.rep.name}</span> },
+            { key: "status", header: "Status", cell: (v) => <StatusBadge status={v.status} /> },
+            {
+              key: "checked",
+              header: "Checked in",
+              hideBelow: "md",
+              cell: (v) => (
+                <span className="text-content-muted text-xs">
+                  {v.checkInAt
+                    ? v.checkInAt.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })
+                    : "—"}
+                </span>
+              ),
+            },
+            {
+              key: "verified",
+              header: "Verified",
+              align: "right",
+              cell: (v) =>
+                v.geofenceVerified ? (
+                  <span className="badge bg-success-bg text-success border-success-border">yes</span>
+                ) : v.checkInAt ? (
+                  <span className="badge bg-danger-bg text-danger border-danger-border">no</span>
+                ) : (
+                  <span className="text-content-muted text-xs">—</span>
+                ),
+            },
+            {
+              key: "distance",
+              header: "Distance",
+              align: "right",
+              hideBelow: "lg",
+              cell: (v) => (
+                <span className={(v.distanceFromCustomerM ?? 0) > 200 ? "text-warning" : "text-content-muted"}>
+                  {v.distanceFromCustomerM != null ? `${v.distanceFromCustomerM}m` : "—"}
+                </span>
+              ),
+            },
+            {
+              key: "order",
+              header: "Order",
+              align: "right",
+              cell: (v) =>
+                v.order ? (
+                  <div className="text-xs">
+                    {v.order.number}
+                    <span className="text-content-muted block">
+                      <Money cents={v.order.totalCents} compact />
+                    </span>
+                  </div>
+                ) : (
+                  <span className="text-content-muted text-xs">—</span>
+                ),
+            },
+          ]}
+          rows={todayVisits}
+          getRowKey={(v) => v.id}
+          caption="Visits scheduled today"
+          empty={{ title: "No visits scheduled for today" }}
+        />
       </div>
 
       <div>
@@ -282,56 +308,62 @@ export default async function FieldSalesPage() {
 
       <div>
         <SectionHeading title="Recent check-ins" description="Evidence trail across the team" />
-        <div className="scroll-x rounded-lg border border-border bg-surface shadow-sm">
-          <table className="w-full border-collapse text-base">
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Rep</th>
-                <th>Customer</th>
-                <th>Status</th>
-                <th>Verified</th>
-                <th>Distance from pin</th>
-                <th>Duration</th>
-              </tr>
-            </thead>
-            <tbody>
-              {recentVisits.map((v) => (
-                <tr key={v.id}>
-                  <td className="text-content-muted text-xs">
-                    {v.checkInAt?.toLocaleString("en-KE", {
-                      day: "2-digit", month: "short",
-                      hour: "2-digit", minute: "2-digit",
-                    })}
-                  </td>
-                  <td className="text-xs">{v.rep.name}</td>
-                  <td>
-                    {v.customer.name}
-                    <span className="text-content-muted block text-xs">{v.customer.town}</span>
-                  </td>
-                  <td>
-                    <StatusBadge status={v.status} />
-                  </td>
-                  <td>
-                    {v.geofenceVerified ? (
-                      <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-success-bg text-success">verified</span>
-                    ) : (
-                      <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-danger-bg text-danger">unverified</span>
-                    )}
-                  </td>
-                  <td
-                    className={
-                      (v.distanceFromCustomerM ?? 0) > 200 ? "text-warning" : "muted"
-                    }
-                  >
-                    {v.distanceFromCustomerM != null ? `${v.distanceFromCustomerM}m` : "—"}
-                  </td>
-                  <td className="text-content-text-content-muted">{v.durationMin != null ? `${v.durationMin}m` : "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={[
+            {
+              key: "when",
+              header: "When",
+              cell: (v) => (
+                <span className="text-content-muted text-xs">
+                  {v.checkInAt?.toLocaleString("en-KE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
+                </span>
+              ),
+            },
+            { key: "rep", header: "Rep", hideBelow: "sm", cell: (v) => <span className="text-xs">{v.rep.name}</span> },
+            {
+              key: "customer",
+              header: "Customer",
+              cell: (v) => <CellStack primary={v.customer.name} secondary={v.customer.town ?? ""} />,
+            },
+            { key: "status", header: "Status", cell: (v) => <StatusBadge status={v.status} /> },
+            {
+              key: "verified",
+              header: "Verified",
+              cell: (v) =>
+                v.geofenceVerified ? (
+                  <span className="badge bg-success-bg text-success border-success-border">verified</span>
+                ) : (
+                  <span className="badge bg-danger-bg text-danger border-danger-border">unverified</span>
+                ),
+            },
+            {
+              key: "distance",
+              header: "Distance from pin",
+              align: "right",
+              hideBelow: "md",
+              cell: (v) => (
+                <span className={(v.distanceFromCustomerM ?? 0) > 200 ? "text-warning" : "text-content-muted"}>
+                  {v.distanceFromCustomerM != null ? `${v.distanceFromCustomerM}m` : "—"}
+                </span>
+              ),
+            },
+            {
+              key: "duration",
+              header: "Duration",
+              align: "right",
+              hideBelow: "lg",
+              cell: (v) => (
+                <span className="text-content-muted text-xs">
+                  {v.durationMin != null ? `${v.durationMin}m` : "—"}
+                </span>
+              ),
+            },
+          ]}
+          rows={recentVisits}
+          getRowKey={(v) => v.id}
+          caption="Recent check-ins"
+          empty={{ title: "No check-ins yet" }}
+        />
       </div>
     </div>
   );

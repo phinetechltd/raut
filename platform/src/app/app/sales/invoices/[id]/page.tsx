@@ -7,6 +7,7 @@ import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
 
 import { CreditNoteButton } from "./credit-note-button";
+import { PaymentDialog } from "../../../finance/payment-dialog";
 import { TransmitButton } from "./transmit-button";
 
 export const dynamic = "force-dynamic";
@@ -77,6 +78,7 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
   const credited = invoice.creditNotes
     .filter((c) => c.status !== "CANCELLED")
     .reduce((n, c) => n + c.totalCents, 0);
+  const outstandingCents = invoice.totalCents - invoice.paidCents - credited;
 
   return (
     <div className="space-y-5">
@@ -91,6 +93,14 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={ETIMS_TONE[status]}>{ETIMS_LABEL[status]}</Badge>
+          {can(principal, "payment:write") && outstandingCents > 0 && (
+            <PaymentDialog
+              customers={[{ id: invoice.customer.id, name: invoice.customer.name, balanceCents: invoice.customer.balanceCents }]}
+              presetCustomerId={invoice.customer.id}
+              buttonVariant="primary"
+              buttonLabel="Record payment"
+            />
+          )}
           {can(principal, "etims:submit") && status !== "ACCEPTED" && (
             <TransmitButton invoiceId={invoice.id} />
           )}

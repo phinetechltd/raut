@@ -1,4 +1,4 @@
-﻿
+
 import {
   BarChart,
   Meter,
@@ -28,7 +28,7 @@ export default async function ReportsPage({
   const from = daysAgo(days);
 
   const [metrics, territories, reps, channelSplit, productMix] = await Promise.all([
-    tenantDashboard(companyId, days),
+    tenantDashboard(companyId, { from: daysAgo(days - 1), to: new Date() }),
     territoryPerformance(companyId, days),
     repPerformance(companyId, from, new Date()),
     db.invoice.groupBy({

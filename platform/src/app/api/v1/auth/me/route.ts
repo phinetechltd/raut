@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { MODULE_CATALOG, type ModuleKey } from "@/lib/modules";
 import { owningModule, permissionsForRole, ROLE_LABELS, type Role } from "@/lib/rbac";
 import { seatUsage } from "@/lib/tenant";
+import { mapConfigFor } from "@/server/maps";
 
 export const dynamic = "force-dynamic";
 
@@ -26,6 +27,8 @@ export const GET = handler({ allowPlatform: true }, async ({ principal }) => {
         select: { enabled: true, environment: true },
       })
     : null;
+
+  const maps = user.companyId ? await mapConfigFor(user.companyId) : null;
 
   return {
     user: {
@@ -60,6 +63,11 @@ export const GET = handler({ allowPlatform: true }, async ({ principal }) => {
     etims: {
       enabled: etimsConfig?.enabled ?? false,
       environment: etimsConfig?.environment ?? "SANDBOX",
+    },
+    // Which maps app the handset's Directions buttons open. Mirrors login.
+    maps: {
+      provider: maps?.provider ?? "OSM",
+      googleAvailable: maps?.google != null,
     },
     modules,
     moduleDetails: modules.map((k) => ({

@@ -28,7 +28,24 @@ export {
   type Tone,
 } from "./primitives";
 
-export { CellStack, DataTable, type Column } from "./data-table";
+export { CellStack, DataTable, type Column, type TableSort, type TablePagination } from "./data-table";
+
+export {
+  DateRangeBar,
+  ExportLink,
+  FilterBar,
+  FilterSearch,
+  FilterSelect,
+  type FilterOption,
+} from "./filters";
+
+export * from "./icons";
+
+export { TileMap } from "./tile-map";
+
+export { Modal, ModalButton } from "./modal";
+
+export { apiClient, useFormSubmit } from "./crud";
 
 export {
   Can,

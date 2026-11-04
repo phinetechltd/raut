@@ -2,15 +2,20 @@
 import { notFound } from "next/navigation";
 
 import {
-  GeoMap,
   ModuleLocked,
   Money,
   SectionHeading,
   StatCard,
   StatusBadge,
+  TileMap,
 } from "@/components/ui";
 import { db } from "@/lib/db";
+import { toClientConfig } from "@/lib/maps";
+import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
+import { mapConfigFor } from "@/server/maps";
+
+import { CustomerDeleteButton, CustomerDialog } from "../customer-dialog";
 
 export const dynamic = "force-dynamic";
 
@@ -52,13 +57,30 @@ export default async function CustomerDetailPage({
 
   if (!customer) notFound();
 
-  const lifetime = await db.invoice.aggregate({
-    where: { customerId: customer.id, status: { notIn: ["DRAFT", "CANCELLED"] } },
-    _sum: { totalCents: true },
-    _count: true,
-  });
+  const maps = await mapConfigFor(companyId);
+
+  const [lifetime, territories, reps] = await Promise.all([
+    db.invoice.aggregate({
+      where: { customerId: customer.id, status: { notIn: ["DRAFT", "CANCELLED"] } },
+      _sum: { totalCents: true },
+      _count: true,
+    }),
+    db.territory.findMany({
+      where: { companyId },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+    db.user.findMany({
+      where: { companyId, status: "ACTIVE" },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+      take: 100,
+    }),
+  ]);
 
   const verifiedVisits = customer.visits.filter((v) => v.geofenceVerified).length;
+  const canWrite = can(principal, "customer:write");
+  const canDelete = can(principal, "customer:delete");
 
   return (
     <div className="space-y-8">
@@ -73,7 +95,13 @@ export default async function CustomerDetailPage({
             {customer.town ?? "no town"}
           </p>
         </div>
-        <StatusBadge status={customer.status} />
+        <div className="flex items-start gap-2">
+          {canWrite ? (
+            <CustomerDialog mode="edit" customer={customer} territories={territories} reps={reps} buttonLabel="Edit details" buttonVariant="secondary" />
+          ) : null}
+          {canDelete ? <CustomerDeleteButton id={customer.id} name={customer.name} /> : null}
+          <StatusBadge status={customer.status} />
+        </div>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -149,7 +177,8 @@ export default async function CustomerDetailPage({
                 : "No GPS pin captured yet"
             }
           />
-          <GeoMap
+          <TileMap
+            map={toClientConfig(maps)}
             points={
               customer.latitude != null
                 ? [
@@ -167,7 +196,7 @@ export default async function CustomerDetailPage({
                         id: v.id,
                         lat: v.checkInLat!,
                         lng: v.checkInLng!,
-                        label: v.geofenceVerified ? "✓" : "✗",
+                        label: `${new Date(v.scheduledAt).toLocaleDateString("en-KE")} — ${v.geofenceVerified ? "verified" : "outside fence"}`,
                         tone: v.geofenceVerified
                           ? ("neutral" as const)
                           : ("danger" as const),
@@ -175,7 +204,7 @@ export default async function CustomerDetailPage({
                   ]
                 : []
             }
-            height={280}
+            height={300}
           />
         </div>
       </div>

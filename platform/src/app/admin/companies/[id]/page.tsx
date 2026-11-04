@@ -9,9 +9,12 @@ import {
   MODULE_LIST,
   type ModuleKey,
 } from "@/lib/modules";
+import { maskKey } from "@/lib/maps";
 import { ROLE_LABELS, type Role } from "@/lib/rbac";
-import { tenantDashboard } from "@/server/analytics";
+import { daysAgo, tenantDashboard } from "@/server/analytics";
+import { mapConfigFor, platformMapDefaults, readStoredMapSettings } from "@/server/maps";
 
+import { MapSettingsControl } from "./map-settings-control";
 import { ModuleToggle, StatusControl } from "./module-toggle";
 
 export const dynamic = "force-dynamic";
@@ -49,7 +52,12 @@ export default async function CompanyDetailPage({
   // Cross-tenant read, permitted because the layout restricts this route to
   // SUPER_ADMIN. Shown so the operator can see whether a tenant is actually
   // using what they bought.
-  const metrics = await tenantDashboard(company.id, 30);
+  const [metrics, mapStored, mapEffective] = await Promise.all([
+    tenantDashboard(company.id, { from: daysAgo(29), to: new Date() }),
+    readStoredMapSettings(company.id),
+    mapConfigFor(company.id),
+  ]);
+  const mapPlatform = platformMapDefaults();
 
   return (
     <div className="space-y-8">
@@ -114,6 +122,31 @@ export default async function CompanyDetailPage({
             />
           ))}
         </div>
+      </div>
+
+      <div>
+        <SectionHeading
+          title="Maps"
+          description="The basemap behind this company's console maps and the field app's Directions buttons. The company's own admin can change it under Settings → Maps."
+        />
+        <MapSettingsControl
+          companyId={company.id}
+          stored={{
+            provider: mapStored.provider,
+            googleApiKeyHint: maskKey(mapStored.googleApiKey),
+            googleMapId: mapStored.googleMapId,
+          }}
+          effective={{
+            provider: mapEffective.provider,
+            providerSource: mapEffective.providerSource,
+            googleKeySource: mapEffective.google?.keySource ?? null,
+            warning: mapEffective.warning,
+          }}
+          platform={{
+            defaultProvider: mapPlatform.provider,
+            hasGoogleApiKey: Boolean(mapPlatform.googleApiKey),
+          }}
+        />
       </div>
 
       <div className="grid gap-6 lg:grid-cols-2">

@@ -19,7 +19,7 @@ export const GET = handler(
     const companyId = companyIdOf(principal);
     const days = Math.min(365, Math.max(1, Number(searchParams.get("days") ?? 30)));
 
-    const dashboard = await tenantDashboard(companyId, days);
+    const dashboard = await tenantDashboard(companyId, { from: daysAgo(days - 1), to: new Date() });
 
     const hasAnalytics = principal.enabledModules.has("ANALYTICS");
     const hasFinance = principal.enabledModules.has("FINANCE");

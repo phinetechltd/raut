@@ -5,10 +5,15 @@ import {
   ButtonLink,
   Card,
   CellStack,
+  CustomersIcon,
   DataTable,
+  DateRangeBar,
+  FieldIcon,
+  FinanceIcon,
   Meter,
   Money,
   RankedBars,
+  SalesIcon,
   SectionHeading,
   StatCard,
   StatGrid,
@@ -20,6 +25,7 @@ import { MODULE_KEYS } from "@/lib/modules";
 import { AGE_BUCKET_LABELS } from "@/lib/money";
 import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
+import { preserved, rangeFromParams, rangeLabel } from "@/lib/table";
 import { receivablesAgeing, tenantDashboard } from "@/server/analytics";
 import { repPerformance, type RepPerformance } from "@/server/field";
 import { refreshOverdueStatuses } from "@/server/sales";
@@ -38,20 +44,30 @@ async function recentInvoices(companyId: string) {
 
 type InvoiceRow = Awaited<ReturnType<typeof recentInvoices>>[number];
 
-export default async function TenantDashboard() {
+export default async function TenantDashboard({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
   const { companyId, principal, claims } = await requireTenant();
+  const params = await searchParams;
+
+  // The dashboard answers one question ("how are we doing?") over a period the
+  // user picks. Default 30 days; the range drives every frame on the page.
+  const range = rangeFromParams(params);
 
   // Invoice status only moves when money moves, so due dates that passed
   // overnight need sweeping before any figure here is trustworthy.
   await refreshOverdueStatuses(companyId);
 
   const has = (m: string) => principal.enabledModules.has(m);
-  const metrics = await tenantDashboard(companyId, 30);
+  const metrics = await tenantDashboard(companyId, { from: range.from, to: range.to });
 
+  const thirtyDaysAgo = new Date(Date.now() - 29 * 86_400_000);
   const [ageing, reps, invoices] = await Promise.all([
     has("FINANCE") ? receivablesAgeing(companyId) : Promise.resolve(null),
     has("FIELD_SALES")
-      ? repPerformance(companyId, new Date(Date.now() - 30 * 86_400_000), new Date())
+      ? repPerformance(companyId, range.from ?? thirtyDaysAgo, range.to ?? new Date())
       : Promise.resolve(null),
     // Gated on the permission too, not just the module: an accountant and a
     // storekeeper hold different rights inside the same licensed module.
@@ -167,13 +183,20 @@ export default async function TenantDashboard() {
 
   return (
     <div className="space-y-8">
-      <header>
-        <h1 className="text-2xl font-semibold tracking-tight">
-          {greeting}, {claims.name.split(" ")[0]}
-        </h1>
-        <p className="mt-1 text-base text-content-secondary">
-          Last 30 days · {principal.enabledModules.size} of {MODULE_KEYS.length} modules licensed
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight">
+            {greeting}, {claims.name.split(" ")[0]}
+          </h1>
+          <p className="mt-1 text-base text-content-secondary">
+            {rangeLabel(range)} · {principal.enabledModules.size} of {MODULE_KEYS.length} modules licensed
+          </p>
+        </div>
+        <DateRangeBar
+          action="/app"
+          active={range.key}
+          preserve={preserved(params, ["range", "from", "to", "days"])}
+        />
       </header>
 
       <StatGrid>
@@ -181,16 +204,14 @@ export default async function TenantDashboard() {
           label="Sales"
           value={<Money cents={metrics.salesCents} compact />}
           hint={`${metrics.ordersCount} invoices issued`}
+          icon={<SalesIcon size={17} />}
         />
         <StatCard
           label="Collections"
           value={<Money cents={metrics.collectionsCents} compact />}
           tone="success"
-          hint={
-            metrics.salesCents > 0
-              ? `${(collectionRate * 100).toFixed(0)}% of invoiced value`
-              : undefined
-          }
+          hint={`${(collectionRate * 100).toFixed(0)}% of invoiced value`}
+          icon={<FinanceIcon size={17} />}
         />
         <StatCard
           label="Receivables"
@@ -201,6 +222,7 @@ export default async function TenantDashboard() {
               <Money cents={metrics.overdueCents} compact /> overdue
             </>
           }
+          icon={<FinanceIcon size={17} />}
         />
         <StatCard
           label="Active customers"
@@ -211,13 +233,19 @@ export default async function TenantDashboard() {
               ? `${metrics.lowStockItems} product(s) below reorder level`
               : undefined
           }
+          icon={<CustomersIcon size={17} />}
         />
       </StatGrid>
 
       {has("FIELD_SALES") ? (
         <div className="grid gap-4 sm:grid-cols-3">
           <StatCard label="Visits scheduled today" value={metrics.visitsToday} />
-          <StatCard label="Completed today" value={metrics.visitsCompletedToday} tone="success" />
+          <StatCard
+            label="Completed today"
+            value={metrics.visitsCompletedToday}
+            tone="success"
+            icon={<FieldIcon size={17} />}
+          />
           <StatCard
             label="GPS-verified today"
             value={metrics.visitsVerifiedToday}
@@ -232,13 +260,17 @@ export default async function TenantDashboard() {
                 ? "Check-in inside the customer geofence"
                 : "Geofencing not licensed — positions recorded, not verified"
             }
+            icon={<FieldIcon size={17} />}
           />
         </div>
       ) : null}
 
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
-          <SectionHeading title="Sales trend" description="Invoiced value by week" />
+          <SectionHeading
+            title="Sales trend"
+            description={`Invoiced value · ${rangeLabel(range)}`}
+          />
           <BarChart data={metrics.weeklySales.map((w) => ({ label: w.label, value: w.cents }))} />
         </Card>
 
@@ -286,7 +318,7 @@ export default async function TenantDashboard() {
         <section>
           <SectionHeading
             title="Field team"
-            description="Last 30 days"
+            description={rangeLabel(range)}
             actions={
               <ButtonLink href="/app/field" size="sm">
                 Open Field Sales
@@ -297,7 +329,7 @@ export default async function TenantDashboard() {
             columns={repColumns}
             rows={reps}
             getRowKey={(r) => r.repId}
-            caption="Field rep performance over the last 30 days"
+            caption="Field rep performance over the selected period"
           />
         </section>
       ) : null}
@@ -325,7 +357,7 @@ export default async function TenantDashboard() {
         <Card>
           <SectionHeading
             title="Collection performance"
-            description="Cash collected against value invoiced, last 30 days"
+            description={`Cash collected against value invoiced · ${rangeLabel(range)}`}
           />
           <Meter
             value={metrics.collectionsCents}

@@ -1,3 +1,21 @@
+# Raut — November 2026 update
+
+**Choose Google Maps or OpenStreetMap.** Every map in the console — customer
+locations, today's field activity, routes and each customer's profile — can now
+run on Google Maps instead of OpenStreetMap. Your administrator chooses under
+Settings → Maps and can add your company's own Google Maps key, or your
+platform administrator can set it for you. Nothing changes until someone
+chooses: OpenStreetMap stays the default.
+
+**The field app's Directions follow the same choice.** A rep can tap Directions
+on a stop or a customer and be handed to Google Maps or to their installed maps
+app, whichever the office picked, instead of searching for the shop themselves.
+
+**A bad Google key shows you a map anyway.** If Google refuses the key — wrong
+key, billing lapsed, restricted to another website — the console shows the map
+on OpenStreetMap and tells you why, rather than a grey box. The settings screen
+previews the live map so a mistyped key is caught where it was typed.
+
 # Raut — September 2026 update
 
 **Returns now credit exactly what the customer paid.** When goods come back from

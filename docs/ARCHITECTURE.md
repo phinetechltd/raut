@@ -208,16 +208,29 @@ reads one figure to a shopkeeper and the office invoices another.
 
 ## 7. Geo
 
-No external routing or mapping API. The proposal excludes third-party
-integrations from the platform price, so nothing here depends on a contract
-that was not bought.
+No external routing API. The proposal excludes third-party integrations from
+the platform price, so distance, fences and sequencing run in-process and
+nothing a rep depends on needs a contract that was not bought.
 
 | Need | Implementation |
 | --- | --- |
 | Distance | Haversine, ×1.35 road-winding factor for planning |
 | Territory fences | Ray-casting point-in-polygon, circular fallback |
 | Route sequencing | Nearest-neighbour + 2-opt refinement |
-| Console maps | SVG equirectangular projection of stored coordinates |
+| Console maps | OpenStreetMap (Leaflet) by default, or Google Maps — an admin setting |
+| Field app directions | Deep link to the maps app matching that setting |
+
+**Map provider.** The basemap is the one thing here that *may* use a third
+party, and it is opt-in. `src/lib/maps.ts` resolves the choice: a company's
+`Setting` rows (`maps.provider`, `maps.google_api_key`, `maps.google_map_id`)
+over the deployment's `MAPS_DEFAULT_PROVIDER` / `GOOGLE_MAPS_API_KEY`. Company
+admins set it under Settings → Maps; the Super Admin can set it per company.
+Both renderers (`tile-map-inner.tsx`, `google-map-inner.tsx`) take the same
+props and draw the same pins, so pages do not know which they got. If Google
+rejects the key at runtime the map falls back to OpenStreetMap and says so,
+rather than leaving a grey panel. The field app does not embed a map; its
+Directions buttons hand the pin to the matching maps app (`core/map_links.dart`),
+reading the provider from the login response.
 
 **Why 2-opt.** Exact TSP is not worth solving for a 5–20 stop day, and the
 road-winding estimate already dominates the error. But nearest-neighbour alone

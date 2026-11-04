@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import '../core/auth_service.dart';
 import '../core/location_service.dart';
+import '../core/map_links.dart';
 import '../core/money.dart';
 import '../data/field_repository.dart';
 import '../models/models.dart';
@@ -372,6 +373,21 @@ class _CustomerCard extends StatelessWidget {
   final Customer customer;
   final VoidCallback onUpdatePin;
 
+  String _provider(BuildContext context) =>
+      context.read<AuthService>().session?.mapProvider ?? MapLinks.osm;
+
+  Future<void> _openDirections(BuildContext context) async {
+    final lat = customer.latitude;
+    final lng = customer.longitude;
+    if (lat == null || lng == null) return;
+    final opened = await MapLinks.openDirections(_provider(context), lat, lng);
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No maps app could open this location')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Card(
@@ -473,6 +489,20 @@ class _CustomerCard extends StatelessWidget {
                 ),
               ],
             ),
+
+            if (customer.hasPin) ...[
+              const SizedBox(height: 4),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: OutlinedButton.icon(
+                  onPressed: () => _openDirections(context),
+                  icon: const Icon(Icons.directions_outlined, size: 18),
+                  label: Text(
+                    'Directions · ${MapLinks.label(_provider(context))}',
+                  ),
+                ),
+              ),
+            ],
 
             if (customer.phone != null) ...[
               const Divider(height: 20),

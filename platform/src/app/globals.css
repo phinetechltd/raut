@@ -82,6 +82,17 @@
     --chart-5: #0891b2;
     --chart-6: #be185d;
 
+    /* sidebar — the console's dark spine, kept navy in both colour schemes */
+    --sidebar-bg-1: #0a2940;
+    --sidebar-bg-2: #052744;
+    --sidebar-text: #e8edf7;
+    --sidebar-muted: #c2cbda;
+    --sidebar-subtle: #7e8fb0;
+    --sidebar-hover: rgb(255 255 255 / 0.07);
+    --sidebar-active: var(--brand-600);
+    --sidebar-active-text: #ffffff;
+    --sidebar-border: rgb(255 255 255 / 0.12);
+
     --radius-sm: 6px;
     --radius-md: 10px;
     --radius-lg: 14px;
@@ -124,6 +135,11 @@
     --info-fg: var(--brand-300);
     --info-bg: #0f1e3d;
     --info-border: #1e3a6b;
+
+    /* dark scheme: the sidebar stays navy, a step darker than the page */
+    --sidebar-bg-1: #0b1e33;
+    --sidebar-bg-2: #071528;
+    --sidebar-muted: var(--slate-300);
 
     /* dark steps chosen against the dark surface, CVD-validated */
     --chart-1: #2e8ae0;
@@ -190,6 +206,135 @@
       animation-duration: 0.01ms !important;
       transition-duration: 0.01ms !important;
     }
+  }
+
+  /* ── Leaflet ────────────────────────────────────────────────────────
+     Tile map theming pulled onto our tokens; only what Leaflet cannot
+     take as an option lives here. */
+  .leaflet-container {
+    font: inherit;
+    background: var(--surface-sunken);
+  }
+  .raut-tilemap .leaflet-control-zoom a {
+    color: var(--text);
+    background: var(--surface);
+    border-color: var(--border);
+  }
+  .raut-tilemap .leaflet-control-attribution {
+    font-size: 10px;
+    background: color-mix(in srgb, var(--surface) 82%, transparent);
+    color: var(--text-muted);
+  }
+  .raut-tilemap .leaflet-control-attribution a {
+    color: var(--accent);
+  }
+  .raut-tilemap .leaflet-popup-content-wrapper {
+    background: var(--surface);
+    color: var(--text);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+  }
+  .raut-tilemap .leaflet-popup-tip {
+    background: var(--surface);
+  }
+  .raut-tilemap .leaflet-popup-content {
+    margin: 10px 14px;
+    font-size: 13px;
+    line-height: 1.4;
+  }
+  .raut-seq-pin {
+    display: grid;
+    place-items: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 9999px;
+    border: 2px solid;
+    font-size: 11px;
+    font-weight: 700;
+    box-shadow: var(--shadow-md);
+  }
+  /* The plain customer pin. Shared by both basemaps, so a switch from
+     OpenStreetMap to Google Maps changes the streets and nothing else. */
+  .raut-dot-pin {
+    display: block;
+    width: 15px;
+    height: 15px;
+    border-radius: 9999px;
+    border: 2px solid;
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* ── Google Maps ──────────────────────────────────────────────────────
+     The Maps JavaScript API injects its own UI; these pull the parts that
+     carry text onto our tokens. */
+  .raut-tilemap-google .gm-style {
+    font: inherit;
+  }
+  .raut-tilemap-google .gm-style-iw,
+  .raut-tilemap-google .gm-style-iw-c {
+    background: var(--surface);
+    color: var(--text);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+  }
+  .raut-tilemap-google .gm-style-iw-d {
+    overflow: hidden !important;
+  }
+  .raut-tilemap-google .gm-style-iw-tc::after {
+    background: var(--surface);
+  }
+  .raut-gm-popup {
+    font-size: 13px;
+    line-height: 1.4;
+    padding: 2px 4px;
+  }
+}
+
+@layer components {
+  /* These classes back the component library — they exist so class names used
+     in views are always real, and so plain <form> GET controls match the rest
+     of the app without importing React components into server pages. */
+  .card {
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .input {
+    width: 100%;
+    height: 2.5rem;
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border);
+    background: var(--surface);
+    padding: 0 0.75rem;
+    font-size: 14px;
+    color: var(--text);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  .input::placeholder {
+    color: var(--text-muted);
+  }
+  .input:hover {
+    border-color: var(--border-strong);
+  }
+  .input:focus {
+    outline: none;
+    border-color: var(--focus);
+    box-shadow: var(--shadow-focus, 0 0 0 3px rgb(10 182 214 / 0.2));
+  }
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    white-space: nowrap;
+    border-radius: 9999px;
+    border: 1px solid var(--border);
+    padding: 0.125rem 0.5rem;
+    font-size: 11px;
+    font-weight: 500;
+    line-height: 1.45;
   }
 }
 

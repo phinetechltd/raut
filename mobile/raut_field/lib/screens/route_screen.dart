@@ -3,6 +3,7 @@ import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 
 import '../core/auth_service.dart';
+import '../core/map_links.dart';
 import '../core/sync_service.dart';
 import '../data/field_repository.dart';
 import '../models/models.dart';
@@ -393,12 +394,34 @@ class _StopCard extends StatelessWidget {
                 ),
               ),
 
-              Icon(Icons.chevron_right, color: Colors.grey.shade400),
+              // Hands the stop to the maps app the company's admin chose —
+              // a rep should not have to leave the route to find the shop.
+              if (customer?.latitude != null && customer?.longitude != null)
+                IconButton(
+                  tooltip: 'Directions',
+                  icon: Icon(Icons.directions_outlined, color: RautTheme.brand),
+                  onPressed: () => _openDirections(context),
+                )
+              else
+                Icon(Icons.chevron_right, color: Colors.grey.shade400),
             ],
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _openDirections(BuildContext context) async {
+    final c = customer;
+    if (c?.latitude == null || c?.longitude == null) return;
+    final provider =
+        context.read<AuthService>().session?.mapProvider ?? MapLinks.osm;
+    final opened = await MapLinks.openDirections(provider, c!.latitude!, c.longitude!);
+    if (!opened && context.mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No maps app could open this location')),
+      );
+    }
   }
 
   static String _money(int cents) =>

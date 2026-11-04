@@ -40,23 +40,81 @@ export interface TenantDashboard {
   topProducts: Array<{ id: string; name: string; quantity: number; cents: number }>;
 }
 
+export interface DashboardRange {
+  from: Date | null;
+  to: Date | null;
+}
+
+/**
+ * Adaptive sales buckets: daily for short windows, weekly in between, monthly
+ * beyond that. The shapes stay daily/weekly/monthly because the label, not the
+ * bucket name, is what the chart shows.
+ */
+function salesBuckets(from: Date, to: Date): Array<{ label: string; start: Date; end: Date }> {
+  const spanDays = Math.max(1, Math.ceil((to.getTime() - from.getTime()) / 86_400_000));
+  const buckets: Array<{ label: string; start: Date; end: Date }> = [];
+
+  const day = 86_400_000;
+  const short = (d: Date) => d.toLocaleDateString("en-KE", { day: "2-digit", month: "short" });
+  const monthYear = (d: Date) => d.toLocaleDateString("en-KE", { month: "short", year: spanDays > 370 ? "numeric" : undefined });
+
+  if (spanDays <= 21) {
+    for (let i = 0; i < spanDays; i++) {
+      const start = new Date(from.getTime() + i * day);
+      const end = new Date(Math.min(start.getTime() + day, to.getTime()));
+      buckets.push({ label: short(start).replace(/ \d{4}$/, ""), start, end });
+    }
+    return buckets;
+  }
+
+  if (spanDays <= 180) {
+    for (let s = startOfDay(from); s.getTime() < to.getTime(); s = new Date(s.getTime() + 7 * day)) {
+      const end = new Date(Math.min(s.getTime() + 7 * day, to.getTime()));
+      buckets.push({ label: short(s).replace(/ \d{4}$/, ""), start: s, end });
+    }
+    return buckets;
+  }
+
+  for (let s = new Date(startOfDay(from).getFullYear(), startOfDay(from).getMonth(), 1); s.getTime() < to.getTime(); s = new Date(s.getFullYear(), s.getMonth() + 1, 1)) {
+    const start = s < from ? new Date(from) : s;
+    const next = new Date(s.getFullYear(), s.getMonth() + 1, 1);
+    const end = new Date(Math.min(next.getTime(), to.getTime()));
+    buckets.push({ label: monthYear(s), start, end });
+  }
+  return buckets;
+}
+
 export async function tenantDashboard(
   companyId: string,
-  days = 30,
+  range: DashboardRange,
 ): Promise<TenantDashboard> {
-  const from = daysAgo(days);
+  const now = new Date();
   const today = startOfDay();
   const tomorrow = new Date(today.getTime() + 86_400_000);
+
+  // All-time ranges need a floor for the chart — the first invoice is it.
+  let from = range.from;
+  if (!from) {
+    const first = await db.invoice.findFirst({
+      where: { companyId, status: { notIn: ["DRAFT", "CANCELLED"] } },
+      orderBy: { issueDate: "asc" },
+      select: { issueDate: true },
+    });
+    from = first ? startOfDay(first.issueDate) : rangeFromDaysAgo(now, 29);
+  }
+  const to = range.to ?? now;
+
+  const dated = { gte: from, lte: to };
 
   const [invoiceAgg, payments, receivables, customersActive, visits] =
     await Promise.all([
       db.invoice.aggregate({
-        where: { companyId, status: { notIn: ["DRAFT", "CANCELLED"] }, issueDate: { gte: from } },
+        where: { companyId, status: { notIn: ["DRAFT", "CANCELLED"] }, issueDate: dated },
         _sum: { totalCents: true },
         _count: true,
       }),
       db.payment.aggregate({
-        where: { companyId, paidAt: { gte: from } },
+        where: { companyId, paidAt: dated },
         _sum: { amountCents: true },
       }),
       db.invoice.findMany({
@@ -73,7 +131,6 @@ export async function tenantDashboard(
       }),
     ]);
 
-  const now = new Date();
   let receivablesCents = 0;
   let overdueCents = 0;
   for (const inv of receivables) {
@@ -82,25 +139,29 @@ export async function tenantDashboard(
     if (inv.dueDate && inv.dueDate < now) overdueCents += outstanding;
   }
 
-  // Six weekly buckets, matching the "Company Activity — Weekly" chart on p.5.
-  const weeklySales: Array<{ label: string; cents: number }> = [];
-  for (let w = 5; w >= 0; w--) {
-    const bucketStart = daysAgo((w + 1) * 7);
-    const bucketEnd = daysAgo(w * 7);
-    const agg = await db.invoice.aggregate({
-      where: {
-        companyId,
-        status: { notIn: ["DRAFT", "CANCELLED"] },
-        issueDate: { gte: bucketStart, lt: bucketEnd },
-      },
-      _sum: { totalCents: true },
-    });
-    weeklySales.push({ label: `W${6 - w}`, cents: agg._sum.totalCents ?? 0 });
-  }
+  // Buckets adapt to the window — daily under three weeks, monthly past six
+  // months — so the chart stays readable at 7 days and at 12 months.
+  const buckets = salesBuckets(startOfDay(from), to);
+  const bucketAggs = await Promise.all(
+    buckets.map((b) =>
+      db.invoice.aggregate({
+        where: {
+          companyId,
+          status: { notIn: ["DRAFT", "CANCELLED"] },
+          issueDate: { gte: b.start, lt: b.end },
+        },
+        _sum: { totalCents: true },
+      }),
+    ),
+  );
+  const weeklySales = buckets.map((b, i) => ({
+    label: b.label,
+    cents: bucketAggs[i]._sum.totalCents ?? 0,
+  }));
 
   const customerTotals = await db.invoice.groupBy({
     by: ["customerId"],
-    where: { companyId, status: { notIn: ["DRAFT", "CANCELLED"] }, issueDate: { gte: from } },
+    where: { companyId, status: { notIn: ["DRAFT", "CANCELLED"] }, issueDate: { gte: from, lte: to } },
     _sum: { totalCents: true },
     orderBy: { _sum: { totalCents: "desc" } },
     take: 5,
@@ -117,7 +178,7 @@ export async function tenantDashboard(
       invoice: {
         companyId,
         status: { notIn: ["DRAFT", "CANCELLED"] },
-        issueDate: { gte: from },
+        issueDate: { gte: from, lte: to },
       },
     },
     select: { productId: true, description: true, quantity: true, lineTotalCents: true },
@@ -159,6 +220,10 @@ export async function tenantDashboard(
     })),
     topProducts,
   };
+}
+
+function rangeFromDaysAgo(now: Date, days: number): Date {
+  return new Date(startOfDay(now).getTime() - days * 86_400_000);
 }
 
 export interface PlatformOverview {

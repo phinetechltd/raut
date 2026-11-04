@@ -74,5 +74,17 @@
              printer service fails silently without this: bindService returns
              false and no exception is thrown. -->
         <package android:name="woyou.aidlservice.jiuiv5" />
+        <!-- The Directions button hands a customer's pin to a maps app:
+             geo: for whatever maps app is installed (OpenStreetMap mode),
+             https for Google Maps and the web fallbacks. Without these
+             declarations url_launcher cannot see the handlers on Android 11+. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="geo"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:scheme="https"/>
+        </intent>
     </queries>
 </manifest>

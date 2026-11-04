@@ -41,6 +41,24 @@ cd xos/mobile/raut_field && flutter pub get && flutter run --dart-define=RAUT_AP
 emulator, `localhost` is the emulator itself. On a physical handset, use your
 computer's LAN address.
 
+### Map provider
+
+Every map in the console, and the field app's **Directions** buttons, run on
+either **OpenStreetMap** (the default — no key, no quota) or **Google Maps**.
+It is an administrator's choice, per company:
+
+- A Company Admin sets it under **Settings → Maps**, optionally with the
+  company's own Google Maps browser key and Map ID.
+- The Super Admin can set it for any company from that company's page.
+- The deployment sets the default every company inherits in `platform/.env`:
+  `MAPS_DEFAULT_PROVIDER=osm|google`, plus an optional shared
+  `GOOGLE_MAPS_API_KEY` / `GOOGLE_MAPS_MAP_ID`.
+
+A Google key must have the **Maps JavaScript API** enabled and should be
+restricted to the console's domain in Google Cloud: it is sent to every
+browser that opens a map. If Google rejects the key at runtime the console
+falls back to OpenStreetMap and says so on the map.
+
 ### Sign-in accounts
 
 All seeded accounts use the password `Raut@2026`.

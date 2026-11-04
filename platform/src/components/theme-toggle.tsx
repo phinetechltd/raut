@@ -14,7 +14,7 @@ const KEY = "raut.theme";
  * gets stored — storing the *resolved* value would silently freeze a user out
  * of their OS setting the first time they toggled.
  */
-export function ThemeToggle() {
+export function ThemeToggle({ onDark = false }: { onDark?: boolean }) {
   const [mode, setMode] = useState<Mode>("system");
   const [mounted, setMounted] = useState(false);
 
@@ -52,7 +52,11 @@ export function ThemeToggle() {
 
   return (
     <div
-      className="inline-flex rounded-lg border border-border bg-surface-sunken p-0.5"
+      className={
+        onDark
+          ? "inline-flex rounded-lg p-0.5 border border-sidebar-border bg-sidebar-hover"
+          : "inline-flex rounded-lg border border-border bg-surface-sunken p-0.5"
+      }
       role="radiogroup"
       aria-label="Colour theme"
     >
@@ -65,10 +69,14 @@ export function ThemeToggle() {
           aria-label={o.label}
           title={o.label}
           onClick={() => setMode(o.value)}
-          className={`grid h-7 w-8 place-items-center rounded text-sm transition-colors ${
-            mounted && mode === o.value
-              ? "bg-surface text-accent shadow-sm"
-              : "text-content-muted hover:text-content"
+          className={`grid h-7 w-8 place-items-center rounded-md text-sm transition-colors ${
+            onDark
+              ? mounted && mode === o.value
+                ? "bg-sidebar-active text-sidebar-activetext shadow-sm"
+                : "text-sidebar-subtle hover:text-sidebar-content"
+              : mounted && mode === o.value
+                ? "bg-surface text-accent shadow-sm"
+                : "text-content-muted hover:text-content"
           }`}
         >
           <span aria-hidden="true">{o.icon}</span>

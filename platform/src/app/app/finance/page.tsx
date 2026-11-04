@@ -1,110 +1,285 @@
-﻿
-import {
+﻿import {
   ButtonLink,
+  CellStack,
+  DataTable,
+  DateRangeBar,
   Meter,
   ModuleLocked,
   Money,
+  PageHeader,
   SectionHeading,
   StatCard,
+  StatGrid,
   StatusBadge,
+  type Column,
 } from "@/components/ui";
 import { db } from "@/lib/db";
 import { can } from "@/lib/rbac";
 import { AGE_BUCKET_LABELS } from "@/lib/money";
 import { requireTenant } from "@/lib/session";
-import { daysAgo, receivablesAgeing } from "@/server/analytics";
+import { preserved, rangeFromParams, rangeLabel, tableHref, tableState, toggleSort } from "@/lib/table";
+import { receivablesAgeing } from "@/server/analytics";
 import { refreshOverdueStatuses } from "@/server/sales";
+
+import { ExpenseDecisionButtons, ExpenseDialog } from "./expense-forms";
+import { PaymentDialog } from "./payment-dialog";
 
 export const dynamic = "force-dynamic";
 
+const EXP_SORT: Record<string, string> = {
+  incurred: "incurredAt",
+  description: "description",
+  amount: "amountCents",
+  status: "status",
+};
+const PAY_SORT: Record<string, string> = { paid: "paidAt", amount: "amountCents", number: "number" };
+
 /** Module 05 · Finance, Expenses & Receivables. */
-export default async function FinancePage() {
+export default async function FinancePage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
   const { companyId, principal } = await requireTenant();
   if (!principal.enabledModules.has("FINANCE")) return <ModuleLocked module="FINANCE" />;
 
   await refreshOverdueStatuses(companyId);
+  const params = await searchParams;
+  const range = rangeFromParams(params);
 
-  const [ageing, expenses, payments, topDebtors, expenseByCategory] = await Promise.all([
-    receivablesAgeing(companyId),
-    db.expense.findMany({
-      where: { companyId },
-      include: {
-        category: { select: { name: true } },
-        user: { select: { name: true } },
-      },
-      orderBy: { incurredAt: "desc" },
-      take: 30,
-    }),
-    db.payment.findMany({
-      where: { companyId },
-      include: { customer: { select: { name: true } } },
-      orderBy: { paidAt: "desc" },
-      take: 20,
-    }),
-    db.customer.findMany({
-      where: { companyId, balanceCents: { gt: 0 } },
-      orderBy: { balanceCents: "desc" },
-      take: 10,
-      select: { id: true, name: true, town: true, balanceCents: true, creditLimitCents: true },
-    }),
-    db.expense.groupBy({
-      by: ["categoryId"],
-      where: { companyId, incurredAt: { gte: daysAgo(30) } },
-      _sum: { amountCents: true },
-      _count: true,
-    }),
-  ]);
+  const expTs = tableState(params, {
+    prefix: "exp",
+    allowed: ["incurred", "description", "amount", "status"],
+    defaultSort: "incurred",
+    defaultDir: "desc",
+    limit: 10,
+  });
+  const payTs = tableState(params, {
+    prefix: "pay",
+    allowed: ["paid", "amount", "number"],
+    defaultSort: "paid",
+    defaultDir: "desc",
+    limit: 10,
+  });
 
-  const categories = await db.expenseCategory.findMany({ where: { companyId } });
+  const rangeWhere = (field: string) =>
+    range.from ? { [field]: { gte: range.from, lte: range.to ?? new Date() } } : {};
+
+  const [ageing, expenses, expenseCount, payments, paymentCount, topDebtors, expenseByCategory, categories, customersForPay] =
+    await Promise.all([
+      receivablesAgeing(companyId),
+      db.expense.findMany({
+        where: { companyId, ...rangeWhere("incurredAt") },
+        include: { category: { select: { name: true } }, user: { select: { name: true } } },
+        orderBy: { [EXP_SORT[expTs.sort ?? "incurred"]]: expTs.dir } as Record<string, string>,
+        take: expTs.limit,
+        skip: (expTs.page - 1) * expTs.limit,
+      }),
+      db.expense.count({ where: { companyId, ...rangeWhere("incurredAt") } }),
+      db.payment.findMany({
+        where: { companyId, ...rangeWhere("paidAt") },
+        include: { customer: { select: { name: true } } },
+        orderBy: { [PAY_SORT[payTs.sort ?? "paid"]]: payTs.dir } as Record<string, string>,
+        take: payTs.limit,
+        skip: (payTs.page - 1) * payTs.limit,
+      }),
+      db.payment.count({ where: { companyId, ...rangeWhere("paidAt") } }),
+      db.customer.findMany({
+        where: { companyId, balanceCents: { gt: 0 } },
+        orderBy: { balanceCents: "desc" },
+        take: 10,
+        select: { id: true, name: true, town: true, balanceCents: true, creditLimitCents: true },
+      }),
+      db.expense.groupBy({
+        by: ["categoryId"],
+        where: { companyId, incurredAt: { gte: new Date(Date.now() - 30 * 86_400_000) } },
+        _sum: { amountCents: true },
+        _count: true,
+      }),
+      db.expenseCategory.findMany({ where: { companyId } }),
+      db.customer.findMany({
+        where: { companyId },
+        select: { id: true, name: true, balanceCents: true },
+        orderBy: { name: "asc" },
+        take: 300,
+      }),
+    ]);
+
   const categoryName = new Map(categories.map((c) => [c.id, c.name]));
 
   const totalReceivable = ageing.reduce((s, a) => s + a.cents, 0);
   const overdue = ageing.filter((a) => a.bucket !== "CURRENT").reduce((s, a) => s + a.cents, 0);
-  const pendingExpenses = expenses.filter((e) => e.status === "SUBMITTED");
-  const collected30 = payments
-    .filter((p) => p.paidAt >= daysAgo(30))
-    .reduce((s, p) => s + p.amountCents, 0);
+  const pendingCount = await db.expense.count({ where: { companyId, status: "SUBMITTED" } });
+  const collectedAgg = await db.payment.aggregate({
+    where: { companyId, ...rangeWhere("paidAt") },
+    _sum: { amountCents: true },
+  });
+  const collectedInRange = collectedAgg._sum.amountCents ?? 0;
+
+  const canExpenseWrite = can(principal, "expense:write");
+  const canApprove = can(principal, "expense:approve");
+  const canPaymentWrite = can(principal, "payment:write");
+
+  const expHrefFor = (key: string) => {
+    const next = toggleSort(expTs, key);
+    return tableHref("/app/finance", params, { exp_sort: next.sort, exp_dir: next.dir }, "exp");
+  };
+  const payHrefFor = (key: string) => {
+    const next = toggleSort(payTs, key);
+    return tableHref("/app/finance", params, { pay_sort: next.sort, pay_dir: next.dir }, "pay");
+  };
+
+  type ExpRow = (typeof expenses)[number];
+  const expenseColumns: Array<Column<ExpRow>> = [
+    {
+      key: "number",
+      header: "Number",
+      cell: (e) => <span className="font-medium">{e.number}</span>,
+    },
+    {
+      key: "description",
+      header: "Description",
+      sortKey: "description",
+      cell: (e) => <CellStack primary={<span>{e.description}</span>} secondary={e.category?.name ?? "Uncategorised"} />,
+    },
+    {
+      key: "claimed",
+      header: "Claimed by",
+      hideBelow: "md",
+      cell: (e) => <span className="text-xs">{e.user?.name ?? "—"}</span>,
+    },
+    {
+      key: "incurred",
+      header: "Incurred",
+      sortKey: "incurred",
+      hideBelow: "sm",
+      cell: (e) => <span className="text-content-muted text-xs">{e.incurredAt.toLocaleDateString("en-KE")}</span>,
+    },
+    {
+      key: "amount",
+      header: "Amount",
+      align: "right",
+      numeric: true,
+      sortKey: "amount",
+      cell: (e) => <Money cents={e.amountCents} />,
+    },
+    {
+      key: "located",
+      header: "",
+      srOnlyHeader: true,
+      hideBelow: "lg",
+      cell: (e) =>
+        e.latitude != null ? (
+          <span className="badge bg-success-bg text-success border-success-border">gps</span>
+        ) : (
+          <span className="text-content-muted text-xs">—</span>
+        ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      align: "right",
+      sortKey: "status",
+      cell: (e) => <StatusBadge status={e.status} />,
+    },
+    ...(canApprove
+      ? [
+          {
+            key: "actions",
+            header: "Approve",
+            align: "right" as const,
+            cell: (e: ExpRow) =>
+              e.status === "SUBMITTED" ? (
+                <ExpenseDecisionButtons expenseId={e.id} amountTitle={`${e.description}`} />
+              ) : (
+                <span className="text-content-muted text-xs">{e.status === "APPROVED" ? "✓ approved" : "—"}</span>
+              ),
+          },
+        ]
+      : []),
+  ];
+
+  type PayRow = (typeof payments)[number];
+  const paymentColumns: Array<Column<PayRow>> = [
+    {
+      key: "number",
+      header: "Receipt",
+      cell: (p) => <span className="font-medium">{p.number}</span>,
+    },
+    { key: "customer", header: "Customer", cell: (p) => p.customer.name },
+    {
+      key: "method",
+      header: "Method",
+      hideBelow: "sm",
+      cell: (p) => <span className="badge bg-surface-sunken">{p.method.toLowerCase()}</span>,
+    },
+    {
+      key: "reference",
+      header: "Reference",
+      hideBelow: "lg",
+      cell: (p) => <span className="text-content-muted text-xs">{p.reference ?? "—"}</span>,
+    },
+    {
+      key: "paid",
+      header: "Paid",
+      sortKey: "paid",
+      hideBelow: "md",
+      cell: (p) => <span className="text-content-muted text-xs">{p.paidAt.toLocaleDateString("en-KE")}</span>,
+    },
+    {
+      key: "amount",
+      header: "Amount",
+      align: "right",
+      numeric: true,
+      sortKey: "amount",
+      cell: (p) => <span className="font-medium text-accent"><Money cents={p.amountCents} /></span>,
+    },
+  ];
 
   return (
     <div className="space-y-8">
-      <div className="flex flex-wrap items-end justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Finance</h1>
-          <p className="text-content-muted text-sm">
-            Receivables, payment history and field expense claims.
-          </p>
-        </div>
-        {can(principal, "report:financial") && (
-          <ButtonLink href="/app/finance/reports" variant="primary" size="sm">
-            Financial reports
-          </ButtonLink>
-        )}
-      </div>
+      <PageHeader
+        title="Finance"
+        description="Receivables, payment history and field expense claims."
+        actions={
+          <>
+            {canPaymentWrite && <PaymentDialog customers={customersForPay} />}
+            {canExpenseWrite && <ExpenseDialog categories={categories.map((c) => ({ id: c.id, name: c.name }))} />}
+            {can(principal, "report:financial") && (
+              <ButtonLink href="/app/finance/reports" variant="secondary">
+                Financial reports
+              </ButtonLink>
+            )}
+          </>
+        }
+      />
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <DateRangeBar
+        action="/app/finance"
+        active={range.key}
+        preserve={preserved(params, ["range", "from", "to", "exp_page", "pay_page"])}
+      />
+
+      <StatGrid>
         <StatCard label="Total receivable" value={<Money cents={totalReceivable} compact />} />
         <StatCard
           label="Overdue"
           value={<Money cents={overdue} compact />}
-          hint={
-            totalReceivable > 0
-              ? `${((overdue / totalReceivable) * 100).toFixed(0)}% of book`
-              : undefined
-          }
+          hint={totalReceivable > 0 ? `${((overdue / totalReceivable) * 100).toFixed(0)}% of book` : undefined}
           tone={overdue > 0 ? "danger" : "success"}
         />
-        <StatCard label="Collected (30d)" value={<Money cents={collected30} compact />} tone="success" />
+        <StatCard
+          label="Collected in range"
+          value={<Money cents={collectedInRange} compact />}
+          tone="success"
+          hint={rangeLabel(range)}
+        />
         <StatCard
           label="Claims awaiting approval"
-          value={String(pendingExpenses.length)}
-          hint={
-            <>
-              <Money cents={pendingExpenses.reduce((s, e) => s + e.amountCents, 0)} /> pending
-            </>
-          }
-          tone={pendingExpenses.length > 0 ? "warning" : "neutral"}
+          value={String(pendingCount)}
+          tone={pendingCount > 0 ? "warning" : "neutral"}
         />
-      </div>
+      </StatGrid>
 
       <div>
         <SectionHeading title="Receivables ageing" description="Outstanding balance by days past due" />
@@ -126,14 +301,13 @@ export default async function FinancePage() {
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
           <SectionHeading title="Top debtors" description="Largest outstanding balances" />
-          <div className="rounded-lg border border-border bg-surface p-5 shadow-sm">
+          <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
             {topDebtors.length === 0 ? (
               <p className="text-content-muted text-sm">Nothing outstanding</p>
             ) : (
               <ul className="space-y-3">
                 {topDebtors.map((c) => {
-                  const overLimit =
-                    c.creditLimitCents > 0 && c.balanceCents > c.creditLimitCents;
+                  const overLimit = c.creditLimitCents > 0 && c.balanceCents > c.creditLimitCents;
                   return (
                     <li key={c.id}>
                       <div className="mb-1 flex items-baseline justify-between gap-3 text-xs">
@@ -166,7 +340,7 @@ export default async function FinancePage() {
 
         <div>
           <SectionHeading title="Expenses by category" description="Last 30 days" />
-          <div className="rounded-lg border border-border bg-surface p-5 shadow-sm">
+          <div className="rounded-xl border border-border bg-surface p-5 shadow-sm">
             {expenseByCategory.length === 0 ? (
               <p className="text-content-muted text-sm">No expenses recorded</p>
             ) : (
@@ -184,10 +358,7 @@ export default async function FinancePage() {
                       </div>
                       <Meter
                         value={e._sum.amountCents ?? 0}
-                        max={Math.max(
-                          ...expenseByCategory.map((x) => x._sum.amountCents ?? 0),
-                          1,
-                        )}
+                        max={Math.max(...expenseByCategory.map((x) => x._sum.amountCents ?? 0), 1)}
                         tone="warning"
                       />
                     </li>
@@ -203,94 +374,43 @@ export default async function FinancePage() {
           title="Expense claims"
           description="Field claims capture the rep's position when the expense was raised"
         />
-        <div className="scroll-x rounded-lg border border-border bg-surface shadow-sm">
-          <table className="w-full border-collapse text-base">
-            <thead>
-              <tr>
-                <th>Number</th>
-                <th>Description</th>
-                <th>Category</th>
-                <th>Claimed by</th>
-                <th>Incurred</th>
-                <th>Amount</th>
-                <th>Located</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {expenses.length === 0 ? (
-                <tr>
-                  <td colSpan={8} className="text-content-muted py-10 text-center">
-                    No expense claims
-                  </td>
-                </tr>
-              ) : (
-                expenses.map((e) => (
-                  <tr key={e.id}>
-                    <td className="font-medium">{e.number}</td>
-                    <td>{e.description}</td>
-                    <td className="text-content-muted text-xs">{e.category?.name ?? "—"}</td>
-                    <td className="text-xs">{e.user?.name ?? "—"}</td>
-                    <td className="text-content-muted text-xs">
-                      {e.incurredAt.toLocaleDateString("en-KE")}
-                    </td>
-                    <td>
-                      <Money cents={e.amountCents} />
-                    </td>
-                    <td>
-                      {e.latitude != null ? (
-                        <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-success-bg text-success">gps</span>
-                      ) : (
-                        <span className="text-content-muted text-xs">—</span>
-                      )}
-                    </td>
-                    <td>
-                      <StatusBadge status={e.status} />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={expenseColumns}
+          rows={expenses}
+          getRowKey={(e) => e.id}
+          caption="Expense claims"
+          sort={{ key: expTs.sort, dir: expTs.dir }}
+          sortHrefFor={expHrefFor}
+          pagination={{
+            page: expTs.page,
+            pages: Math.max(1, Math.ceil(expenseCount / expTs.limit)),
+            total: expenseCount,
+            limit: expTs.limit,
+            hrefFor: (p) => tableHref("/app/finance", params, { exp_page: p }),
+          }}
+          empty={{ title: "No expense claims", action: canExpenseWrite ? <ExpenseDialog categories={categories.map((c) => ({ id: c.id, name: c.name }))} /> : undefined }}
+        />
       </div>
 
       <div>
-        <SectionHeading title="Recent payments" />
-        <div className="scroll-x rounded-lg border border-border bg-surface shadow-sm">
-          <table className="w-full border-collapse text-base">
-            <thead>
-              <tr>
-                <th>Receipt</th>
-                <th>Customer</th>
-                <th>Method</th>
-                <th>Reference</th>
-                <th>Paid</th>
-                <th>Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {payments.map((p) => (
-                <tr key={p.id}>
-                  <td className="font-medium">{p.number}</td>
-                  <td>{p.customer.name}</td>
-                  <td>
-                    <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-surface-sunken">
-                      {p.method.toLowerCase()}
-                    </span>
-                  </td>
-                  <td className="text-content-muted text-xs">{p.reference ?? "—"}</td>
-                  <td className="text-content-muted text-xs">{p.paidAt.toLocaleDateString("en-KE")}</td>
-                  <td className="font-medium text-accent">
-                    <Money cents={p.amountCents} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <SectionHeading title="Payments" description={`${paymentCount} in range`} />
+        <DataTable
+          columns={paymentColumns}
+          rows={payments}
+          getRowKey={(p) => p.id}
+          caption="Payments"
+          sort={{ key: payTs.sort, dir: payTs.dir }}
+          sortHrefFor={payHrefFor}
+          pagination={{
+            page: payTs.page,
+            pages: Math.max(1, Math.ceil(paymentCount / payTs.limit)),
+            total: paymentCount,
+            limit: payTs.limit,
+            hrefFor: (p) => tableHref("/app/finance", params, { pay_page: p }),
+          }}
+          empty={{ title: "No payments in the selected range" }}
+        />
       </div>
     </div>
   );
 }
-

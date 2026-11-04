@@ -13,6 +13,7 @@ import { audit } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { MODULE_CATALOG, type ModuleKey } from "@/lib/modules";
 import { owningModule, permissionsForRole, type Role } from "@/lib/rbac";
+import { mapConfigFor } from "@/server/maps";
 
 export const dynamic = "force-dynamic";
 
@@ -140,6 +141,11 @@ export async function POST(request: Request) {
     environment: etimsConfig?.environment ?? "SANDBOX",
   };
 
+  // Which maps app the handset's Directions buttons should open. An admin
+  // decision, so it travels with the session rather than being a handset
+  // preference a rep could set differently from the office.
+  const maps = user.companyId ? await mapConfigFor(user.companyId) : null;
+
   const modules = licences.map((l) => l.moduleKey);
 
   return ok({
@@ -177,6 +183,10 @@ export async function POST(request: Request) {
     // straight away. The app must not guess — a company that does not file
     // would otherwise wait for a code that is never coming.
     etims: etimsState,
+    maps: {
+      provider: maps?.provider ?? "OSM",
+      googleAvailable: maps?.google != null,
+    },
     modules,
     moduleDetails: modules.map((k) => ({
       key: k,

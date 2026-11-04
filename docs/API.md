@@ -57,7 +57,9 @@ cookie instead; both decode to the same claims.
 Returns `accessToken`, `refreshToken` (only when `device` is sent), the user,
 their company, **licensed `modules`**, and the effective `permissions` with
 unlicensed-module permissions already stripped — so the client never renders a
-button the server would refuse.
+button the server would refuse. Also `maps: { provider: "OSM" | "GOOGLE",
+googleAvailable }` — the basemap the company's admin chose, which the handset's
+Directions buttons follow. `/auth/me` returns the same block.
 
 ### `POST /auth/refresh`
 
@@ -233,6 +235,36 @@ store, admin user, SMS templates and expense categories.
 `PUT …/modules` warns when a module's prerequisite is missing — Smart Routing
 without Field Sales has nothing to sequence — but permits it, because that is
 the operator's commercial call.
+
+---
+
+## Settings (`settings:write`)
+
+### `GET` / `PUT /settings/maps`
+
+Which basemap the company uses: OpenStreetMap or Google Maps.
+
+```jsonc
+// PUT — every field optional; omitted fields are left as they are
+{
+  "provider": "GOOGLE",          // "OSM" | "GOOGLE" | null (null = platform default)
+  "googleApiKey": "AIza…",       // "" removes the company's stored key
+  "googleMapId": "1a2b3c4d5e6f"  // "" removes it
+}
+```
+
+Both return the same view: `stored` (the company's own rows, key masked),
+`platform` (whether the deployment supplies a default and a shared key) and
+`effective` (what is actually rendered, with its source and any warning).
+Choosing `GOOGLE` with no key anywhere is refused with `GOOGLE_KEY_REQUIRED`
+rather than saved and silently ignored. The key is validated for shape
+(`INVALID_GOOGLE_KEY`) and never appears in the audit log — only that it was
+replaced or removed.
+
+### `GET` / `POST` / `PATCH /settings/credentials`
+
+Payment-gateway and eTIMS credentials. Write-only: no response ever carries a
+stored secret.
 
 ---
 

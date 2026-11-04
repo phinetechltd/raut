@@ -206,4 +206,10 @@ export const CONTRAST_ASSERTIONS: Array<{
   { name: "muted text on surface (dark)", fg: semantic.dark.textMuted, bg: semantic.dark.surface, min: 4.5 },
   { name: "accent text on surface (dark)", fg: semantic.dark.accent, bg: semantic.dark.surface, min: 4.5 },
   { name: "body text on bg (dark)", fg: semantic.dark.text, bg: semantic.dark.bg, min: 4.5 },
+
+  // The sidebar is navy in both colour schemes; these cover its text pairings.
+  { name: "sidebar body (light)", fg: "#E8EDF7", bg: "#052744", min: 4.5 },
+  { name: "sidebar secondary (light)", fg: "#C2CBDA", bg: "#052744", min: 4.5 },
+  { name: "sidebar accent (light)", fg: "#6FD5E8", bg: "#052744", min: 4.5 },
+  { name: "sidebar active text", fg: "#FFFFFF", bg: "#076C80", min: 4.5 },
 ];
