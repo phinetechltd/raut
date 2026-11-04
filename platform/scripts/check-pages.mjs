@@ -28,7 +28,7 @@ const ROLES = [
   },
   {
     label: "Company Admin (all modules)",
-    email: "admin@zamarsolutions.co.ke",
+    email: "admin@tarisolutions.co.ke",
     pages: [
       ["/app", "Receivables"],
       ["/app/customers", "Customer locations"],
@@ -50,7 +50,7 @@ const ROLES = [
   },
   {
     label: "Field Rep",
-    email: "rep@zamarsolutions.co.ke",
+    email: "rep@tarisolutions.co.ke",
     pages: [
       ["/app", "Sales trend"],
       ["/app/customers", "All customers"],

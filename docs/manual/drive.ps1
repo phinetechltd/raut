@@ -3,7 +3,7 @@
 # 1080x2424 screen and are worth writing down once.
 param(
     [string]$Serial = "emulator-5556",
-    [string]$Email = "rep@zamarsolutions.co.ke",
+    [string]$Email = "rep@tarisolutions.co.ke",
     [string]$Password = "Raut@2026"
 )
 

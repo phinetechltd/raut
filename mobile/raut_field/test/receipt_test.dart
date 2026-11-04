@@ -20,7 +20,7 @@ void main() {
 
   const company = CompanyInfo(
     id: 'c1',
-    name: 'Zamar Solutions Limited',
+    name: 'Tari Solutions Limited',
     taxPin: 'P051234567X',
     address: 'Industrial Area, Nairobi',
     phone: '+254711000000',

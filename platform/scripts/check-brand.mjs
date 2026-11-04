@@ -66,7 +66,7 @@ async function main() {
   );
   check("favicon declared", /rel="icon"/.test(loginHtml));
 
-  const cookie = await sessionCookie("admin@zamarsolutions.co.ke");
+  const cookie = await sessionCookie("admin@tarisolutions.co.ke");
   check("tenant admin signs in", !!cookie);
 
   const appHtml = await (await fetch(`${BASE}/app`, {
@@ -80,7 +80,7 @@ async function main() {
   );
   check(
     "tenant name preserved, not overwritten by the rebrand",
-    appHtml.includes("Zamar Solutions"),
+    appHtml.includes("Tari Solutions"),
   );
 
   console.log(`\n${"─".repeat(52)}`);

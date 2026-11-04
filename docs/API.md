@@ -43,7 +43,7 @@ cookie instead; both decode to the same claims.
 
 ```jsonc
 {
-  "email": "rep@zamarsolutions.co.ke",
+  "email": "rep@tarisolutions.co.ke",
   "password": "…",
   "device": {                        // omit for web; present for mobile
     "deviceId": "stable-install-id",

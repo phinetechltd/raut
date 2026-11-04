@@ -7,7 +7,7 @@
  * Wholesale) and the rep on page 9 (J. Mwangi) are the ones seeded here, with
  * real Kenyan coordinates so the maps and geofencing are exercisable.
  *
- * Two tenants are created: Zamar Solutions with every module, and a
+ * Two tenants are created: Tari Solutions with every module, and a
  * second company on the core platform only — without it, nothing proves the
  * module gate actually gates anything.
  */
@@ -92,13 +92,13 @@ async function main() {
   });
   console.log("✓ Super admin");
 
-  // ── Zamar Solutions: full platform ──────────────────────────────────
-  const zamar = await db.company.create({
+  // ── Tari Solutions: full platform ──────────────────────────────────
+  const tari = await db.company.create({
     data: {
-      name: "Zamar Solutions Limited",
-      slug: "zamar",
+      name: "Tari Solutions Limited",
+      slug: "tari",
       taxPin: "P051234567X",
-      email: "info@zamarsolutions.co.ke",
+      email: "info@tarisolutions.co.ke",
       phone: "+254711000000",
       address: "Enterprise Road, Industrial Area, Nairobi",
       currency: "KES",
@@ -113,7 +113,7 @@ async function main() {
 
   await db.companyModule.createMany({
     data: ALL_MODULES.map((moduleKey) => ({
-      companyId: zamar.id,
+      companyId: tari.id,
       moduleKey,
       enabled: true,
       priceCents: MODULE_PRICES[moduleKey],
@@ -123,7 +123,7 @@ async function main() {
 
   await db.documentCounter.createMany({
     data: DOC_TYPES.map(([docType, prefix]) => ({
-      companyId: zamar.id,
+      companyId: tari.id,
       docType,
       prefix,
       nextValue: 1,
@@ -131,13 +131,13 @@ async function main() {
   });
 
   await db.smsTemplate.createMany({
-    data: SMS_TEMPLATES.map((t) => ({ ...t, companyId: zamar.id })),
+    data: SMS_TEMPLATES.map((t) => ({ ...t, companyId: tari.id })),
   });
 
   const [nairobiBranch, mombasaBranch] = await Promise.all([
     db.branch.create({
       data: {
-        companyId: zamar.id, name: "Nairobi Head Office", code: "HQ",
+        companyId: tari.id, name: "Nairobi Head Office", code: "HQ",
         isPrimary: true, phone: "+254711000000",
         address: "Enterprise Road, Industrial Area",
         latitude: -1.30326, longitude: 36.85107,
@@ -145,7 +145,7 @@ async function main() {
     }),
     db.branch.create({
       data: {
-        companyId: zamar.id, name: "Mombasa Depot", code: "MSA",
+        companyId: tari.id, name: "Mombasa Depot", code: "MSA",
         phone: "+254711000002", address: "Nyerere Avenue, Mombasa",
         latitude: -4.05466, longitude: 39.66359,
       },
@@ -155,7 +155,7 @@ async function main() {
   const territories = await Promise.all([
     db.territory.create({
       data: {
-        companyId: zamar.id, name: "Nairobi Central", code: "NBO-C", colour: "#2f83f7",
+        companyId: tari.id, name: "Nairobi Central", code: "NBO-C", colour: "#2f83f7",
         centerLat: -1.28333, centerLng: 36.81667, radiusM: 12_000,
         // Rough ring around the Nairobi CBD and near-east.
         boundary: JSON.stringify([
@@ -166,19 +166,19 @@ async function main() {
     }),
     db.territory.create({
       data: {
-        companyId: zamar.id, name: "Coast", code: "CST", colour: "#12b981",
+        companyId: tari.id, name: "Coast", code: "CST", colour: "#12b981",
         centerLat: -4.04350, centerLng: 39.66820, radiusM: 25_000,
       },
     }),
     db.territory.create({
       data: {
-        companyId: zamar.id, name: "Rift Valley", code: "RV", colour: "#f59e0b",
+        companyId: tari.id, name: "Rift Valley", code: "RV", colour: "#f59e0b",
         centerLat: -0.30310, centerLng: 36.08000, radiusM: 40_000,
       },
     }),
     db.territory.create({
       data: {
-        companyId: zamar.id, name: "Western", code: "WST", colour: "#8b5cf6",
+        companyId: tari.id, name: "Western", code: "WST", colour: "#8b5cf6",
         centerLat: -0.09170, centerLng: 34.76796, radiusM: 40_000,
       },
     }),
@@ -188,51 +188,51 @@ async function main() {
   const users = await Promise.all([
     db.user.create({
       data: {
-        companyId: zamar.id, branchId: nairobiBranch.id,
-        name: "Grace Wanjiku", email: "admin@zamarsolutions.co.ke",
+        companyId: tari.id, branchId: nairobiBranch.id,
+        name: "Grace Wanjiku", email: "admin@tarisolutions.co.ke",
         phone: "+254711000010", passwordHash, role: "COMPANY_ADMIN",
       },
     }),
     db.user.create({
       data: {
-        companyId: zamar.id, branchId: nairobiBranch.id,
-        name: "Peter Kimani", email: "sales@zamarsolutions.co.ke",
+        companyId: tari.id, branchId: nairobiBranch.id,
+        name: "Peter Kimani", email: "sales@tarisolutions.co.ke",
         phone: "+254711000011", passwordHash, role: "SALES_MANAGER",
       },
     }),
     db.user.create({
       data: {
-        companyId: zamar.id, branchId: nairobiBranch.id,
-        name: "Alice Nyambura", email: "accounts@zamarsolutions.co.ke",
+        companyId: tari.id, branchId: nairobiBranch.id,
+        name: "Alice Nyambura", email: "accounts@tarisolutions.co.ke",
         phone: "+254711000012", passwordHash, role: "ACCOUNTANT",
       },
     }),
     db.user.create({
       data: {
-        companyId: zamar.id, branchId: nairobiBranch.id,
-        name: "Samuel Otieno", email: "stores@zamarsolutions.co.ke",
+        companyId: tari.id, branchId: nairobiBranch.id,
+        name: "Samuel Otieno", email: "stores@tarisolutions.co.ke",
         phone: "+254711000013", passwordHash, role: "STOREKEEPER",
       },
     }),
     db.user.create({
       data: {
-        companyId: zamar.id, branchId: mombasaBranch.id,
-        name: "Fatuma Ali", email: "mombasa@zamarsolutions.co.ke",
+        companyId: tari.id, branchId: mombasaBranch.id,
+        name: "Fatuma Ali", email: "mombasa@tarisolutions.co.ke",
         phone: "+254711000014", passwordHash, role: "BRANCH_MANAGER",
       },
     }),
     // The rep named on proposal page 9.
     db.user.create({
       data: {
-        companyId: zamar.id, branchId: nairobiBranch.id,
-        name: "James Mwangi", email: "rep@zamarsolutions.co.ke",
+        companyId: tari.id, branchId: nairobiBranch.id,
+        name: "James Mwangi", email: "rep@tarisolutions.co.ke",
         phone: "+254711000015", passwordHash, role: "FIELD_REP",
       },
     }),
     db.user.create({
       data: {
-        companyId: zamar.id, branchId: mombasaBranch.id,
-        name: "Brian Omondi", email: "rep2@zamarsolutions.co.ke",
+        companyId: tari.id, branchId: mombasaBranch.id,
+        name: "Brian Omondi", email: "rep2@tarisolutions.co.ke",
         phone: "+254711000016", passwordHash, role: "FIELD_REP",
       },
     }),
@@ -242,19 +242,19 @@ async function main() {
   const [mainStore, msaStore, vanJames] = await Promise.all([
     db.stockLocation.create({
       data: {
-        companyId: zamar.id, branchId: nairobiBranch.id,
+        companyId: tari.id, branchId: nairobiBranch.id,
         name: "Nairobi Main Store", code: "MAIN", type: "WAREHOUSE",
       },
     }),
     db.stockLocation.create({
       data: {
-        companyId: zamar.id, branchId: mombasaBranch.id,
+        companyId: tari.id, branchId: mombasaBranch.id,
         name: "Mombasa Store", code: "MSA-ST", type: "WAREHOUSE",
       },
     }),
     db.stockLocation.create({
       data: {
-        companyId: zamar.id, branchId: nairobiBranch.id,
+        companyId: tari.id, branchId: nairobiBranch.id,
         name: "Van KDG 445J — J. Mwangi", code: "VAN-01", type: "VAN",
         ownerUserId: repJames.id,
       },
@@ -262,10 +262,10 @@ async function main() {
   ]);
 
   const categories = await Promise.all([
-    db.productCategory.create({ data: { companyId: zamar.id, name: "Cooking Oils & Fats", code: "OIL" } }),
-    db.productCategory.create({ data: { companyId: zamar.id, name: "Grains & Cereals", code: "GRN" } }),
-    db.productCategory.create({ data: { companyId: zamar.id, name: "Home Care", code: "HC" } }),
-    db.productCategory.create({ data: { companyId: zamar.id, name: "Beverages", code: "BEV" } }),
+    db.productCategory.create({ data: { companyId: tari.id, name: "Cooking Oils & Fats", code: "OIL" } }),
+    db.productCategory.create({ data: { companyId: tari.id, name: "Grains & Cereals", code: "GRN" } }),
+    db.productCategory.create({ data: { companyId: tari.id, name: "Home Care", code: "HC" } }),
+    db.productCategory.create({ data: { companyId: tari.id, name: "Beverages", code: "BEV" } }),
   ]);
   const [oil, grain, homecare, bev] = categories;
 
@@ -290,7 +290,7 @@ async function main() {
     products.push(
       await db.product.create({
         data: {
-          companyId: zamar.id, categoryId: spec.cat, sku: spec.sku, name: spec.name,
+          companyId: tari.id, categoryId: spec.cat, sku: spec.sku, name: spec.name,
           unit: spec.unit, unitsPerPack: 12, sellPriceCents: spec.sell,
           costPriceCents: spec.cost, taxRateBp: 1600, reorderLevel: spec.reorder,
         },
@@ -314,11 +314,11 @@ async function main() {
     quantity: number,
   ) => {
     await db.stockItem.create({
-      data: { companyId: zamar.id, productId, locationId, quantity },
+      data: { companyId: tari.id, productId, locationId, quantity },
     });
     await db.stockMovement.create({
       data: {
-        companyId: zamar.id, productId, locationId,
+        companyId: tari.id, productId, locationId,
         type: "OPENING", quantity, balanceAfter: quantity,
         unitCostCents: costPriceCents, note: "Opening balance",
         createdById: storekeeper.id, createdAt: daysAgo(110),
@@ -340,7 +340,7 @@ async function main() {
   // never reach KRA in this state, which is the point.
   await db.etimsConfig.create({
     data: {
-      companyId: zamar.id,
+      companyId: tari.id,
       enabled: true,
       environment: "SANDBOX",
       autoTransmit: true,
@@ -375,7 +375,7 @@ async function main() {
     await db.productVariant.createMany({
       data: [
         {
-          companyId: zamar.id,
+          companyId: tari.id,
           productId: product.id,
           // The unit as a shopkeeper would say it, not the stock code.
           name: UNIT_LABELS[product.unit] ?? product.unit,
@@ -385,7 +385,7 @@ async function main() {
           isDefault: true,
         },
         {
-          companyId: zamar.id,
+          companyId: tari.id,
           productId: product.id,
           name: "Dozen",
           sku: `${product.sku}-12`,
@@ -418,7 +418,7 @@ async function main() {
     customers.push(
       await db.customer.create({
         data: {
-          companyId: zamar.id,
+          companyId: tari.id,
           branchId: spec.terr === coastT.id ? mombasaBranch.id : nairobiBranch.id,
           territoryId: spec.terr, assignedRepId: spec.rep,
           code: spec.code, name: spec.name, type: spec.type, segment: spec.seg,
@@ -433,46 +433,46 @@ async function main() {
     );
   }
   await db.documentCounter.update({
-    where: { companyId_docType: { companyId: zamar.id, docType: "CUSTOMER" } },
+    where: { companyId_docType: { companyId: tari.id, docType: "CUSTOMER" } },
     data: { nextValue: customers.length + 1 },
   });
   console.log(`✓ ${customers.length} customers`);
 
   await db.expenseCategory.createMany({
     data: [
-      { companyId: zamar.id, name: "Fuel", code: "FUEL" },
-      { companyId: zamar.id, name: "Airtime & Data", code: "AIRTIME" },
-      { companyId: zamar.id, name: "Travel & Accommodation", code: "TRAVEL" },
-      { companyId: zamar.id, name: "Vehicle Maintenance", code: "VEHICLE" },
-      { companyId: zamar.id, name: "Miscellaneous", code: "MISC" },
+      { companyId: tari.id, name: "Fuel", code: "FUEL" },
+      { companyId: tari.id, name: "Airtime & Data", code: "AIRTIME" },
+      { companyId: tari.id, name: "Travel & Accommodation", code: "TRAVEL" },
+      { companyId: tari.id, name: "Vehicle Maintenance", code: "VEHICLE" },
+      { companyId: tari.id, name: "Miscellaneous", code: "MISC" },
     ],
   });
 
   const suppliers = await Promise.all([
     db.supplier.create({
       data: {
-        companyId: zamar.id, code: "SUP-0001", name: "Bidco Africa Ltd",
+        companyId: tari.id, code: "SUP-0001", name: "Bidco Africa Ltd",
         contactName: "Procurement Desk", phone: "+254733000001",
         email: "orders@bidco.example", paymentTermsDays: 30, taxPin: "P051111111A",
       },
     }),
     db.supplier.create({
       data: {
-        companyId: zamar.id, code: "SUP-0002", name: "Mwea Rice Millers",
+        companyId: tari.id, code: "SUP-0002", name: "Mwea Rice Millers",
         contactName: "Sales Office", phone: "+254733000002",
         email: "sales@mwearice.example", paymentTermsDays: 14,
       },
     }),
     db.supplier.create({
       data: {
-        companyId: zamar.id, code: "SUP-0003", name: "Kapa Home Care",
+        companyId: tari.id, code: "SUP-0003", name: "Kapa Home Care",
         contactName: "Distribution", phone: "+254733000003",
         email: "distribution@kapa.example", paymentTermsDays: 30,
       },
     }),
   ]);
   await db.documentCounter.update({
-    where: { companyId_docType: { companyId: zamar.id, docType: "SUPPLIER" } },
+    where: { companyId_docType: { companyId: tari.id, docType: "SUPPLIER" } },
     data: { nextValue: suppliers.length + 1 },
   });
 
@@ -519,7 +519,7 @@ async function main() {
 
       const order = await db.salesOrder.create({
         data: {
-          companyId: zamar.id, customerId: customer.id, branchId: nairobiBranch.id,
+          companyId: tari.id, customerId: customer.id, branchId: nairobiBranch.id,
           number: `SO-${String(orderSeq++).padStart(4, "0")}`,
           status: "INVOICED", channel: isField ? "FIELD" : "CONSOLE",
           orderDate: issueDate, subtotalCents, taxCents, totalCents,
@@ -531,7 +531,7 @@ async function main() {
 
       const invoice = await db.invoice.create({
         data: {
-          companyId: zamar.id, customerId: customer.id, branchId: nairobiBranch.id,
+          companyId: tari.id, customerId: customer.id, branchId: nairobiBranch.id,
           locationId: isField ? vanJames.id : mainStore.id, orderId: order.id,
           number: `INV-${String(invoiceSeq++).padStart(4, "0")}`,
           status: "ISSUED", channel: isField ? "FIELD" : "CONSOLE",
@@ -553,7 +553,7 @@ async function main() {
         if (paidAt <= new Date()) {
           const payment = await db.payment.create({
             data: {
-              companyId: zamar.id, customerId: customer.id,
+              companyId: tari.id, customerId: customer.id,
               number: `PAY-${String(paymentSeq++).padStart(4, "0")}`,
               amountCents: amount, method: rand() > 0.45 ? "MPESA" : "CASH",
               paidAt, createdById: isField ? repJames.id : salesManager.id,
@@ -577,13 +577,13 @@ async function main() {
     }
   }
   await db.documentCounter.updateMany({
-    where: { companyId: zamar.id, docType: "INVOICE" }, data: { nextValue: invoiceSeq },
+    where: { companyId: tari.id, docType: "INVOICE" }, data: { nextValue: invoiceSeq },
   });
   await db.documentCounter.updateMany({
-    where: { companyId: zamar.id, docType: "PAYMENT" }, data: { nextValue: paymentSeq },
+    where: { companyId: tari.id, docType: "PAYMENT" }, data: { nextValue: paymentSeq },
   });
   await db.documentCounter.updateMany({
-    where: { companyId: zamar.id, docType: "ORDER" }, data: { nextValue: orderSeq },
+    where: { companyId: tari.id, docType: "ORDER" }, data: { nextValue: orderSeq },
   });
   console.log(`✓ ${invoiceSeq - 1} invoices, ${paymentSeq - 1} payments`);
 
@@ -608,7 +608,7 @@ async function main() {
 
   const route = await db.route.create({
     data: {
-      companyId: zamar.id, repId: repJames.id, territoryId: nboT.id,
+      companyId: tari.id, repId: repJames.id, territoryId: nboT.id,
       name: "Today's Route — Nairobi Central", routeDate: today, status: "ACTIVE",
       startLat: nairobiBranch.latitude, startLng: nairobiBranch.longitude,
       totalDistanceM: 48_200, estimatedMin: 111, startedAt: new Date(today.getTime() + 8 * 3_600_000),
@@ -647,7 +647,7 @@ async function main() {
 
     await db.visit.create({
       data: {
-        companyId: zamar.id, customerId: plan.customer.id, repId: repJames.id,
+        companyId: tari.id, customerId: plan.customer.id, repId: repJames.id,
         routeId: route.id, status: plan.visit, purpose: "SALES", scheduledAt: plannedAt,
         checkInAt: checkedIn ? plannedAt : null,
         checkInLat: checkedIn ? plan.customer.latitude! + jitter() : null,
@@ -665,7 +665,7 @@ async function main() {
   // Brian's Coast route, so the console shows more than one rep working.
   const coastRoute = await db.route.create({
     data: {
-      companyId: zamar.id, repId: repBrian.id, territoryId: coastT.id,
+      companyId: tari.id, repId: repBrian.id, territoryId: coastT.id,
       name: "Today's Route — Coast", routeDate: today, status: "PLANNED",
       startLat: mombasaBranch.latitude, startLng: mombasaBranch.longitude,
       totalDistanceM: 16_400, estimatedMin: 38,
@@ -682,7 +682,7 @@ async function main() {
     });
     await db.visit.create({
       data: {
-        companyId: zamar.id, customerId: customer.id, repId: repBrian.id,
+        companyId: tari.id, customerId: customer.id, repId: repBrian.id,
         routeId: coastRoute.id, status: "SCHEDULED", scheduledAt: plannedAt,
       },
     });
@@ -702,7 +702,7 @@ async function main() {
         const verified = attended && rand() > 0.18;
         await db.visit.create({
           data: {
-            companyId: zamar.id, customerId: customer.id, repId: rep.id,
+            companyId: tari.id, customerId: customer.id, repId: rep.id,
             status: attended ? "COMPLETED" : "MISSED", purpose: "SALES", scheduledAt,
             checkInAt: attended ? scheduledAt : null,
             checkInLat: attended ? customer.latitude : null,
@@ -727,7 +727,7 @@ async function main() {
 
   await db.salesTarget.createMany({
     data: [repJames, repBrian].map((rep) => ({
-      companyId: zamar.id, repId: rep.id, period: "MONTHLY",
+      companyId: tari.id, repId: rep.id, period: "MONTHLY",
       periodStart: monthStart, periodEnd: monthEnd,
       targetSalesCents: 2_500_000_00, targetCollectionCents: 2_000_000_00,
       targetVisits: 80, targetNewCustomers: 5,
@@ -735,12 +735,12 @@ async function main() {
   });
 
   const fuelCategory = await db.expenseCategory.findFirstOrThrow({
-    where: { companyId: zamar.id, code: "FUEL" },
+    where: { companyId: tari.id, code: "FUEL" },
   });
   for (let i = 0; i < 8; i++) {
     await db.expense.create({
       data: {
-        companyId: zamar.id, branchId: nairobiBranch.id, categoryId: fuelCategory.id,
+        companyId: tari.id, branchId: nairobiBranch.id, categoryId: fuelCategory.id,
         userId: i % 2 === 0 ? repJames.id : repBrian.id,
         number: `EXP-${String(i + 1).padStart(4, "0")}`,
         description: i % 2 === 0 ? "Fuel — Nairobi Central route" : "Fuel — Coast route",
@@ -756,7 +756,7 @@ async function main() {
     });
   }
   await db.documentCounter.updateMany({
-    where: { companyId: zamar.id, docType: "EXPENSE" }, data: { nextValue: 9 },
+    where: { companyId: tari.id, docType: "EXPENSE" }, data: { nextValue: 9 },
   });
 
   // ── second tenant: core platform only ───────────────────────────────
@@ -826,14 +826,14 @@ async function main() {
   PLATFORM
     admin@tariafrica.com            Super Admin
 
-  ZAMAR SOLUTIONS  (all 11 modules licensed, eTIMS in sandbox)
-    admin@zamarsolutions.co.ke      Company Admin
-    sales@zamarsolutions.co.ke      Sales Manager
-    accounts@zamarsolutions.co.ke   Accountant
-    stores@zamarsolutions.co.ke     Storekeeper
-    mombasa@zamarsolutions.co.ke    Branch Manager
-    rep@zamarsolutions.co.ke        Field Rep  (James Mwangi — mobile app)
-    rep2@zamarsolutions.co.ke       Field Rep  (Brian Omondi)
+  TARI SOLUTIONS  (all 11 modules licensed, eTIMS in sandbox)
+    admin@tarisolutions.co.ke      Company Admin
+    sales@tarisolutions.co.ke      Sales Manager
+    accounts@tarisolutions.co.ke   Accountant
+    stores@tarisolutions.co.ke     Storekeeper
+    mombasa@tarisolutions.co.ke    Branch Manager
+    rep@tarisolutions.co.ke        Field Rep  (James Mwangi — mobile app)
+    rep2@tarisolutions.co.ke       Field Rep  (Brian Omondi)
 
   ACACIA DISTRIBUTORS  (core platform only — module gate demo)
     admin@acacia.example            Company Admin

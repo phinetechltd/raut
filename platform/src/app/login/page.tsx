@@ -8,12 +8,12 @@ import { login, type LoginState } from "./actions";
 
 const DEMO_ACCOUNTS = [
   { label: "Super Admin", email: "admin@tariafrica.com", note: "Platform" },
-  // These notes name the tenant, not the product — Zamar Solutions is a
+  // These notes name the tenant, not the product — Tari Solutions is a
   // company on Raut, not Raut itself.
-  { label: "Company Admin", email: "admin@zamarsolutions.co.ke", note: "Zamar Solutions — all modules" },
-  { label: "Sales Manager", email: "sales@zamarsolutions.co.ke", note: "Zamar Solutions" },
-  { label: "Accountant", email: "accounts@zamarsolutions.co.ke", note: "Zamar Solutions" },
-  { label: "Field Rep", email: "rep@zamarsolutions.co.ke", note: "James Mwangi — mobile" },
+  { label: "Company Admin", email: "admin@tarisolutions.co.ke", note: "Tari Solutions — all modules" },
+  { label: "Sales Manager", email: "sales@tarisolutions.co.ke", note: "Tari Solutions" },
+  { label: "Accountant", email: "accounts@tarisolutions.co.ke", note: "Tari Solutions" },
+  { label: "Field Rep", email: "rep@tarisolutions.co.ke", note: "James Mwangi — mobile" },
   { label: "Core-only Admin", email: "admin@acacia.example", note: "Acacia — module gate" },
 ];
 
@@ -68,7 +68,7 @@ export default function LoginPage() {
         </ul>
 
         <p className="text-xs text-white/40">
-          Prepared for Zamar Solutions Limited · Core platform + 11 modules
+          Prepared for Tari Solutions Limited · Core platform + 11 modules
           {" · "}
           <a href="/policy" className="underline hover:text-white/70">
             Privacy &amp; Cookies

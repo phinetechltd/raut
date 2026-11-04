@@ -34,7 +34,7 @@ void main() {
     final fields = find.byType(TextFormField);
     expect(fields, findsNWidgets(2), reason: 'login form not found');
 
-    await tester.enterText(fields.at(0), 'rep@zamarsolutions.co.ke');
+    await tester.enterText(fields.at(0), 'rep@tarisolutions.co.ke');
     await tester.pumpAndSettle();
     await tester.enterText(fields.at(1), 'Raut@2026');
     await tester.pumpAndSettle();

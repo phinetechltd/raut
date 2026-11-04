@@ -76,7 +76,7 @@ async function main() {
   const login = await api("/auth/login", {
     method: "POST",
     body: {
-      email: "rep@zamarsolutions.co.ke",
+      email: "rep@tarisolutions.co.ke",
       password: PASSWORD,
       device: {
         deviceId,
@@ -303,7 +303,7 @@ async function main() {
   // The real test of "connected": not an API echo, but the console page a
   // sales manager opens, rendered from shared state.
   console.log("\n8. Back office opens the console");
-  const managerCookie = await sessionCookie("sales@zamarsolutions.co.ke");
+  const managerCookie = await sessionCookie("sales@tarisolutions.co.ke");
   check("Sales manager signs in to the console", !!managerCookie);
 
   const salesPage = await consoleHtml(managerCookie, "/app/sales");

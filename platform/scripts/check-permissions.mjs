@@ -102,7 +102,7 @@ const ROLES = [
   },
   {
     label: "Company Admin",
-    email: "admin@zamarsolutions.co.ke",
+    email: "admin@tarisolutions.co.ke",
     reach: [
       "/app",
       "/app/customers",
@@ -118,7 +118,7 @@ const ROLES = [
   },
   {
     label: "Accountant",
-    email: "accounts@zamarsolutions.co.ke",
+    email: "accounts@tarisolutions.co.ke",
     reach: ["/app", "/app/sales", "/app/finance"],
     redirect: ["/admin"],
     apiAllow: [
@@ -141,7 +141,7 @@ const ROLES = [
   },
   {
     label: "Storekeeper",
-    email: "stores@zamarsolutions.co.ke",
+    email: "stores@tarisolutions.co.ke",
     reach: ["/app", "/app/inventory"],
     redirect: ["/admin"],
     apiAllow: ["/stock", "/products", "/suppliers"],
@@ -160,7 +160,7 @@ const ROLES = [
   },
   {
     label: "Field Rep",
-    email: "rep@zamarsolutions.co.ke",
+    email: "rep@tarisolutions.co.ke",
     reach: ["/app", "/app/customers", "/app/field"],
     redirect: ["/admin"],
     // A rep raises returns where the goods are handed back, which is the whole

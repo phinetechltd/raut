@@ -26,7 +26,7 @@ import 'package:raut_field/models/models.dart';
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
 
-  const email = 'rep@zamarsolutions.co.ke';
+  const email = 'rep@tarisolutions.co.ke';
   const password = 'Raut@2026';
 
   group('Platform reachability', () {
@@ -64,7 +64,7 @@ void main() {
       // The tenant, not the product. A rep signs in to a company on Raut —
       // asserting 'Raut' here would be asserting the platform's own name against
       // a customer record, which is exactly backwards.
-      expect(auth.session!.companyName, contains('Zamar Solutions'));
+      expect(auth.session!.companyName, contains('Tari Solutions'));
 
       // The seeded tenant holds all ten modules, so the field-facing
       // capabilities must all be on.

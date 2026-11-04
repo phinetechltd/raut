@@ -33,7 +33,7 @@ phone is on the same network.
 The login screen displays the server it will call, so a misconfigured build is
 visible rather than mysterious.
 
-Sign in as `rep@zamarsolutions.co.ke` / `Raut@2026` (James Mwangi, the rep from
+Sign in as `rep@tarisolutions.co.ke` / `Raut@2026` (James Mwangi, the rep from
 proposal page 9).
 
 ### Cleartext HTTP
@@ -123,8 +123,8 @@ apply, silently.
 
 ## Upgrading from the pre-Raut build
 
-The rebrand changed the `applicationId` from `co.ke.tariafrica.zamar_field` to
-`com.raut.app`. **Android treats a changed applicationId as a
+The rebrand changed the `applicationId` from the pre-Raut package id (a `co.ke.tariafrica.*` id; find it with
+`adb shell pm list packages tariafrica`) to `com.raut.app`. **Android treats a changed applicationId as a
 different app**, so:
 
 - The new build will not upgrade an existing install — it installs alongside it.
@@ -137,7 +137,7 @@ Before rolling this out to handsets that already have the old build:
 ```bash
 # 1. On each device, open the OLD app and sync until the queue is empty.
 # 2. Confirm nothing is pending, then remove it.
-adb uninstall co.ke.tariafrica.zamar_field
+adb uninstall <pre-raut-application-id>
 ```
 
 There is no automatic data migration between the two package ids, and building

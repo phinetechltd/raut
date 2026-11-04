@@ -1,14 +1,14 @@
 # Raut — One Platform. Every Mile.
 
 Multi-tenant ERP, CRM and field-sales platform by **Tari Africa Platforms
-Limited**. First deployed for **Zamar Solutions Limited**, to the scope in
-`Zamar_ERP_Proposal.pdf` (31 July 2026).
+Limited**. First deployed for **Tari Solutions Limited**, to the scope in
+`Tari_ERP_Proposal.pdf` (31 July 2026).
 
-> **Raut is the product. Zamar Solutions is a customer on it.**
+> **Raut is the product. Tari Solutions is a customer on it.**
 > The proposal (§9–12) has Tari Africa licensing this platform to many
-> businesses, so it carries its own name rather than the first client's. Zamar
-> Solutions Limited remains throughout as the seeded tenant — that is a real
-> company with real data, not a placeholder to be renamed.
+> businesses, so it carries its own name rather than the first client's. Tari
+> Solutions Limited is the seeded tenant throughout: the demo company every
+> account, route and invoice in the sample data belongs to.
 
 Two systems, one database, one permission model:
 
@@ -66,11 +66,11 @@ All seeded accounts use the password `Raut@2026`.
 | Account | Role | Sees |
 | --- | --- | --- |
 | `admin@tariafrica.com` | Super Admin | Platform: companies, licences, audit |
-| `admin@zamarsolutions.co.ke` | Company Admin | Raut — all ten modules |
-| `sales@zamarsolutions.co.ke` | Sales Manager | Territories, targets, field team |
-| `accounts@zamarsolutions.co.ke` | Accountant | Invoices, payments, receivables |
-| `stores@zamarsolutions.co.ke` | Storekeeper | Stock, transfers, goods received |
-| `rep@zamarsolutions.co.ke` | Field Rep | **The mobile app** — James Mwangi |
+| `admin@tarisolutions.co.ke` | Company Admin | Raut — all ten modules |
+| `sales@tarisolutions.co.ke` | Sales Manager | Territories, targets, field team |
+| `accounts@tarisolutions.co.ke` | Accountant | Invoices, payments, receivables |
+| `stores@tarisolutions.co.ke` | Storekeeper | Stock, transfers, goods received |
+| `rep@tarisolutions.co.ke` | Field Rep | **The mobile app** — James Mwangi |
 | `admin@acacia.example` | Company Admin | Core platform only — proves the module gate |
 
 That last account matters: Acacia has bought the core platform and none of the
@@ -243,5 +243,5 @@ WhatsApp Business API, live bulk-SMS accounts.
 
 Per proposal §7 and §8: the platform is a Tari Africa-owned software product.
 Payment for development does not transfer source code or intellectual property.
-Zamar Solutions receives a commercial licence to the configured platform for up
+Tari Solutions receives a commercial licence to the configured platform for up
 to 50 users, enforced by the `seatLimit` on their company record.

@@ -5,7 +5,7 @@ $s = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
 Invoke-RestMethod -Uri "$base/auth/login" -Method Post -WebSession $s `
     -ContentType "application/json" `
-    -Body (@{ email = "admin@zamarsolutions.co.ke"; password = "Raut@2026" } | ConvertTo-Json) | Out-Null
+    -Body (@{ email = "admin@tarisolutions.co.ke"; password = "Raut@2026" } | ConvertTo-Json) | Out-Null
 
 $notes = (Invoke-RestMethod -Uri "$base/credit-notes" -WebSession $s).data.rows
 $note = $notes | Select-Object -First 1

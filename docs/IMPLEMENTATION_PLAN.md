@@ -1,12 +1,12 @@
 # Raut — One Platform. Every Mile. · Implementation Plan
 
 **Product:** Raut, owned by Tari Africa Platforms Limited
-**First client:** Zamar Solutions Limited
-**Source of truth:** `Zamar_ERP_Proposal.pdf` (31 July 2026)
+**First client:** Tari Solutions Limited
+**Source of truth:** `Tari_ERP_Proposal.pdf` (31 July 2026)
 
 The proposal names the engagement after the client. The platform does not:
 §9–12 make it a reusable product licensed to many businesses, and a product
-named after one customer cannot be sold to the next. Zamar Solutions is
+named after one customer cannot be sold to the next. Tari Solutions is
 therefore a tenant on Raut, not the thing being built.
 
 ---

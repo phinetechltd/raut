@@ -10,7 +10,7 @@ $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
 
 $login = Invoke-RestMethod -Uri "$base/auth/login" -Method Post -WebSession $session `
     -ContentType "application/json" `
-    -Body (@{ email = "admin@zamarsolutions.co.ke"; password = "Raut@2026" } | ConvertTo-Json)
+    -Body (@{ email = "admin@tarisolutions.co.ke"; password = "Raut@2026" } | ConvertTo-Json)
 
 Write-Output "signed in as $($login.data.user.name)"
 

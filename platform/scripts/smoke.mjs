@@ -58,7 +58,7 @@ async function main() {
   const login = await api("/auth/login", {
     method: "POST",
     body: {
-      email: "rep@zamarsolutions.co.ke",
+      email: "rep@tarisolutions.co.ke",
       password: PASSWORD,
       device: { deviceId, platform: "android", model: "Smoke", appVersion: "1.0.0" },
     },
@@ -76,7 +76,7 @@ async function main() {
 
   const badLogin = await api("/auth/login", {
     method: "POST",
-    body: { email: "rep@zamarsolutions.co.ke", password: "wrong-password" },
+    body: { email: "rep@tarisolutions.co.ke", password: "wrong-password" },
   });
   check("Wrong password rejected", badLogin.status === 401);
 
@@ -267,7 +267,7 @@ async function main() {
   console.log("\nBack-office visibility");
   const adminLogin = await api("/auth/login", {
     method: "POST",
-    body: { email: "admin@zamarsolutions.co.ke", password: PASSWORD },
+    body: { email: "admin@tarisolutions.co.ke", password: PASSWORD },
   });
   const adminToken = adminLogin.json?.data?.accessToken;
   check("Company admin signs in", adminLogin.status === 200);
