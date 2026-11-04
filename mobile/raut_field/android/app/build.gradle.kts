@@ -13,6 +13,15 @@ if (hasReleaseSigning) {
     keystoreProperties.load(FileInputStream(keystorePropertiesFile))
 }
 
+fun dartDefine(name: String): String {
+    val raw = project.findProperty("dart-defines") as String? ?: return ""
+    return raw.split(",")
+        .map { String(java.util.Base64.getDecoder().decode(it), Charsets.UTF_8) }
+        .firstOrNull { it.startsWith("$name=") }
+        ?.substringAfter("=")
+        ?: ""
+}
+
 plugins {
     id("com.android.application")
     id("kotlin-android")
@@ -47,6 +56,13 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // The Google Maps SDK reads its key from the manifest. It is supplied
+        // as a --dart-define so the Dart side (AppConfig.hasGoogleMapsKey) and
+        // the native side cannot disagree about whether a key was built in.
+        // Flutter hands dart-defines to Gradle as a comma-separated list of
+        // base64 "KEY=VALUE" entries.
+        manifestPlaceholders["GOOGLE_MAPS_ANDROID_KEY"] = dartDefine("GOOGLE_MAPS_ANDROID_KEY")
     }
 
     signingConfigs {

@@ -7,11 +7,12 @@ import {
   DEFAULT_EMPTY_CENTER,
   allCoordinates,
   dotPinHtml,
-  escapeHtml,
   pathPointsOf,
+  popupHtml,
   resolveThemeColours,
   sequencePinHtml,
   toneColour,
+  vehiclePinHtml,
   type TileMapProps,
 } from "./map-shared";
 
@@ -29,6 +30,7 @@ export default function TileMapInner({
   points,
   polygons = [],
   path = [],
+  tracks = [],
   height = 380,
   zoom = 13,
   emptyCenter = DEFAULT_EMPTY_CENTER,
@@ -104,6 +106,19 @@ export default function TileMapInner({
         ).addTo(layer);
       }
 
+      // Driven trails go under the plan: solid, so the dashed plan reads as
+      // the intention and the solid line as what happened.
+      for (const track of tracks) {
+        if (track.coords.length < 2) continue;
+        L.polyline(track.coords, {
+          color: track.colour,
+          weight: 3,
+          opacity: 0.7,
+          lineCap: "round",
+          lineJoin: "round",
+        }).addTo(layer);
+      }
+
       const pathPoints = pathPointsOf(points, path);
       if (pathPoints.length > 1) {
         L.polyline(pathPoints.map((p) => [p.lat, p.lng] as [number, number]), {
@@ -118,7 +133,17 @@ export default function TileMapInner({
       for (const p of points) {
         const colour = toneColour(theme, p.tone);
 
-        if (p.sequence) {
+        if (p.kind === "vehicle") {
+          const icon = L.divIcon({
+            className: "raut-vehicle-marker",
+            html: vehiclePinHtml(colour, theme),
+            iconSize: [26, 26],
+            iconAnchor: [13, 13],
+          });
+          L.marker([p.lat, p.lng], { icon, zIndexOffset: 1000 })
+            .bindPopup(popupHtml(p))
+            .addTo(layer);
+        } else if (p.sequence) {
           const icon = L.divIcon({
             className: "raut-seq-marker",
             html: sequencePinHtml(p.sequence, colour, theme),
@@ -126,7 +151,7 @@ export default function TileMapInner({
             iconAnchor: [11, 11],
           });
           L.marker([p.lat, p.lng], { icon })
-            .bindPopup(`<strong>${escapeHtml(p.label)}</strong><br>Stop ${p.sequence}`)
+            .bindPopup(popupHtml(p))
             .addTo(layer);
         } else {
           const icon = L.divIcon({
@@ -136,12 +161,12 @@ export default function TileMapInner({
             iconAnchor: [7.5, 7.5],
           });
           L.marker([p.lat, p.lng], { icon })
-            .bindPopup(`<strong>${escapeHtml(p.label)}</strong>`)
+            .bindPopup(popupHtml(p))
             .addTo(layer);
         }
       }
 
-      const all = allCoordinates(points, polygons);
+      const all = allCoordinates(points, polygons, tracks);
       if (all.length === 1) {
         map.setView(all[0], zoom);
       } else if (all.length > 1) {
@@ -153,7 +178,7 @@ export default function TileMapInner({
     return () => {
       cancelled = true;
     };
-  }, [points, polygons, path, zoom]);
+  }, [points, polygons, path, tracks, zoom]);
 
   return (
     <div

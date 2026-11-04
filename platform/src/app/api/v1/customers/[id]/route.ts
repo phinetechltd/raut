@@ -3,7 +3,9 @@ import { z } from "zod";
 import { handler, notFound, parseBody } from "@/lib/api";
 import { auditAs, diff } from "@/lib/audit";
 import { db } from "@/lib/db";
+import { outstandingCents } from "@/lib/money";
 import { scope } from "@/lib/tenant";
+import { creditedByInvoice } from "@/server/sales";
 
 export const dynamic = "force-dynamic";
 
@@ -25,9 +27,15 @@ export const GET = handler<{ id: string }>(
 
     if (!customer) throw notFound("Customer not found");
 
-    const outstanding = customer.invoices
-      .filter((i) => ["ISSUED", "PARTIALLY_PAID", "OVERDUE"].includes(i.status))
-      .reduce((sum, i) => sum + (i.totalCents - i.paidCents), 0);
+    // Net of credit notes, like the invoice list and the allocation logic.
+    const open = customer.invoices.filter((i) =>
+      ["ISSUED", "PARTIALLY_PAID", "OVERDUE"].includes(i.status),
+    );
+    const credited = await creditedByInvoice(db, open.map((i) => i.id));
+    const outstanding = open.reduce(
+      (sum, i) => sum + outstandingCents({ ...i, creditedCents: credited.get(i.id) ?? 0 }),
+      0,
+    );
 
     return { ...customer, outstandingCents: outstanding };
   },
@@ -94,13 +102,33 @@ export const DELETE = handler<{ id: string }>(
   async ({ principal, params, request }) => {
     const existing = await db.customer.findFirst({
       where: { id: params.id, ...scope(principal) },
-      include: { _count: { select: { invoices: true, salesOrders: true } } },
+      include: {
+        _count: {
+          select: {
+            invoices: true,
+            salesOrders: true,
+            payments: true,
+            creditNotes: true,
+            paymentIntents: true,
+          },
+        },
+      },
     });
     if (!existing) throw notFound("Customer not found");
 
-    // A customer with trading history is deactivated, never removed —
-    // deleting them would orphan invoices the business still needs to collect.
-    if (existing._count.invoices > 0 || existing._count.salesOrders > 0) {
+    // A customer with trading history is deactivated, never removed. The
+    // schema has no deletedAt, so the soft delete is status BLOCKED, which the
+    // console and the field app already treat as "do not trade with". Deleting
+    // would cascade into invoices, payments and credit notes the ledger still
+    // refers to, and the receivable would vanish while the journal kept it.
+    const counts = existing._count;
+    if (
+      counts.invoices > 0 ||
+      counts.salesOrders > 0 ||
+      counts.payments > 0 ||
+      counts.creditNotes > 0 ||
+      counts.paymentIntents > 0
+    ) {
       const customer = await db.customer.update({
         where: { id: params.id },
         data: { status: "BLOCKED" },

@@ -10,6 +10,7 @@ import '../core/money.dart';
 import '../data/field_repository.dart';
 import '../models/models.dart';
 import '../theme.dart';
+import '../widgets/raut_map.dart';
 import 'order_screen.dart';
 import 'payment_screen.dart';
 
@@ -268,6 +269,25 @@ class _VisitScreenState extends State<VisitScreen> {
         padding: const EdgeInsets.fromLTRB(16, 12, 16, 120),
         children: [
           _CustomerCard(customer: customer, onUpdatePin: _updatePin),
+          if (customer.hasPin) ...[
+            const SizedBox(height: 12),
+            // The pin and its check-in fence, so the rep can see before
+            // tapping Check in whether they are standing inside it.
+            RautMap(
+              provider: session.mapProvider,
+              height: 180,
+              circleRadiusM: customer.geofenceRadiusM.toDouble(),
+              points: [
+                RautMapPoint(
+                  id: customer.id,
+                  lat: customer.latitude!,
+                  lng: customer.longitude!,
+                  label: customer.name,
+                  tone: RautMapTone.success,
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           _VisitStatusCard(visit: visit, session: session),
 

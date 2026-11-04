@@ -11,6 +11,7 @@ import {
   ModalButton,
   Select,
 } from "@/components/ui";
+import { ITEM_CLASSES, ITEM_TYPES, TAX_TYPES } from "@/lib/etims-codes";
 
 export interface ProductShape {
   id?: string;
@@ -27,6 +28,9 @@ export interface ProductShape {
   trackStock: boolean;
   categoryId?: string | null;
   active?: boolean;
+  etimsItemClassCode?: string | null;
+  etimsTaxTypeCode?: string | null;
+  etimsItemTypeCode?: string | null;
 }
 
 interface Option {
@@ -58,7 +62,7 @@ export function ProductDialog({
     <ModalButton
       label={buttonLabel ?? (mode === "create" ? "+ New product" : "Edit")}
       title={mode === "create" ? "New product" : `Edit ${product?.name ?? "product"}`}
-      description="Prices are keyed in KES excluding VAT; the tax rate adds VAT at invoice time. eTIMS classification is set under Settings → eTIMS."
+      description="Prices are keyed in KES excluding VAT; the tax rate adds VAT at invoice time. Leave the eTIMS fields blank to use the company defaults from Settings → eTIMS."
       variant={buttonVariant === "ghost" && mode === "edit" ? "ghost" : buttonVariant}
       size="sm"
       width="max-w-2xl"
@@ -96,6 +100,9 @@ function ProductForm({
     trackStock: product?.trackStock ?? true,
     categoryId: product?.categoryId ?? "",
     active: product?.active ?? true,
+    etimsItemClassCode: product?.etimsItemClassCode ?? "",
+    etimsTaxTypeCode: product?.etimsTaxTypeCode ?? "",
+    etimsItemTypeCode: product?.etimsItemTypeCode ?? "",
   });
   const set = (k: keyof typeof form, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
 
@@ -119,6 +126,10 @@ function ProductForm({
         return await apiClient("/api/v1/products", { method: "POST", body });
       }
       body.active = form.active;
+      // Blank means "use the company default", which is stored as null.
+      body.etimsItemClassCode = form.etimsItemClassCode.trim() || null;
+      body.etimsTaxTypeCode = form.etimsTaxTypeCode || null;
+      body.etimsItemTypeCode = form.etimsItemTypeCode || null;
       return await apiClient(`/api/v1/products/${product!.id}`, { method: "PATCH", body });
     }, { onSuccess: onClose });
   }
@@ -186,6 +197,51 @@ function ProductForm({
       <Field label="Description" htmlFor="prod-desc">
         <Input id="prod-desc" value={form.description} onChange={(e) => set("description", e.target.value)} />
       </Field>
+
+      {mode === "edit" ? (
+        <fieldset className="rounded-md border border-border p-3">
+          <legend className="px-1 text-sm font-medium">eTIMS classification</legend>
+          <p className="mb-3 text-xs text-content-muted">
+            How this product is described to KRA. A zero VAT rate is ambiguous: choose
+            <strong> C</strong> for zero-rated supplies and <strong>A</strong> for exempt ones, or they are
+            filed as zero-rated.
+          </p>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <Field label="Item classification" htmlFor="prod-etims-class" hint="Eight-digit KRA code">
+              <Input
+                id="prod-etims-class"
+                list="prod-etims-class-options"
+                value={form.etimsItemClassCode}
+                onChange={(e) => set("etimsItemClassCode", e.target.value)}
+                placeholder="Company default"
+                pattern="\d{8}"
+                maxLength={8}
+              />
+              <datalist id="prod-etims-class-options">
+                {Object.entries(ITEM_CLASSES).map(([code, label]) => (
+                  <option key={code} value={code}>{label}</option>
+                ))}
+              </datalist>
+            </Field>
+            <Field label="Tax type" htmlFor="prod-etims-tax">
+              <Select id="prod-etims-tax" value={form.etimsTaxTypeCode} onChange={(e) => set("etimsTaxTypeCode", e.target.value)}>
+                <option value="">Company default / from VAT rate</option>
+                {Object.entries(TAX_TYPES).map(([code, t]) => (
+                  <option key={code} value={code}>{code} · {t.label}</option>
+                ))}
+              </Select>
+            </Field>
+            <Field label="Item type" htmlFor="prod-etims-type">
+              <Select id="prod-etims-type" value={form.etimsItemTypeCode} onChange={(e) => set("etimsItemTypeCode", e.target.value)}>
+                <option value="">Company default</option>
+                {Object.entries(ITEM_TYPES).map(([code, label]) => (
+                  <option key={code} value={code}>{label}</option>
+                ))}
+              </Select>
+            </Field>
+          </div>
+        </fieldset>
+      ) : null}
 
       <label className="flex items-center gap-2 text-sm font-medium">
         <input

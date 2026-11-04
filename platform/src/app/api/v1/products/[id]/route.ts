@@ -1,8 +1,9 @@
 import { z } from "zod";
 
-import { handler, notFound, parseBody } from "@/lib/api";
+import { ApiError, handler, notFound, parseBody } from "@/lib/api";
 import { auditAs, diff } from "@/lib/audit";
 import { db } from "@/lib/db";
+import { isItemClassCode, isItemTypeCode, isTaxTypeCode } from "@/lib/etims-codes";
 import { scope } from "@/lib/tenant";
 
 export const dynamic = "force-dynamic";
@@ -35,7 +36,16 @@ const updateSchema = z.object({
   trackStock: z.boolean().optional(),
   categoryId: z.string().nullable().optional(),
   active: z.boolean().optional(),
+  // eTIMS classification. Null clears the override and the company default
+  // applies again. Validated against the published code tables below, so a
+  // typo surfaces here as a 422 rather than at KRA as a rejected sale.
+  etimsItemClassCode: z.string().nullable().optional(),
+  etimsTaxTypeCode: z.string().nullable().optional(),
+  etimsItemTypeCode: z.string().nullable().optional(),
 });
+
+const invalidCode = (field: string, value: string, hint: string) =>
+  new ApiError(422, "INVALID_ETIMS_CODE", `${field}: "${value}" is not ${hint}`, { field, value });
 
 export const PATCH = handler<{ id: string }>(
   { permission: "product:write" },
@@ -50,6 +60,23 @@ export const PATCH = handler<{ id: string }>(
     for (const [key, value] of Object.entries(input)) {
       if (value === undefined) continue;
       data[key] = value === "" ? null : value;
+    }
+
+    if (data.etimsItemClassCode != null && !isItemClassCode(data.etimsItemClassCode)) {
+      throw invalidCode("etimsItemClassCode", String(data.etimsItemClassCode), "an eTIMS item classification (eight digits)");
+    }
+    if (data.etimsTaxTypeCode != null && !isTaxTypeCode(data.etimsTaxTypeCode)) {
+      throw invalidCode("etimsTaxTypeCode", String(data.etimsTaxTypeCode), "an eTIMS tax type (A–E)");
+    }
+    if (data.etimsItemTypeCode != null && !isItemTypeCode(data.etimsItemTypeCode)) {
+      throw invalidCode("etimsItemTypeCode", String(data.etimsItemTypeCode), "an eTIMS item type (1, 2 or 3)");
+    }
+    // Reclassifying a product whose registration KRA refused gives it another
+    // go: the refusal was about the old codes.
+    const reclassified = ["etimsItemClassCode", "etimsTaxTypeCode", "etimsItemTypeCode"].some((k) => k in data);
+    if (reclassified && existing.etimsStatus === "FAILED" && !existing.etimsItemCode) {
+      data.etimsStatus = "UNREGISTERED";
+      data.etimsError = null;
     }
 
     const product = await db.product.update({ where: { id: params.id }, data });

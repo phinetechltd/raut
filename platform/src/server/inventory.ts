@@ -28,6 +28,7 @@ export type MovementType =
   | "TRANSFER_IN"
   | "TRANSFER_OUT"
   | "ADJUSTMENT"
+  | "WRITE_OFF"
   | "RETURN"
   | "OPENING";
 
@@ -45,8 +46,40 @@ export interface MovementInput {
   createdById?: string | null;
 }
 
+/** Movement types whose value moves the inventory account. */
+const VALUED_TYPES = new Set(["SALE", "RETURN", "ADJUSTMENT", "WRITE_OFF", "OPENING"]);
+
 export async function applyMovement(tx: Tx, input: MovementInput) {
-  const item = await tx.stockItem.upsert({
+  if (!Number.isInteger(input.quantity) || input.quantity === 0) {
+    throw new Error("A stock movement needs a non-zero whole quantity");
+  }
+
+  // Both ends of the movement must belong to the company. The stock route
+  // passes client-supplied ids straight through, and without this a product id
+  // from another tenant would quietly grow a StockItem under this company.
+  const product = await tx.product.findFirst({
+    where: { id: input.productId, companyId: input.companyId },
+    select: { id: true, costPriceCents: true },
+  });
+  const location = await tx.stockLocation.findFirst({
+    where: { id: input.locationId, companyId: input.companyId },
+    select: { id: true },
+  });
+  if (!product) throw new Error("Product not found");
+  if (!location) throw new Error("Stock location not found");
+
+  // A valued movement with no cost given carries the product's cost, so the
+  // inventory account moves with the quantity. A manual adjustment that moved
+  // the shelf but not the books used to be the commonest source of a stock
+  // valuation variance.
+  const unitCostCents =
+    input.unitCostCents ?? (VALUED_TYPES.has(input.type) ? product.costPriceCents : 0);
+
+  // An atomic increment, not read-add-write: two movements against the same
+  // item in overlapping transactions each add their own delta, and neither can
+  // overwrite the other's. The balance is then read back inside the same
+  // transaction, so `balanceAfter` is the figure this movement produced.
+  await tx.stockItem.upsert({
     where: {
       productId_locationId: {
         productId: input.productId,
@@ -57,17 +90,21 @@ export async function applyMovement(tx: Tx, input: MovementInput) {
       companyId: input.companyId,
       productId: input.productId,
       locationId: input.locationId,
-      quantity: 0,
+      quantity: input.quantity,
     },
-    update: {},
+    update: { quantity: { increment: input.quantity } },
   });
 
-  const balanceAfter = item.quantity + input.quantity;
-
-  await tx.stockItem.update({
-    where: { id: item.id },
-    data: { quantity: balanceAfter },
+  const item = await tx.stockItem.findUniqueOrThrow({
+    where: {
+      productId_locationId: {
+        productId: input.productId,
+        locationId: input.locationId,
+      },
+    },
+    select: { quantity: true },
   });
+  const balanceAfter = item.quantity;
 
   const movement = await tx.stockMovement.create({
     data: {
@@ -77,7 +114,7 @@ export async function applyMovement(tx: Tx, input: MovementInput) {
       type: input.type,
       quantity: input.quantity,
       balanceAfter,
-      unitCostCents: input.unitCostCents ?? 0,
+      unitCostCents,
       refType: input.refType ?? null,
       refId: input.refId ?? null,
       note: input.note ?? null,

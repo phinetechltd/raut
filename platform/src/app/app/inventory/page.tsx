@@ -19,7 +19,7 @@ import { db } from "@/lib/db";
 import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
 import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
-import { stockLevels } from "@/server/inventory";
+import { stockLevels, type StockLevelRow } from "@/server/inventory";
 
 import { ProductDialog, type ProductShape } from "./product-dialog";
 import { StockAdjustDialog } from "./stock-dialog";
@@ -33,6 +33,33 @@ const SORT_COLUMNS: Record<string, string> = {
   cost: "costPriceCents",
   reorder: "reorderLevel",
 };
+
+const STOCK_SORT: Record<string, (r: StockLevelRow) => string | number> = {
+  name: (r) => r.name.toLowerCase(),
+  sku: (r) => r.sku.toLowerCase(),
+  unit: (r) => r.unit.toLowerCase(),
+  onhand: (r) => r.totalQuantity,
+  reorder: (r) => r.reorderLevel,
+  status: (r) => (r.belowReorder ? 0 : 1),
+};
+
+const MOVEMENT_SORT: Record<string, string> = {
+  when: "createdAt",
+  type: "type",
+  quantity: "quantity",
+  balance: "balanceAfter",
+};
+
+const MOVEMENT_TYPES = [
+  "PURCHASE",
+  "SALE",
+  "TRANSFER_IN",
+  "TRANSFER_OUT",
+  "ADJUSTMENT",
+  "RETURN",
+  "OPENING",
+  "WRITE_OFF",
+];
 
 /** Module 03 · Inventory — catalogue, multi-location stock, low-stock alerts. */
 export default async function InventoryPage({
@@ -54,8 +81,38 @@ export default async function InventoryPage({
     limit: 15,
   });
 
+  const stkTs = tableState(params, {
+    prefix: "stk",
+    allowed: Object.keys(STOCK_SORT),
+    defaultSort: "name",
+    defaultDir: "asc",
+    limit: 15,
+  });
+  const movTs = tableState(params, {
+    prefix: "mov",
+    allowed: Object.keys(MOVEMENT_SORT),
+    defaultSort: "when",
+    defaultDir: "desc",
+    limit: 15,
+  });
+
   const canWrite = can(principal, "product:write");
   const canStock = can(principal, "stock:write");
+
+  const movementWhere = {
+    companyId,
+    ...(filters.mov_type && MOVEMENT_TYPES.includes(filters.mov_type) ? { type: filters.mov_type } : {}),
+    ...(filters.mov_q
+      ? {
+          OR: [
+            { product: { name: { contains: filters.mov_q } } },
+            { product: { sku: { contains: filters.mov_q } } },
+            { refType: { contains: filters.mov_q } },
+            { note: { contains: filters.mov_q } },
+          ],
+        }
+      : {}),
+  };
 
   const where = {
     companyId,
@@ -66,7 +123,7 @@ export default async function InventoryPage({
     ...(filters.inactive === "true" ? {} : { active: true }),
   };
 
-  const [products, productCount, categories, locations, levels, movements, valuation] =
+  const [products, productCount, categories, locations, allLevels, movements, movementCount, valuation] =
     await Promise.all([
       db.product.findMany({
         where,
@@ -85,16 +142,19 @@ export default async function InventoryPage({
       stockLevels(companyId, {
         locationId: filters.location,
         lowOnly: filters.low === "true",
+        search: filters.stk_q,
       }),
       db.stockMovement.findMany({
-        where: { companyId },
+        where: movementWhere,
         include: {
           product: { select: { name: true, sku: true } },
           location: { select: { name: true } },
         },
-        orderBy: { createdAt: "desc" },
-        take: 25,
+        orderBy: { [MOVEMENT_SORT[movTs.sort ?? "when"]]: movTs.dir } as Record<string, "asc" | "desc">,
+        take: movTs.limit,
+        skip: (movTs.page - 1) * movTs.limit,
       }),
+      db.stockMovement.count({ where: movementWhere }),
       db.stockItem.findMany({
         where: { companyId },
         include: { product: { select: { costPriceCents: true } } },
@@ -105,12 +165,154 @@ export default async function InventoryPage({
     (sum, s) => sum + s.quantity * s.product.costPriceCents,
     0,
   );
-  const lowCount = levels.filter((l) => l.belowReorder).length;
+  const lowCount = allLevels.filter((l) => l.belowReorder).length;
+
+  // stockLevels() computes its rows (totals across locations), so the order
+  // and the page are applied here rather than in SQL.
+  const stockValue = STOCK_SORT[stkTs.sort ?? "name"];
+  const sortedLevels = [...allLevels].sort((a, b) => {
+    const av = stockValue(a);
+    const bv = stockValue(b);
+    const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+    return stkTs.dir === "asc" ? cmp : -cmp;
+  });
+  const stockPages = Math.max(1, Math.ceil(sortedLevels.length / stkTs.limit));
+  const stockPage = Math.min(stkTs.page, stockPages);
+  const levels = sortedLevels.slice((stockPage - 1) * stkTs.limit, stockPage * stkTs.limit);
 
   const sortHrefFor = (key: string) => {
     const next = toggleSort(ts, key);
     return tableHref("/app/inventory", params, { prod_sort: next.sort, prod_dir: next.dir }, "prod");
   };
+  const stkSortHrefFor = (key: string) => {
+    const next = toggleSort(stkTs, key);
+    return tableHref("/app/inventory", params, { stk_sort: next.sort, stk_dir: next.dir }, "stk");
+  };
+  const movSortHrefFor = (key: string) => {
+    const next = toggleSort(movTs, key);
+    return tableHref("/app/inventory", params, { mov_sort: next.sort, mov_dir: next.dir }, "mov");
+  };
+
+  const stockColumns: Array<Column<StockLevelRow>> = [
+    {
+      key: "name",
+      header: "Product",
+      sortKey: "name",
+      cell: (l) => <span className="font-medium">{l.name}</span>,
+    },
+    {
+      key: "sku",
+      header: "SKU",
+      sortKey: "sku",
+      hideBelow: "sm",
+      cell: (l) => <span className="text-content-muted text-xs tabular">{l.sku}</span>,
+    },
+    {
+      key: "unit",
+      header: "Unit",
+      sortKey: "unit",
+      hideBelow: "md",
+      cell: (l) => <span className="text-content-muted text-xs">{l.unit}</span>,
+    },
+    {
+      key: "onhand",
+      header: "On hand",
+      align: "right",
+      numeric: true,
+      sortKey: "onhand",
+      cell: (l) => (
+        <span className={l.belowReorder ? "font-semibold text-warning" : "font-medium"}>{l.totalQuantity}</span>
+      ),
+    },
+    {
+      key: "reorder",
+      header: "Reorder at",
+      align: "right",
+      numeric: true,
+      sortKey: "reorder",
+      hideBelow: "md",
+      cell: (l) => <span className="text-content-muted text-xs">{l.reorderLevel || "—"}</span>,
+    },
+    {
+      key: "locations",
+      header: "By location",
+      hideBelow: "lg",
+      cell: (l) => (
+        <span className="text-content-muted text-xs">
+          {l.byLocation
+            .filter((b) => b.quantity !== 0)
+            .map((b) => `${b.locationName}: ${b.quantity}`)
+            .join(" · ") || "—"}
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      align: "right",
+      sortKey: "status",
+      cell: (l) =>
+        l.belowReorder ? (
+          <span className="badge bg-warning-bg text-warning border-warning-border">reorder</span>
+        ) : (
+          <span className="badge bg-success-bg text-success border-success-border">ok</span>
+        ),
+    },
+  ];
+
+  type MovementRow = (typeof movements)[number];
+  const movementColumns: Array<Column<MovementRow>> = [
+    {
+      key: "when",
+      header: "When",
+      sortKey: "when",
+      cell: (m) => (
+        <span className="text-content-muted text-xs">{m.createdAt.toLocaleDateString("en-KE")}</span>
+      ),
+    },
+    {
+      key: "product",
+      header: "Product",
+      cell: (m) => <CellStack primary={m.product.name} secondary={m.product.sku} />,
+    },
+    {
+      key: "location",
+      header: "Location",
+      hideBelow: "sm",
+      cell: (m) => <span className="text-xs">{m.location.name}</span>,
+    },
+    { key: "type", header: "Type", sortKey: "type", cell: (m) => <StatusBadge status={m.type} /> },
+    {
+      key: "quantity",
+      header: "Quantity",
+      align: "right",
+      numeric: true,
+      sortKey: "quantity",
+      cell: (m) => (
+        <span className={m.quantity < 0 ? "text-danger" : "text-accent"}>
+          {m.quantity > 0 ? "+" : ""}
+          {m.quantity}
+        </span>
+      ),
+    },
+    {
+      key: "balance",
+      header: "Balance after",
+      align: "right",
+      numeric: true,
+      sortKey: "balance",
+      hideBelow: "md",
+      cell: (m) => <span className="text-content-muted text-xs">{m.balanceAfter}</span>,
+    },
+    {
+      key: "reference",
+      header: "Reference",
+      hideBelow: "lg",
+      cell: (m) => (
+        <span className="text-content-muted text-xs">{m.refType ? `${m.refType}` : (m.note ?? "—")}</span>
+      ),
+    },
+  ];
 
   type Row = (typeof products)[number];
   const columns: Array<Column<Row>> = [
@@ -241,7 +443,7 @@ export default async function InventoryPage({
           {locations.map((l) => (
             <Link
               key={l.id}
-              href={tableHref("/app/inventory", params, { location: l.id })}
+              href={tableHref("/app/inventory", params, { location: l.id, stk_page: null })}
               className={`card p-4 transition-[border-color,box-shadow] hover:border-border-strong hover:shadow-md ${filters.location === l.id ? "border-accent" : ""}`}
             >
               <p className="truncate text-sm font-medium">{l.name}</p>
@@ -293,67 +495,42 @@ export default async function InventoryPage({
       <div>
         <SectionHeading
           title="Stock levels"
-          description={filters.low === "true" ? "Showing low stock only" : `${levels.length} products`}
+          description={
+            filters.low === "true"
+              ? `Showing low stock only · ${sortedLevels.length} products`
+              : `${sortedLevels.length} products`
+          }
           actions={
             <Link
-              href={tableHref("/app/inventory", params, { low: filters.low === "true" ? null : "true" })}
+              href={tableHref("/app/inventory", params, {
+                low: filters.low === "true" ? null : "true",
+                stk_page: null,
+              })}
               className="inline-flex h-8 items-center justify-center rounded-md border border-border px-3 text-xs font-medium hover:bg-surface-hover"
             >
               {filters.low === "true" ? "Show all" : "Show low stock only"}
             </Link>
           }
         />
-        <Card nopad>
-          <div className="scroll-x">
-            <table className="w-full border-collapse text-base">
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>SKU</th>
-                  <th>Unit</th>
-                  <th>On hand</th>
-                  <th>Reorder at</th>
-                  <th>By location</th>
-                  <th>Status</th>
-                </tr>
-              </thead>
-              <tbody>
-                {levels.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="text-content-muted py-10 text-center">
-                      No stock lines match this filter
-                    </td>
-                  </tr>
-                ) : (
-                  levels.map((l) => (
-                    <tr key={l.productId}>
-                      <td className="font-medium">{l.name}</td>
-                      <td className="text-content-muted text-xs">{l.sku}</td>
-                      <td className="text-content-muted text-xs">{l.unit}</td>
-                      <td className={l.belowReorder ? "font-semibold text-warning" : "font-medium"}>
-                        {l.totalQuantity}
-                      </td>
-                      <td className="text-content-muted text-xs">{l.reorderLevel || "—"}</td>
-                      <td className="text-content-muted text-xs">
-                        {l.byLocation
-                          .filter((b) => b.quantity !== 0)
-                          .map((b) => `${b.locationName}: ${b.quantity}`)
-                          .join(" · ") || "—"}
-                      </td>
-                      <td>
-                        {l.belowReorder ? (
-                          <span className="badge bg-warning-bg text-warning border-warning-border">reorder</span>
-                        ) : (
-                          <span className="badge bg-success-bg text-success border-success-border">ok</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        <FilterBar action="/app/inventory" preserve={preserved(params, ["stk_q", "stk_page"])}>
+          <FilterSearch name="stk_q" value={filters.stk_q} placeholder="Search product, SKU…" />
+        </FilterBar>
+        <DataTable
+          columns={stockColumns}
+          rows={levels}
+          getRowKey={(l) => l.productId}
+          caption="Stock levels"
+          sort={{ key: stkTs.sort, dir: stkTs.dir }}
+          sortHrefFor={stkSortHrefFor}
+          pagination={{
+            page: stockPage,
+            pages: stockPages,
+            total: sortedLevels.length,
+            limit: stkTs.limit,
+            hrefFor: (pg) => tableHref("/app/inventory", params, { stk_page: pg }),
+          }}
+          empty={{ title: "No stock lines match this filter" }}
+        />
       </div>
 
       <div>
@@ -361,66 +538,32 @@ export default async function InventoryPage({
           title="Recent stock movements"
           description="Every balance change is ledgered — balances are derived, never edited directly"
         />
-        <Card nopad>
-          <div className="scroll-x">
-            <table className="w-full border-collapse text-base">
-              <thead>
-                <tr>
-                  <th>When</th>
-                  <th>Product</th>
-                  <th>Location</th>
-                  <th>Type</th>
-                  <th>Quantity</th>
-                  <th>Balance after</th>
-                  <th>Reference</th>
-                </tr>
-              </thead>
-              <tbody>
-                {movements.length === 0 ? (
-                  <tr>
-                    <td colSpan={7} className="text-content-muted py-10 text-center">
-                      No movements yet
-                    </td>
-                  </tr>
-                ) : (
-                  movements.map((m) => (
-                    <tr key={m.id}>
-                      <td className="text-content-muted text-xs">
-                        {m.createdAt.toLocaleDateString("en-KE")}
-                      </td>
-                      <td>
-                        {m.product.name}
-                        <span className="text-content-muted block text-xs">{m.product.sku}</span>
-                      </td>
-                      <td className="text-xs">{m.location.name}</td>
-                      <td>
-                        <StatusBadge status={m.type} />
-                      </td>
-                      <td className={m.quantity < 0 ? "text-danger" : "text-accent"}>
-                        {m.quantity > 0 ? "+" : ""}
-                        {m.quantity}
-                      </td>
-                      <td className="text-content-muted text-xs">{m.balanceAfter}</td>
-                      <td className="text-content-muted text-xs">
-                        {m.refType ? `${m.refType}` : (m.note ?? "—")}
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
-        </Card>
+        <FilterBar action="/app/inventory" preserve={preserved(params, ["mov_q", "mov_type", "mov_page"])}>
+          <FilterSearch name="mov_q" value={filters.mov_q} placeholder="Search product, SKU, reference…" />
+          <FilterSelect
+            name="mov_type"
+            value={filters.mov_type}
+            allLabel="All types"
+            options={MOVEMENT_TYPES.map((t) => ({ value: t, label: t.toLowerCase().replace("_", " ") }))}
+          />
+        </FilterBar>
+        <DataTable
+          columns={movementColumns}
+          rows={movements}
+          getRowKey={(m) => m.id}
+          caption="Stock movements"
+          sort={{ key: movTs.sort, dir: movTs.dir }}
+          sortHrefFor={movSortHrefFor}
+          pagination={{
+            page: movTs.page,
+            pages: Math.max(1, Math.ceil(movementCount / movTs.limit)),
+            total: movementCount,
+            limit: movTs.limit,
+            hrefFor: (pg) => tableHref("/app/inventory", params, { mov_page: pg }),
+          }}
+          empty={{ title: filters.mov_q || filters.mov_type ? "No movements match this filter" : "No movements yet" }}
+        />
       </div>
-    </div>
-  );
-}
-
-/** Local Card variant without padding, used for flush tables. */
-function Card({ children, nopad }: { children: React.ReactNode; nopad?: boolean }) {
-  return (
-    <div className={`rounded-xl border border-border bg-surface shadow-sm ${nopad ? "" : "p-5"}`}>
-      {children}
     </div>
   );
 }

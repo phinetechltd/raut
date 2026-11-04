@@ -2,33 +2,74 @@
 import { notFound } from "next/navigation";
 
 import {
+  DataTable,
+  FilterBar,
+  FilterSelect,
   ModuleLocked,
   Money,
   SectionHeading,
   StatCard,
   StatusBadge,
   TileMap,
+  type Column,
 } from "@/components/ui";
 import { db } from "@/lib/db";
 import { toClientConfig } from "@/lib/maps";
+import { outstandingCents } from "@/lib/money";
+import { creditedByInvoice } from "@/server/sales";
 import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
+import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
 import { mapConfigFor } from "@/server/maps";
 
 import { CustomerDeleteButton, CustomerDialog } from "../customer-dialog";
 
 export const dynamic = "force-dynamic";
 
+const INV_SORT: Record<string, string> = {
+  number: "number",
+  issued: "issueDate",
+  total: "totalCents",
+  paid: "paidCents",
+  status: "status",
+};
+const VIS_SORT: Record<string, string> = {
+  date: "scheduledAt",
+  status: "status",
+  verified: "geofenceVerified",
+  distance: "distanceFromCustomerM",
+};
+
+
 /** Module 01 · CRM — the 360° customer profile with activity log. */
 export default async function CustomerDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const { companyId, principal } = await requireTenant();
   if (!principal.enabledModules.has("CRM")) return <ModuleLocked module="CRM" />;
 
   const { id } = await params;
+  const sp = await searchParams;
+  const path = `/app/customers/${id}`;
+
+  const invTs = tableState(sp, {
+    prefix: "inv",
+    allowed: Object.keys(INV_SORT),
+    defaultSort: "issued",
+    defaultDir: "desc",
+    limit: 10,
+  });
+  const visTs = tableState(sp, {
+    prefix: "vis",
+    allowed: Object.keys(VIS_SORT),
+    defaultSort: "date",
+    defaultDir: "desc",
+    limit: 10,
+  });
 
   const customer = await db.customer.findFirst({
     where: {
@@ -45,42 +86,177 @@ export default async function CustomerDetailPage({
         take: 30,
         include: { user: { select: { name: true } } },
       },
-      invoices: { orderBy: { issueDate: "desc" }, take: 15 },
-      payments: { orderBy: { paidAt: "desc" }, take: 15 },
-      visits: {
-        orderBy: { scheduledAt: "desc" },
-        take: 15,
-        include: { rep: { select: { name: true } } },
-      },
     },
   });
 
   if (!customer) notFound();
 
-  const maps = await mapConfigFor(companyId);
+  const invWhere = {
+    customerId: customer.id,
+    companyId,
+    ...(sp.inv_status ? { status: sp.inv_status } : {}),
+  };
+  const visWhere = {
+    customerId: customer.id,
+    companyId,
+    ...(sp.vis_status ? { status: sp.vis_status } : {}),
+  };
 
-  const [lifetime, territories, reps] = await Promise.all([
-    db.invoice.aggregate({
-      where: { customerId: customer.id, status: { notIn: ["DRAFT", "CANCELLED"] } },
-      _sum: { totalCents: true },
-      _count: true,
-    }),
-    db.territory.findMany({
-      where: { companyId },
-      select: { id: true, name: true },
-      orderBy: { name: "asc" },
-    }),
-    db.user.findMany({
-      where: { companyId, status: "ACTIVE" },
-      select: { id: true, name: true },
-      orderBy: { name: "asc" },
-      take: 100,
-    }),
-  ]);
+  const [maps, invoices, invoiceCount, visits, visitCount, visitStats, lifetime, territories, reps] =
+    await Promise.all([
+      mapConfigFor(companyId),
+      db.invoice.findMany({
+        where: invWhere,
+        orderBy: { [INV_SORT[invTs.sort ?? "issued"]]: invTs.dir } as Record<string, "asc" | "desc">,
+        take: invTs.limit,
+        skip: (invTs.page - 1) * invTs.limit,
+      }),
+      db.invoice.count({ where: invWhere }),
+      db.visit.findMany({
+        where: visWhere,
+        include: { rep: { select: { name: true } } },
+        orderBy: { [VIS_SORT[visTs.sort ?? "date"]]: visTs.dir } as Record<string, "asc" | "desc">,
+        take: visTs.limit,
+        skip: (visTs.page - 1) * visTs.limit,
+      }),
+      db.visit.count({ where: visWhere }),
+      // The stat card and the map read recent visits regardless of how the
+      // table below is sorted or paged.
+      db.visit.findMany({
+        where: { customerId: customer.id, companyId },
+        select: { id: true, scheduledAt: true, geofenceVerified: true, checkInLat: true, checkInLng: true },
+        orderBy: { scheduledAt: "desc" },
+        take: 15,
+      }),
+      db.invoice.aggregate({
+        where: { customerId: customer.id, status: { notIn: ["DRAFT", "CANCELLED"] } },
+        _sum: { totalCents: true },
+        _count: true,
+      }),
+      db.territory.findMany({
+        where: { companyId },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+      }),
+      db.user.findMany({
+        where: { companyId, status: "ACTIVE" },
+        select: { id: true, name: true },
+        orderBy: { name: "asc" },
+        take: 100,
+      }),
+    ]);
 
-  const verifiedVisits = customer.visits.filter((v) => v.geofenceVerified).length;
+  // What has come back as credit notes, so "Due" agrees with the API and the
+  // payment screen rather than over-stating a part-credited invoice.
+  const credited = await creditedByInvoice(db, invoices.map((i) => i.id));
+  const dueFor = (inv: { id: string; totalCents: number; paidCents: number }) =>
+    outstandingCents({ ...inv, creditedCents: credited.get(inv.id) ?? 0 });
+
+  const verifiedVisits = visitStats.filter((v) => v.geofenceVerified).length;
   const canWrite = can(principal, "customer:write");
   const canDelete = can(principal, "customer:delete");
+
+  const invSortHrefFor = (key: string) => {
+    const next = toggleSort(invTs, key);
+    return tableHref(path, sp, { inv_sort: next.sort, inv_dir: next.dir }, "inv");
+  };
+  const visSortHrefFor = (key: string) => {
+    const next = toggleSort(visTs, key);
+    return tableHref(path, sp, { vis_sort: next.sort, vis_dir: next.dir }, "vis");
+  };
+
+  type InvRow = (typeof invoices)[number];
+  const invoiceColumns: Array<Column<InvRow>> = [
+    {
+      key: "number",
+      header: "Number",
+      sortKey: "number",
+      cell: (inv) => (
+        <Link href={`/app/sales/invoices/${inv.id}`} className="font-medium hover:text-accent">
+          {inv.number}
+        </Link>
+      ),
+    },
+    {
+      key: "issued",
+      header: "Issued",
+      sortKey: "issued",
+      cell: (inv) => (
+        <span className="text-content-muted text-xs">{inv.issueDate.toLocaleDateString("en-KE")}</span>
+      ),
+    },
+    {
+      key: "total",
+      header: "Total",
+      align: "right",
+      numeric: true,
+      sortKey: "total",
+      cell: (inv) => <Money cents={inv.totalCents} />,
+    },
+    {
+      key: "due",
+      header: "Due",
+      align: "right",
+      numeric: true,
+      sortKey: "paid",
+      cell: (inv) => (
+        <span className={dueFor(inv) > 0 ? "font-medium" : "text-content-muted"}>
+          <Money cents={dueFor(inv)} />
+        </span>
+      ),
+    },
+    {
+      key: "status",
+      header: "Status",
+      align: "right",
+      sortKey: "status",
+      cell: (inv) => <StatusBadge status={inv.status} />,
+    },
+  ];
+
+  type VisRow = (typeof visits)[number];
+  const visitColumns: Array<Column<VisRow>> = [
+    {
+      key: "date",
+      header: "Date",
+      sortKey: "date",
+      cell: (v) => (
+        <span className="text-content-muted text-xs">{v.scheduledAt.toLocaleDateString("en-KE")}</span>
+      ),
+    },
+    { key: "rep", header: "Rep", cell: (v) => <span className="text-xs">{v.rep.name}</span> },
+    {
+      key: "status",
+      header: "Status",
+      sortKey: "status",
+      cell: (v) => <StatusBadge status={v.status} />,
+    },
+    {
+      key: "verified",
+      header: "Verified",
+      sortKey: "verified",
+      cell: (v) =>
+        v.geofenceVerified ? (
+          <span className="badge bg-success-bg text-success border-success-border">yes</span>
+        ) : v.checkInAt ? (
+          <span className="badge bg-danger-bg text-danger border-danger-border">no</span>
+        ) : (
+          <span className="text-content-muted text-xs">—</span>
+        ),
+    },
+    {
+      key: "distance",
+      header: "Distance",
+      align: "right",
+      numeric: true,
+      sortKey: "distance",
+      cell: (v) => (
+        <span className="text-content-muted text-xs">
+          {v.distanceFromCustomerM != null ? `${v.distanceFromCustomerM}m` : "—"}
+        </span>
+      ),
+    },
+  ];
 
   return (
     <div className="space-y-8">
@@ -128,7 +304,7 @@ export default async function CustomerDetailPage({
         />
         <StatCard
           label="Visits (recent)"
-          value={`${verifiedVisits} / ${customer.visits.length}`}
+          value={`${verifiedVisits} / ${visitStats.length}`}
           hint="GPS-verified"
         />
       </div>
@@ -189,7 +365,7 @@ export default async function CustomerDetailPage({
                       label: customer.name,
                       tone: "success",
                     },
-                    ...customer.visits
+                    ...visitStats
                       .filter((v) => v.checkInLat != null)
                       .slice(0, 8)
                       .map((v) => ({
@@ -239,103 +415,76 @@ export default async function CustomerDetailPage({
 
         <div className="space-y-6">
           <div>
-            <SectionHeading title="Invoices" />
-            <div className="scroll-x rounded-lg border border-border bg-surface shadow-sm">
-              <table className="w-full border-collapse text-base">
-                <thead>
-                  <tr>
-                    <th>Number</th>
-                    <th>Issued</th>
-                    <th>Total</th>
-                    <th>Due</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {customer.invoices.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="text-content-muted py-6 text-center">
-                        No invoices
-                      </td>
-                    </tr>
-                  ) : (
-                    customer.invoices.map((inv) => (
-                      <tr key={inv.id}>
-                        <td className="font-medium">{inv.number}</td>
-                        <td className="text-content-muted text-xs">
-                          {inv.issueDate.toLocaleDateString("en-KE")}
-                        </td>
-                        <td>
-                          <Money cents={inv.totalCents} />
-                        </td>
-                        <td>
-                          <Money cents={inv.totalCents - inv.paidCents} />
-                        </td>
-                        <td>
-                          <StatusBadge status={inv.status} />
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <SectionHeading title="Invoices" description={`${invoiceCount} on this account`} />
+            <FilterBar action={path} preserve={preserved(sp, ["inv_status", "inv_page"])}>
+              <FilterSelect
+                name="inv_status"
+                value={sp.inv_status}
+                allLabel="Any status"
+                options={[
+                  { value: "ISSUED", label: "Issued" },
+                  { value: "PARTIALLY_PAID", label: "Partially paid" },
+                  { value: "OVERDUE", label: "Overdue" },
+                  { value: "PAID", label: "Paid" },
+                  { value: "CANCELLED", label: "Cancelled" },
+                ]}
+              />
+            </FilterBar>
+            <DataTable
+              columns={invoiceColumns}
+              rows={invoices}
+              getRowKey={(inv) => inv.id}
+              caption="Invoices for this customer"
+              dense
+              sort={{ key: invTs.sort, dir: invTs.dir }}
+              sortHrefFor={invSortHrefFor}
+              pagination={{
+                page: invTs.page,
+                pages: Math.max(1, Math.ceil(invoiceCount / invTs.limit)),
+                total: invoiceCount,
+                limit: invTs.limit,
+                hrefFor: (p) => tableHref(path, sp, { inv_page: p }),
+              }}
+              empty={{ title: "No invoices" }}
+            />
           </div>
 
           <div>
-            <SectionHeading title="Visits" />
-            <div className="scroll-x rounded-lg border border-border bg-surface shadow-sm">
-              <table className="w-full border-collapse text-base">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Rep</th>
-                    <th>Status</th>
-                    <th>Verified</th>
-                    <th>Distance</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {customer.visits.length === 0 ? (
-                    <tr>
-                      <td colSpan={5} className="text-content-muted py-6 text-center">
-                        No visits
-                      </td>
-                    </tr>
-                  ) : (
-                    customer.visits.map((v) => (
-                      <tr key={v.id}>
-                        <td className="text-content-muted text-xs">
-                          {v.scheduledAt.toLocaleDateString("en-KE")}
-                        </td>
-                        <td className="text-xs">{v.rep.name}</td>
-                        <td>
-                          <StatusBadge status={v.status} />
-                        </td>
-                        <td>
-                          {v.geofenceVerified ? (
-                            <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-success-bg text-success">yes</span>
-                          ) : v.checkInAt ? (
-                            <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-danger-bg text-danger">no</span>
-                          ) : (
-                            <span className="text-content-muted text-xs">—</span>
-                          )}
-                        </td>
-                        <td className="text-content-muted text-xs">
-                          {v.distanceFromCustomerM != null
-                            ? `${v.distanceFromCustomerM}m`
-                            : "—"}
-                        </td>
-                      </tr>
-                    ))
-                  )}
-                </tbody>
-              </table>
-            </div>
+            <SectionHeading title="Visits" description={`${visitCount} recorded`} />
+            <FilterBar action={path} preserve={preserved(sp, ["vis_status", "vis_page"])}>
+              <FilterSelect
+                name="vis_status"
+                value={sp.vis_status}
+                allLabel="Any status"
+                options={[
+                  { value: "SCHEDULED", label: "Scheduled" },
+                  { value: "IN_PROGRESS", label: "In progress" },
+                  { value: "COMPLETED", label: "Completed" },
+                  { value: "MISSED", label: "Missed" },
+                  { value: "CANCELLED", label: "Cancelled" },
+                ]}
+              />
+            </FilterBar>
+            <DataTable
+              columns={visitColumns}
+              rows={visits}
+              getRowKey={(v) => v.id}
+              caption="Visits to this customer"
+              dense
+              sort={{ key: visTs.sort, dir: visTs.dir }}
+              sortHrefFor={visSortHrefFor}
+              pagination={{
+                page: visTs.page,
+                pages: Math.max(1, Math.ceil(visitCount / visTs.limit)),
+                total: visitCount,
+                limit: visTs.limit,
+                hrefFor: (p) => tableHref(path, sp, { vis_page: p }),
+              }}
+              empty={{ title: "No visits" }}
+            />
           </div>
         </div>
       </div>
     </div>
   );
 }
-

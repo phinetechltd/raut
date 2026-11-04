@@ -1,24 +1,94 @@
 
 import {
   BarChart,
+  CellStack,
+  DataTable,
+  FilterBar,
+  FilterSearch,
   Meter,
   ModuleLocked,
   Money,
   SectionHeading,
   StatCard,
+  type Column,
 } from "@/components/ui";
 import { db } from "@/lib/db";
 import { requireTenant } from "@/lib/session";
+import { preserved, tableHref, tableState, toggleSort, type TableState } from "@/lib/table";
 import { daysAgo, tenantDashboard, territoryPerformance } from "@/server/analytics";
-import { repPerformance } from "@/server/field";
+import { repPerformance, type RepPerformance } from "@/server/field";
 
 export const dynamic = "force-dynamic";
+
+const PATH = "/app/reports";
+
+type TerritoryRow = Awaited<ReturnType<typeof territoryPerformance>>[number];
+type MixRow = {
+  productId: string;
+  name: string;
+  sku: string;
+  units: number;
+  revenueCents: number;
+};
+
+const TERR_SORT: Record<string, (r: TerritoryRow) => string | number> = {
+  name: (r) => r.name.toLowerCase(),
+  customers: (r) => r.customers,
+  invoices: (r) => r.invoices,
+  visits: (r) => r.visits,
+  sales: (r) => r.salesCents,
+};
+const STAFF_SORT: Record<string, (r: RepPerformance) => string | number> = {
+  rep: (r) => r.repName.toLowerCase(),
+  planned: (r) => r.visitsPlanned,
+  completed: (r) => r.visitsCompleted,
+  completion: (r) => r.completionRate,
+  verified: (r) => r.visitsVerified,
+  verification: (r) => r.verificationRate,
+  orders: (r) => r.ordersCount,
+  sales: (r) => r.salesCents,
+  collections: (r) => r.collectionsCents,
+};
+const MIX_SORT: Record<string, (r: MixRow) => string | number> = {
+  product: (r) => r.name.toLowerCase(),
+  sku: (r) => r.sku.toLowerCase(),
+  units: (r) => r.units,
+  revenue: (r) => r.revenueCents,
+};
+
+/**
+ * The three tables here are computed (territory and rep performance are
+ * aggregates, the product mix is a groupBy), so they are searched, sorted and
+ * paged in memory from the full result rather than in SQL.
+ */
+function arrange<T>(
+  rows: T[],
+  ts: TableState,
+  sorters: Record<string, (r: T) => string | number>,
+  fallback: string,
+): { rows: T[]; page: number; pages: number; total: number } {
+  const value = sorters[ts.sort ?? fallback];
+  const sorted = [...rows].sort((a, b) => {
+    const av = value(a);
+    const bv = value(b);
+    const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+    return ts.dir === "asc" ? cmp : -cmp;
+  });
+  const pages = Math.max(1, Math.ceil(sorted.length / ts.limit));
+  const page = Math.min(ts.page, pages);
+  return { rows: sorted.slice((page - 1) * ts.limit, page * ts.limit), page, pages, total: sorted.length };
+}
+
+const matches = (q: string | undefined, ...fields: string[]) => {
+  const needle = (q ?? "").trim().toLowerCase();
+  return !needle || fields.some((f) => f.toLowerCase().includes(needle));
+};
 
 /** Module 10 · Advanced Reporting & Analytics. */
 export default async function ReportsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ days?: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const { companyId, principal } = await requireTenant();
   if (!principal.enabledModules.has("ANALYTICS")) return <ModuleLocked module="ANALYTICS" />;
@@ -26,6 +96,28 @@ export default async function ReportsPage({
   const params = await searchParams;
   const days = Math.min(365, Math.max(7, Number(params.days ?? 30) || 30));
   const from = daysAgo(days);
+
+  const terrTs = tableState(params, {
+    prefix: "terr",
+    allowed: Object.keys(TERR_SORT),
+    defaultSort: "sales",
+    defaultDir: "desc",
+    limit: 10,
+  });
+  const staffTs = tableState(params, {
+    prefix: "staff",
+    allowed: Object.keys(STAFF_SORT),
+    defaultSort: "sales",
+    defaultDir: "desc",
+    limit: 10,
+  });
+  const mixTs = tableState(params, {
+    prefix: "mix",
+    allowed: Object.keys(MIX_SORT),
+    defaultSort: "revenue",
+    defaultDir: "desc",
+    limit: 10,
+  });
 
   const [metrics, territories, reps, channelSplit, productMix] = await Promise.all([
     tenantDashboard(companyId, { from: daysAgo(days - 1), to: new Date() }),
@@ -48,7 +140,7 @@ export default async function ReportsPage({
       },
       _sum: { quantity: true, lineTotalCents: true },
       orderBy: { _sum: { lineTotalCents: "desc" } },
-      take: 10,
+      take: 200,
     }),
   ]);
 
@@ -58,7 +150,128 @@ export default async function ReportsPage({
   });
   const productName = new Map(products.map((p) => [p.id, p]));
 
+  const mixRows: MixRow[] = productMix.map((p) => ({
+    productId: p.productId,
+    name: productName.get(p.productId)?.name ?? "Unknown",
+    sku: productName.get(p.productId)?.sku ?? "—",
+    units: p._sum.quantity ?? 0,
+    revenueCents: p._sum.lineTotalCents ?? 0,
+  }));
+  const mixTotal = mixRows.reduce((s, r) => s + r.revenueCents, 0);
+
+  const terr = arrange(
+    territories.filter((t) => matches(params.terr_q, t.name)),
+    terrTs,
+    TERR_SORT,
+    "sales",
+  );
+  const staff = arrange(
+    reps.filter((r) => matches(params.staff_q, r.repName)),
+    staffTs,
+    STAFF_SORT,
+    "sales",
+  );
+  const mix = arrange(
+    mixRows.filter((r) => matches(params.mix_q, r.name, r.sku)),
+    mixTs,
+    MIX_SORT,
+    "revenue",
+  );
+
+  const sortHref = (ts: TableState, prefix: string) => (key: string) => {
+    const next = toggleSort(ts, key);
+    return tableHref(PATH, params, { [`${prefix}_sort`]: next.sort, [`${prefix}_dir`]: next.dir }, prefix);
+  };
+  const pageHref = (prefix: string) => (p: number) => tableHref(PATH, params, { [`${prefix}_page`]: p });
+
   const grossMargin = metrics.salesCents > 0 ? metrics.collectionsCents / metrics.salesCents : 0;
+
+  const territoryColumns: Array<Column<TerritoryRow>> = [
+    {
+      key: "name",
+      header: "Territory",
+      sortKey: "name",
+      cell: (t) => (
+        <span className="inline-flex items-center gap-2">
+          <span className="h-2 w-2 rounded-full" style={{ background: t.colour }} />
+          <span className="font-medium">{t.name}</span>
+        </span>
+      ),
+    },
+    { key: "customers", header: "Customers", align: "right", numeric: true, sortKey: "customers", cell: (t) => t.customers },
+    { key: "invoices", header: "Invoices", align: "right", numeric: true, sortKey: "invoices", cell: (t) => t.invoices },
+    { key: "visits", header: "Visits", align: "right", numeric: true, hideBelow: "sm", sortKey: "visits", cell: (t) => t.visits },
+    {
+      key: "sales",
+      header: "Sales",
+      align: "right",
+      numeric: true,
+      sortKey: "sales",
+      cell: (t) => (
+        <span className="font-medium">
+          <Money cents={t.salesCents} compact />
+        </span>
+      ),
+    },
+  ];
+
+  const staffColumns: Array<Column<RepPerformance>> = [
+    { key: "rep", header: "Rep", sortKey: "rep", cell: (r) => <span className="font-medium">{r.repName}</span> },
+    { key: "planned", header: "Visits planned", align: "right", numeric: true, hideBelow: "md", sortKey: "planned", cell: (r) => r.visitsPlanned },
+    { key: "completed", header: "Completed", align: "right", numeric: true, hideBelow: "sm", sortKey: "completed", cell: (r) => r.visitsCompleted },
+    {
+      key: "completion",
+      header: "Completion",
+      align: "right",
+      numeric: true,
+      sortKey: "completion",
+      cell: (r) => (
+        <span className={r.completionRate < 0.7 ? "text-warning" : ""}>{(r.completionRate * 100).toFixed(0)}%</span>
+      ),
+    },
+    { key: "verified", header: "Verified", align: "right", numeric: true, hideBelow: "lg", sortKey: "verified", cell: (r) => r.visitsVerified },
+    {
+      key: "verification",
+      header: "Verification",
+      align: "right",
+      numeric: true,
+      hideBelow: "md",
+      sortKey: "verification",
+      cell: (r) => (
+        <span className={r.verificationRate < 0.8 ? "text-warning" : ""}>{(r.verificationRate * 100).toFixed(0)}%</span>
+      ),
+    },
+    { key: "orders", header: "Orders", align: "right", numeric: true, hideBelow: "lg", sortKey: "orders", cell: (r) => r.ordersCount },
+    { key: "sales", header: "Sales", align: "right", numeric: true, sortKey: "sales", cell: (r) => <Money cents={r.salesCents} compact /> },
+    {
+      key: "collections",
+      header: "Collections",
+      align: "right",
+      numeric: true,
+      hideBelow: "sm",
+      sortKey: "collections",
+      cell: (r) => <Money cents={r.collectionsCents} compact />,
+    },
+  ];
+
+  const mixColumns: Array<Column<MixRow>> = [
+    {
+      key: "product",
+      header: "Product",
+      sortKey: "product",
+      cell: (p) => <CellStack primary={<span className="font-medium">{p.name}</span>} secondary={p.sku} />,
+    },
+    { key: "sku", header: "SKU", hideBelow: "md", sortKey: "sku", cell: (p) => <span className="text-content-muted text-xs tabular">{p.sku}</span> },
+    { key: "units", header: "Units sold", align: "right", numeric: true, sortKey: "units", cell: (p) => p.units },
+    { key: "revenue", header: "Revenue", align: "right", numeric: true, sortKey: "revenue", cell: (p) => <Money cents={p.revenueCents} compact /> },
+    {
+      key: "share",
+      header: "Share",
+      hideBelow: "sm",
+      width: "8rem",
+      cell: (p) => <Meter value={p.revenueCents} max={mixTotal || 1} />,
+    },
+  ];
 
   return (
     <div className="space-y-8">
@@ -111,49 +324,21 @@ export default async function ReportsPage({
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
-          <SectionHeading title="Territory performance" />
-          <div className="scroll-x rounded-lg border border-border bg-surface shadow-sm">
-            <table className="w-full border-collapse text-base">
-              <thead>
-                <tr>
-                  <th>Territory</th>
-                  <th>Customers</th>
-                  <th>Invoices</th>
-                  <th>Visits</th>
-                  <th>Sales</th>
-                </tr>
-              </thead>
-              <tbody>
-                {territories.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="text-content-muted py-8 text-center">
-                      No territories configured
-                    </td>
-                  </tr>
-                ) : (
-                  territories.map((t) => (
-                    <tr key={t.id}>
-                      <td>
-                        <span className="inline-flex items-center gap-2">
-                          <span
-                            className="h-2 w-2 rounded-full"
-                            style={{ background: t.colour }}
-                          />
-                          <span className="font-medium">{t.name}</span>
-                        </span>
-                      </td>
-                      <td>{t.customers}</td>
-                      <td>{t.invoices}</td>
-                      <td>{t.visits}</td>
-                      <td className="font-medium">
-                        <Money cents={t.salesCents} compact />
-                      </td>
-                    </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
-          </div>
+          <SectionHeading title="Territory performance" description={`${terr.total} territories`} />
+          <FilterBar action={PATH} preserve={preserved(params, ["terr_q", "terr_page"])}>
+            <FilterSearch name="terr_q" value={params.terr_q} placeholder="Search territory…" />
+          </FilterBar>
+          <DataTable
+            columns={territoryColumns}
+            rows={terr.rows}
+            getRowKey={(t) => t.id}
+            caption="Territory performance"
+            dense
+            sort={{ key: terrTs.sort, dir: terrTs.dir }}
+            sortHrefFor={sortHref(terrTs, "terr")}
+            pagination={{ page: terr.page, pages: terr.pages, total: terr.total, limit: terrTs.limit, hrefFor: pageHref("terr") }}
+            empty={{ title: params.terr_q ? "No territories match" : "No territories configured" }}
+          />
         </div>
 
         <div>
@@ -193,96 +378,37 @@ export default async function ReportsPage({
 
       <div>
         <SectionHeading title="Staff performance" description={`Field team, last ${days} days`} />
-        <div className="scroll-x rounded-lg border border-border bg-surface shadow-sm">
-          <table className="w-full border-collapse text-base">
-            <thead>
-              <tr>
-                <th>Rep</th>
-                <th>Visits planned</th>
-                <th>Completed</th>
-                <th>Completion</th>
-                <th>Verified</th>
-                <th>Verification</th>
-                <th>Orders</th>
-                <th>Sales</th>
-                <th>Collections</th>
-              </tr>
-            </thead>
-            <tbody>
-              {reps.length === 0 ? (
-                <tr>
-                  <td colSpan={9} className="text-content-muted py-8 text-center">
-                    No field reps configured
-                  </td>
-                </tr>
-              ) : (
-                reps.map((r) => (
-                  <tr key={r.repId}>
-                    <td className="font-medium">{r.repName}</td>
-                    <td>{r.visitsPlanned}</td>
-                    <td>{r.visitsCompleted}</td>
-                    <td className={r.completionRate < 0.7 ? "text-warning" : ""}>
-                      {(r.completionRate * 100).toFixed(0)}%
-                    </td>
-                    <td>{r.visitsVerified}</td>
-                    <td className={r.verificationRate < 0.8 ? "text-warning" : ""}>
-                      {(r.verificationRate * 100).toFixed(0)}%
-                    </td>
-                    <td>{r.ordersCount}</td>
-                    <td>
-                      <Money cents={r.salesCents} compact />
-                    </td>
-                    <td>
-                      <Money cents={r.collectionsCents} compact />
-                    </td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
+        <FilterBar action={PATH} preserve={preserved(params, ["staff_q", "staff_page"])}>
+          <FilterSearch name="staff_q" value={params.staff_q} placeholder="Search rep…" />
+        </FilterBar>
+        <DataTable
+          columns={staffColumns}
+          rows={staff.rows}
+          getRowKey={(r) => r.repId}
+          caption="Staff performance"
+          sort={{ key: staffTs.sort, dir: staffTs.dir }}
+          sortHrefFor={sortHref(staffTs, "staff")}
+          pagination={{ page: staff.page, pages: staff.pages, total: staff.total, limit: staffTs.limit, hrefFor: pageHref("staff") }}
+          empty={{ title: params.staff_q ? "No reps match" : "No field reps configured" }}
+        />
       </div>
 
       <div>
-        <SectionHeading title="Product mix" description="Top lines by revenue" />
-        <div className="scroll-x rounded-lg border border-border bg-surface shadow-sm">
-          <table className="w-full border-collapse text-base">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>SKU</th>
-                <th>Units sold</th>
-                <th>Revenue</th>
-                <th>Share</th>
-              </tr>
-            </thead>
-            <tbody>
-              {productMix.map((p) => {
-                const total = productMix.reduce((s, x) => s + (x._sum.lineTotalCents ?? 0), 0);
-                const value = p._sum.lineTotalCents ?? 0;
-                return (
-                  <tr key={p.productId}>
-                    <td className="font-medium">
-                      {productName.get(p.productId)?.name ?? "Unknown"}
-                    </td>
-                    <td className="text-content-muted text-xs">
-                      {productName.get(p.productId)?.sku ?? "—"}
-                    </td>
-                    <td>{p._sum.quantity ?? 0}</td>
-                    <td>
-                      <Money cents={value} compact />
-                    </td>
-                    <td className="w-32">
-                      <Meter value={value} max={total || 1} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <SectionHeading title="Product mix" description={`Top ${mixRows.length} lines by revenue`} />
+        <FilterBar action={PATH} preserve={preserved(params, ["mix_q", "mix_page"])}>
+          <FilterSearch name="mix_q" value={params.mix_q} placeholder="Search product, SKU…" />
+        </FilterBar>
+        <DataTable
+          columns={mixColumns}
+          rows={mix.rows}
+          getRowKey={(p) => p.productId}
+          caption="Product mix"
+          sort={{ key: mixTs.sort, dir: mixTs.dir }}
+          sortHrefFor={sortHref(mixTs, "mix")}
+          pagination={{ page: mix.page, pages: mix.pages, total: mix.total, limit: mixTs.limit, hrefFor: pageHref("mix") }}
+          empty={{ title: params.mix_q ? "No products match" : "No sales in this period" }}
+        />
       </div>
     </div>
   );
 }
-

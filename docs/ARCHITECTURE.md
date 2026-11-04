@@ -204,6 +204,50 @@ The duplication is deliberate — the rep must see the total before the server
 sees the order — and it is pinned by tests on both sides. If they diverge, a rep
 reads one figure to a shopkeeper and the office invoices another.
 
+### Ledger and consistency
+
+Every document that moves money or stock writes its journal entry **inside its
+own transaction** (`src/server/posting.ts`, called from `sales.ts`,
+`credit-notes.ts`, `inventory.ts` and the expense decision route). An invoice
+without its REVENUE entry, or a payment without its RECEIPT, cannot exist: one
+rolls the other back. `postEntry` is idempotent on
+(company, refType, refId, sourceKind), so replays and backfills never
+double-post.
+
+Invariants the write paths promise, and `scripts/check-consistency.mjs`
+(`npm run test:consistency`, read-only, exits 1 with offending ids) verifies:
+
+- Every journal entry balances; the company trial balance balances; no entry
+  is orphaned, and reversals mirror their original both ways.
+- Every non-draft invoice, payment, non-cancelled credit note, valued stock
+  movement, posted goods receipt and approved expense has its entry, and the
+  entry's amounts equal the document's.
+- `Customer.balanceCents` = Σ non-draft invoice totals (cancelled included)
+  − Σ payments − Σ non-cancelled credit notes. It is **recomputed** by
+  `recomputeCustomerBalance(tx, customerId)` at the end of every write that
+  touches it — invoice issue, payment, credit note — never incremented.
+- What an invoice still owes is `total − paid − credited`
+  (`outstandingCents` in `money.ts`). Allocation, status derivation
+  (`deriveInvoiceStatus`), the invoices API and the customer API all use it.
+- `Invoice.paidCents` = Σ its allocations; allocations are validated, not
+  trusted (same customer and company, not draft, within outstanding, within
+  the payment), and an unknown invoice is a 422, not a skip.
+- `StockItem.quantity` = Σ movements; running balances chain; the inventory
+  account equals Σ qty × cost over valued movements plus posted receipts.
+  `applyMovement` uses an atomic increment and checks product and location
+  belong to the company.
+- Document numbers are allocated by `nextNumber(companyId, type, tx)` inside
+  the document's transaction with an atomic increment, so a rollback burns no
+  number and two writers never share one.
+- Gateway settlement (`settleIntent`) claims the intent atomically
+  (PROCESSING → SETTLING), books the payment under
+  `clientUuid = intent:<id>` (unique, the backstop) and links intent to payment
+  inside the payment's transaction. A failed booking releases the claim.
+
+`scripts/backfill-ledger.ts` replays documents through the same posting rules
+for data written before the ledger existed; `scripts/reconcile-ledger.ts`
+compares ledger balances to the operational tables.
+
 ---
 
 ## 7. Geo

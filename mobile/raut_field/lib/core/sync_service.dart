@@ -647,18 +647,25 @@ class SyncService extends ChangeNotifier {
   }
 
   /// Pushes one document at KRA now.
-  Future<void> pushReturn(String creditNoteId) async {
-    await _api.post('/etims/transmit', {
-      'docType': 'CREDIT_NOTE',
-      'docId': creditNoteId,
-    });
-  }
+  Future<void> pushReturn(String creditNoteId) =>
+      _transmit({'docType': 'CREDIT_NOTE', 'docId': creditNoteId});
 
-  Future<void> pushEtims(String invoiceId) async {
-    await _api.post('/etims/transmit', {
-      'docType': 'SALE',
-      'docId': invoiceId,
-    });
+  Future<void> pushEtims(String invoiceId) =>
+      _transmit({'docType': 'SALE', 'docId': invoiceId});
+
+  /// The server answers 422 for anything KRA has not accepted, which the API
+  /// client already raises. Older servers wrapped the verdict in a 200
+  /// (`{ok:false, reason}`); read the body too so "Send all" never counts a
+  /// refusal as sent whichever server the handset is talking to.
+  Future<void> _transmit(Map<String, Object?> body) async {
+    final result = await _api.post('/etims/transmit', body);
+    if (result['ok'] == false) {
+      throw ApiException(
+        422,
+        'ETIMS_NOT_FILED',
+        (result['reason'] ?? 'Not accepted by eTIMS').toString(),
+      );
+    }
   }
 
 }

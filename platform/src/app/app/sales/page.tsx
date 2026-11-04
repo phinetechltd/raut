@@ -21,7 +21,8 @@ import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
 import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
 import { daysAgo } from "@/server/analytics";
-import { refreshOverdueStatuses } from "@/server/sales";
+import { outstandingCents } from "@/lib/money";
+import { creditedByInvoice, refreshOverdueStatuses } from "@/server/sales";
 
 import { InvoiceDialog } from "./invoice-dialog";
 
@@ -32,6 +33,14 @@ const SORT_COLUMNS: Record<string, string> = {
   number: "number",
   total: "totalCents",
   status: "status",
+};
+
+const ORDER_SORT: Record<string, string> = {
+  number: "number",
+  date: "orderDate",
+  total: "totalCents",
+  status: "status",
+  channel: "channel",
 };
 
 /** Module 02 · Sales & POS — the invoicing surface from proposal page 7. */
@@ -55,8 +64,34 @@ export default async function SalesPage({
     limit: 15,
   });
 
+  const ordTs = tableState(params, {
+    prefix: "ord",
+    allowed: Object.keys(ORDER_SORT),
+    defaultSort: "date",
+    defaultDir: "desc",
+    limit: 10,
+  });
+
   const selfScope =
     principal.role === "FIELD_REP" ? { createdById: principal.userId } : {};
+
+  // "Open" means not yet invoiced; the status select narrows within that.
+  const openStatuses = ["CONFIRMED", "DRAFT"];
+  const orderWhere = {
+    companyId,
+    ...selfScope,
+    status: filters.ord_status && openStatuses.includes(filters.ord_status)
+      ? filters.ord_status
+      : { in: openStatuses },
+    ...(filters.ord_q
+      ? {
+          OR: [
+            { number: { contains: filters.ord_q } },
+            { customer: { name: { contains: filters.ord_q } } },
+          ],
+        }
+      : {}),
+  };
 
   const where = {
     companyId,
@@ -76,7 +111,7 @@ export default async function SalesPage({
     ? { [SORT_COLUMNS[ts.sort]]: ts.dir }
     : { issueDate: "desc" };
 
-  const [invoices, invoiceCount, orders, monthAgg, byStatus, channelSplit, customers, products] =
+  const [invoices, invoiceCount, orders, orderCount, openOrderCount, monthAgg, byStatus, channelSplit, customers, products] =
     await Promise.all([
       db.invoice.findMany({
         where,
@@ -91,11 +126,14 @@ export default async function SalesPage({
       }),
       db.invoice.count({ where }),
       db.salesOrder.findMany({
-        where: { companyId, ...selfScope, status: { in: ["CONFIRMED", "DRAFT"] } },
+        where: orderWhere,
         include: { customer: { select: { name: true } } },
-        orderBy: { orderDate: "desc" },
-        take: 15,
+        orderBy: { [ORDER_SORT[ordTs.sort ?? "date"]]: ordTs.dir } as Record<string, "asc" | "desc">,
+        take: ordTs.limit,
+        skip: (ordTs.page - 1) * ordTs.limit,
       }),
+      db.salesOrder.count({ where: orderWhere }),
+      db.salesOrder.count({ where: { companyId, ...selfScope, status: { in: openStatuses } } }),
       db.invoice.aggregate({
         where: {
           companyId,
@@ -138,10 +176,61 @@ export default async function SalesPage({
   const invoiced = monthAgg._sum.totalCents ?? 0;
   const collected = monthAgg._sum.paidCents ?? 0;
 
+  // Credit notes reduce what is outstanding exactly as payments do.
+  const credited = await creditedByInvoice(db, invoices.map((i) => i.id));
+  const dueFor = (inv: { id: string; totalCents: number; paidCents: number }) =>
+    outstandingCents({ ...inv, creditedCents: credited.get(inv.id) ?? 0 });
+
   const sortHrefFor = (key: string) => {
     const next = toggleSort(ts, key);
     return tableHref("/app/sales", params, { inv_sort: next.sort, inv_dir: next.dir }, "inv");
   };
+
+  const ordSortHrefFor = (key: string) => {
+    const next = toggleSort(ordTs, key);
+    return tableHref("/app/sales", params, { ord_sort: next.sort, ord_dir: next.dir }, "ord");
+  };
+
+  type OrderRow = (typeof orders)[number];
+  const orderColumns: Array<Column<OrderRow>> = [
+    {
+      key: "number",
+      header: "Order",
+      sortKey: "number",
+      cell: (o) => <span className="font-medium">{o.number}</span>,
+    },
+    { key: "customer", header: "Customer", cell: (o) => o.customer.name },
+    {
+      key: "channel",
+      header: "Channel",
+      hideBelow: "sm",
+      sortKey: "channel",
+      cell: (o) => <span className="badge bg-surface-sunken">{o.channel.toLowerCase()}</span>,
+    },
+    {
+      key: "date",
+      header: "Date",
+      sortKey: "date",
+      cell: (o) => (
+        <span className="text-content-muted text-xs">{o.orderDate.toLocaleDateString("en-KE")}</span>
+      ),
+    },
+    {
+      key: "total",
+      header: "Total",
+      align: "right",
+      numeric: true,
+      sortKey: "total",
+      cell: (o) => <Money cents={o.totalCents} />,
+    },
+    {
+      key: "status",
+      header: "Status",
+      align: "right",
+      sortKey: "status",
+      cell: (o) => <StatusBadge status={o.status} />,
+    },
+  ];
 
   type Row = (typeof invoices)[number];
 
@@ -216,8 +305,8 @@ export default async function SalesPage({
       numeric: true,
       hideBelow: "sm",
       cell: (inv) => (
-        <span className={inv.totalCents > inv.paidCents ? "font-medium" : "text-content-muted"}>
-          <Money cents={inv.totalCents - inv.paidCents} />
+        <span className={dueFor(inv) > 0 ? "font-medium" : "text-content-muted"}>
+          <Money cents={dueFor(inv)} />
         </span>
       ),
     },
@@ -254,7 +343,7 @@ export default async function SalesPage({
           hint={invoiced > 0 ? `${((collected / invoiced) * 100).toFixed(0)}% of invoiced` : undefined}
           tone="success"
         />
-        <StatCard label="Open orders" value={String(orders.length)} hint="Awaiting invoicing" />
+        <StatCard label="Open orders" value={String(openOrderCount)} hint="Awaiting invoicing" />
         <StatCard
           label="Overdue"
           value={
@@ -304,47 +393,43 @@ export default async function SalesPage({
         </Card2>
       </div>
 
-      {orders.length > 0 ? (
+      {openOrderCount > 0 || filters.ord_q || filters.ord_status ? (
         <div>
-          <SectionHeading title="Open orders" description="Confirmed but not yet invoiced" />
-          <Card2 noPad>
-            <div className="scroll-x">
-              <table className="w-full border-collapse text-base">
-                <thead>
-                  <tr>
-                    <th>Order</th>
-                    <th>Customer</th>
-                    <th>Channel</th>
-                    <th>Date</th>
-                    <th>Total</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {orders.map((o) => (
-                    <tr key={o.id}>
-                      <td className="font-medium">{o.number}</td>
-                      <td>{o.customer.name}</td>
-                      <td>
-                        <span className="badge bg-surface-sunken">
-                          {o.channel.toLowerCase()}
-                        </span>
-                      </td>
-                      <td className="text-content-muted text-xs">
-                        {o.orderDate.toLocaleDateString("en-KE")}
-                      </td>
-                      <td>
-                        <Money cents={o.totalCents} />
-                      </td>
-                      <td>
-                        <StatusBadge status={o.status} />
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </Card2>
+          <SectionHeading
+            title="Open orders"
+            description={`${orderCount.toLocaleString("en-KE")} confirmed but not yet invoiced`}
+          />
+          <FilterBar
+            action="/app/sales"
+            preserve={preserved(params, ["ord_q", "ord_status", "ord_page"])}
+          >
+            <FilterSearch name="ord_q" value={filters.ord_q} placeholder="Search order #, customer…" />
+            <FilterSelect
+              name="ord_status"
+              value={filters.ord_status}
+              allLabel="Any open status"
+              options={[
+                { value: "DRAFT", label: "Draft" },
+                { value: "CONFIRMED", label: "Confirmed" },
+              ]}
+            />
+          </FilterBar>
+          <DataTable
+            columns={orderColumns}
+            rows={orders}
+            getRowKey={(o) => o.id}
+            caption="Open sales orders"
+            sort={{ key: ordTs.sort, dir: ordTs.dir }}
+            sortHrefFor={ordSortHrefFor}
+            pagination={{
+              page: ordTs.page,
+              pages: Math.max(1, Math.ceil(orderCount / ordTs.limit)),
+              total: orderCount,
+              limit: ordTs.limit,
+              hrefFor: (p) => tableHref("/app/sales", params, { ord_page: p }),
+            }}
+            empty={{ title: "No open orders match this filter" }}
+          />
         </div>
       ) : null}
 

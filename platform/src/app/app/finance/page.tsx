@@ -3,6 +3,9 @@
   CellStack,
   DataTable,
   DateRangeBar,
+  FilterBar,
+  FilterSearch,
+  FilterSelect,
   Meter,
   ModuleLocked,
   Money,
@@ -32,7 +35,13 @@ const EXP_SORT: Record<string, string> = {
   amount: "amountCents",
   status: "status",
 };
-const PAY_SORT: Record<string, string> = { paid: "paidAt", amount: "amountCents", number: "number" };
+const PAY_SORT: Record<string, string> = {
+  paid: "paidAt",
+  amount: "amountCents",
+  number: "number",
+  method: "method",
+};
+
 
 /** Module 05 · Finance, Expenses & Receivables. */
 export default async function FinancePage({
@@ -56,7 +65,7 @@ export default async function FinancePage({
   });
   const payTs = tableState(params, {
     prefix: "pay",
-    allowed: ["paid", "amount", "number"],
+    allowed: Object.keys(PAY_SORT),
     defaultSort: "paid",
     defaultDir: "desc",
     limit: 10,
@@ -65,25 +74,55 @@ export default async function FinancePage({
   const rangeWhere = (field: string) =>
     range.from ? { [field]: { gte: range.from, lte: range.to ?? new Date() } } : {};
 
-  const [ageing, expenses, expenseCount, payments, paymentCount, topDebtors, expenseByCategory, categories, customersForPay] =
+  const expenseWhere = {
+    companyId,
+    ...rangeWhere("incurredAt"),
+    ...(params.exp_cat ? { categoryId: params.exp_cat } : {}),
+    ...(params.exp_q
+      ? {
+          OR: [
+            { description: { contains: params.exp_q } },
+            { number: { contains: params.exp_q } },
+            { category: { name: { contains: params.exp_q } } },
+          ],
+        }
+      : {}),
+  };
+  const paymentWhere = {
+    companyId,
+    ...rangeWhere("paidAt"),
+    ...(params.pay_method ? { method: params.pay_method } : {}),
+    ...(params.pay_q
+      ? {
+          OR: [
+            { reference: { contains: params.pay_q } },
+            { number: { contains: params.pay_q } },
+            { method: { contains: params.pay_q } },
+            { customer: { name: { contains: params.pay_q } } },
+          ],
+        }
+      : {}),
+  };
+
+  const [ageing, expenses, expenseCount, payments, paymentCount, topDebtors, expenseByCategory, categories, customersForPay, methodsUsed] =
     await Promise.all([
       receivablesAgeing(companyId),
       db.expense.findMany({
-        where: { companyId, ...rangeWhere("incurredAt") },
+        where: expenseWhere,
         include: { category: { select: { name: true } }, user: { select: { name: true } } },
         orderBy: { [EXP_SORT[expTs.sort ?? "incurred"]]: expTs.dir } as Record<string, string>,
         take: expTs.limit,
         skip: (expTs.page - 1) * expTs.limit,
       }),
-      db.expense.count({ where: { companyId, ...rangeWhere("incurredAt") } }),
+      db.expense.count({ where: expenseWhere }),
       db.payment.findMany({
-        where: { companyId, ...rangeWhere("paidAt") },
+        where: paymentWhere,
         include: { customer: { select: { name: true } } },
         orderBy: { [PAY_SORT[payTs.sort ?? "paid"]]: payTs.dir } as Record<string, string>,
         take: payTs.limit,
         skip: (payTs.page - 1) * payTs.limit,
       }),
-      db.payment.count({ where: { companyId, ...rangeWhere("paidAt") } }),
+      db.payment.count({ where: paymentWhere }),
       db.customer.findMany({
         where: { companyId, balanceCents: { gt: 0 } },
         orderBy: { balanceCents: "desc" },
@@ -103,6 +142,7 @@ export default async function FinancePage({
         orderBy: { name: "asc" },
         take: 300,
       }),
+      db.payment.groupBy({ by: ["method"], where: { companyId }, orderBy: { method: "asc" } }),
     ]);
 
   const categoryName = new Map(categories.map((c) => [c.id, c.name]));
@@ -211,6 +251,7 @@ export default async function FinancePage({
       key: "method",
       header: "Method",
       hideBelow: "sm",
+      sortKey: "method",
       cell: (p) => <span className="badge bg-surface-sunken">{p.method.toLowerCase()}</span>,
     },
     {
@@ -374,6 +415,15 @@ export default async function FinancePage({
           title="Expense claims"
           description="Field claims capture the rep's position when the expense was raised"
         />
+        <FilterBar action="/app/finance" preserve={preserved(params, ["exp_q", "exp_cat", "exp_page"])}>
+          <FilterSearch name="exp_q" value={params.exp_q} placeholder="Search description, number, category…" />
+          <FilterSelect
+            name="exp_cat"
+            value={params.exp_cat}
+            allLabel="All categories"
+            options={categories.map((c) => ({ value: c.id, label: c.name }))}
+          />
+        </FilterBar>
         <DataTable
           columns={expenseColumns}
           rows={expenses}
@@ -394,6 +444,15 @@ export default async function FinancePage({
 
       <div>
         <SectionHeading title="Payments" description={`${paymentCount} in range`} />
+        <FilterBar action="/app/finance" preserve={preserved(params, ["pay_q", "pay_method", "pay_page"])}>
+          <FilterSearch name="pay_q" value={params.pay_q} placeholder="Search reference, receipt, customer…" />
+          <FilterSelect
+            name="pay_method"
+            value={params.pay_method}
+            allLabel="Any method"
+            options={methodsUsed.map((m) => ({ value: m.method, label: m.method.toLowerCase().replace(/_/g, " ") }))}
+          />
+        </FilterBar>
         <DataTable
           columns={paymentColumns}
           rows={payments}

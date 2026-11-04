@@ -1,5 +1,6 @@
 import "server-only";
 
+import { Prisma } from "@prisma/client";
 import { NextResponse } from "next/server";
 import { ZodError, type ZodSchema } from "zod";
 
@@ -245,20 +246,60 @@ export function paginationMeta(page: Page, total: number) {
 
 // ── idempotency (mobile writes) ────────────────────────────────────────
 
+type IdempotentWork<T> =
+  | (() => Promise<T>)
+  | ((tx: Prisma.TransactionClient) => Promise<T>);
+
+function idempotencyRow<T>(
+  principal: Principal,
+  key: string,
+  endpoint: string,
+  data: T,
+): Prisma.IdempotencyKeyCreateInput {
+  return {
+    key,
+    userId: principal.userId,
+    endpoint,
+    response: JSON.stringify(data),
+    entityType: endpoint,
+    entityId:
+      data && typeof data === "object" && "id" in data
+        ? String((data as { id: unknown }).id)
+        : null,
+  };
+}
+
 /**
  * Replays a previous response for a repeated client UUID.
  *
  * The field app retries pushes it never saw a reply to. Without this, a rep in
  * a low-signal market posts one order and the server records two. The key is
  * the client-generated UUID, scoped per user, so two reps cannot collide.
+ *
+ * Two shapes of work are accepted. A function that **takes a `tx`** is run
+ * inside a transaction and the key is written in that same transaction, so the
+ * record and its replay marker commit together or not at all. A function that
+ * takes no arguments manages its own transactions (every `src/server` write
+ * does, and SQLite would deadlock on a nested one), so the key is written after
+ * it; a failure to write it is logged, never swallowed — the next retry would
+ * otherwise re-run the work and nobody would know why there are two.
  */
 export async function withIdempotency<T>(
   principal: Principal,
   key: string | null | undefined,
   endpoint: string,
-  work: () => Promise<T>,
+  work: IdempotentWork<T>,
 ): Promise<{ data: T; replayed: boolean }> {
-  if (!key) return { data: await work(), replayed: false };
+  if (!key) {
+    const data =
+      work.length > 0
+        ? await db.$transaction(
+            (tx) => (work as (tx: Prisma.TransactionClient) => Promise<T>)(tx),
+            { timeout: 15_000 },
+          )
+        : await (work as () => Promise<T>)();
+    return { data, replayed: false };
+  }
 
   const existing = await db.idempotencyKey.findUnique({ where: { key } });
   if (existing) {
@@ -268,24 +309,38 @@ export async function withIdempotency<T>(
     return { data: JSON.parse(existing.response) as T, replayed: true };
   }
 
-  const data = await work();
-
-  await db.idempotencyKey
-    .create({
-      data: {
-        key,
-        userId: principal.userId,
-        endpoint,
-        response: JSON.stringify(data),
-        entityType: endpoint,
-        entityId:
-          data && typeof data === "object" && "id" in data
-            ? String((data as { id: unknown }).id)
-            : null,
+  if (work.length > 0) {
+    const data = await db.$transaction(
+      async (tx) => {
+        const result = await (work as (tx: Prisma.TransactionClient) => Promise<T>)(tx);
+        await tx.idempotencyKey.create({ data: idempotencyRow(principal, key, endpoint, result) });
+        return result;
       },
-    })
-    // A racing duplicate lost the insert; the work already succeeded once.
-    .catch(() => undefined);
+      { timeout: 15_000 },
+    );
+    return { data, replayed: false };
+  }
+
+  const data = await (work as () => Promise<T>)();
+
+  try {
+    await db.idempotencyKey.create({ data: idempotencyRow(principal, key, endpoint, data) });
+  } catch (error) {
+    const duplicate =
+      error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+    // A racing duplicate lost the insert; the work already succeeded once and
+    // the winner's row will serve the replay. Anything else is a real fault
+    // that will cost a duplicate record on the next retry — say so.
+    if (duplicate) {
+      console.warn("[idempotency] key already recorded by a concurrent request", { endpoint, key });
+    } else {
+      console.error("[idempotency] failed to record key; a retry will repeat the work", {
+        endpoint,
+        key,
+        error,
+      });
+    }
+  }
 
   return { data, replayed: false };
 }

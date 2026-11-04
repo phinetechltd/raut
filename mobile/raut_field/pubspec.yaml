@@ -27,6 +27,9 @@ dependencies:
   geolocator: ^13.0.2
   image_picker: ^1.1.2
   connectivity_plus: ^6.1.0
+  # Battery level rides along with every breadcrumb, so the office can tell a
+  # dead handset from a rep who has stopped moving.
+  battery_plus: ^6.2.1
 
   # Identity for offline writes — the idempotency key the server dedupes on
   uuid: ^4.5.1
@@ -36,6 +39,9 @@ dependencies:
 
   intl: ^0.19.0
   url_launcher: ^6.3.2
+  flutter_map: ^8.3.2
+  latlong2: ^0.10.1
+  google_maps_flutter: ^2.14.2
 
 dev_dependencies:
   flutter_test:

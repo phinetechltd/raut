@@ -40,7 +40,10 @@ export const GET = handler(
 const schema = z.object({
   customerId: z.string(),
   amountCents: z.number().int().positive(),
-  method: z.enum(["CASH", "MPESA", "BANK", "CHEQUE", "CREDIT_NOTE"]).optional(),
+  // CREDIT_NOTE is deliberately absent: a credit note is a document with its
+  // own route (/credit-notes), not a way money arrives. Accepting it here
+  // booked phantom cash against the Cash account.
+  method: z.enum(["CASH", "MPESA", "BANK", "CHEQUE"]).optional(),
   reference: z.string().optional(),
   paidAt: z.string().optional(),
   note: z.string().optional(),
@@ -51,6 +54,10 @@ const schema = z.object({
     .array(z.object({ invoiceId: z.string(), amountCents: z.number().int().positive() }))
     .optional(),
 });
+
+// Allocation validity — invoice exists, same customer, not draft, within what
+// is outstanding net of credit notes, total within the payment — is enforced
+// by recordPayment with a 422, never silently skipped.
 
 export const POST = handler(
   { permission: "payment:write" },

@@ -6,11 +6,20 @@ import type { MapPoint } from "./data-display";
  * who switches provider should recognise every marker.
  */
 
+export interface MapTrack {
+  id: string;
+  colour: string;
+  /** [lat, lng] breadcrumbs, oldest first. */
+  coords: Array<[number, number]>;
+}
+
 export interface TileMapProps {
   points: MapPoint[];
   polygons?: Array<{ id: string; colour: string; vertices: Array<[number, number]> }>;
   /** Ids of points to connect in order — a route's stop sequence. */
   path?: string[];
+  /** Driven trails (GPS breadcrumbs), drawn solid under the dashed plan. */
+  tracks?: MapTrack[];
   height?: number;
   /** Initial zoom when there are points; bounds fitting overrides it. */
   zoom?: number;
@@ -71,6 +80,19 @@ export function dotPinHtml(colour: string, theme: ThemeColours): string {
   return `<span class="raut-dot-pin" style="background:${colour};border-color:${theme.surface}"></span>`;
 }
 
+/**
+ * The vehicle pin: a small rounded van silhouette in the tone colour. Markup,
+ * not an image, so it recolours with the theme like the other two pins.
+ */
+export function vehiclePinHtml(colour: string, theme: ThemeColours): string {
+  return (
+    `<span class="raut-vehicle-pin" style="background:${colour};border-color:${theme.surface}">` +
+    `<svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">` +
+    `<path fill="#ffffff" d="M3 7.5A1.5 1.5 0 0 1 4.5 6H14l4.2 4.2H20a1 1 0 0 1 1 1V15a1 1 0 0 1-1 1h-1.1a2.4 2.4 0 0 1-4.8 0H9.9a2.4 2.4 0 0 1-4.8 0H4a1 1 0 0 1-1-1V7.5Zm9.6 1v2.7h3.9L13.8 8.5h-1.2Z"/>` +
+    `</svg></span>`
+  );
+}
+
 /** Resolves a path of ids to the points it names, dropping unknown ids. */
 export function pathPointsOf(points: MapPoint[], path: string[]): MapPoint[] {
   const byId = new Map(points.map((p) => [p.id, p]));
@@ -80,9 +102,19 @@ export function pathPointsOf(points: MapPoint[], path: string[]): MapPoint[] {
 export function allCoordinates(
   points: MapPoint[],
   polygons: NonNullable<TileMapProps["polygons"]>,
+  tracks: MapTrack[] = [],
 ): Array<[number, number]> {
   return [
     ...points.map((p) => [p.lat, p.lng] as [number, number]),
     ...polygons.flatMap((poly) => poly.vertices),
+    ...tracks.flatMap((t) => t.coords),
   ];
+}
+
+/** Popup body shared by both renderers. */
+export function popupHtml(p: MapPoint): string {
+  const lines = [`<strong>${escapeHtml(p.label)}</strong>`];
+  if (p.sequence) lines.push(`Stop ${p.sequence}`);
+  if (p.detail) lines.push(escapeHtml(p.detail));
+  return lines.join("<br>");
 }

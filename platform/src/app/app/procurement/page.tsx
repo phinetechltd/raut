@@ -1,6 +1,9 @@
 ﻿import {
   CellStack,
   DataTable,
+  FilterBar,
+  FilterSearch,
+  FilterSelect,
   ModuleLocked,
   Money,
   PageHeader,
@@ -13,15 +16,35 @@
 import { db } from "@/lib/db";
 import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
-import { tableHref, tableState, toggleSort } from "@/lib/table";
+import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
 
 import { PurchaseOrderDialog } from "./po-dialog";
 import { SupplierDialog, type SupplierShape } from "./supplier-dialog";
 
 export const dynamic = "force-dynamic";
 
-const SUP_SORT: Record<string, string> = { name: "name", balance: "balanceCents" };
-const PO_SORT: Record<string, string> = { date: "orderDate", number: "number", total: "totalCents" };
+const SUP_SORT: Record<string, string> = {
+  name: "name",
+  balance: "balanceCents",
+  terms: "paymentTermsDays",
+  status: "status",
+};
+const PO_SORT: Record<string, string> = {
+  date: "orderDate",
+  number: "number",
+  total: "totalCents",
+  status: "status",
+  expected: "expectedAt",
+};
+const GRN_SORT: Record<string, string> = { received: "receivedAt", number: "number", status: "status" };
+
+const PO_STATUSES = [
+  { value: "DRAFT", label: "Draft" },
+  { value: "SENT", label: "Sent" },
+  { value: "PARTIALLY_RECEIVED", label: "Partially received" },
+  { value: "RECEIVED", label: "Received" },
+  { value: "CANCELLED", label: "Cancelled" },
+];
 
 /** Module 04 · Procurement & Suppliers. */
 export default async function ProcurementPage({
@@ -38,15 +61,22 @@ export default async function ProcurementPage({
 
   const supTs = tableState(params, {
     prefix: "sup",
-    allowed: ["name", "balance"],
+    allowed: Object.keys(SUP_SORT),
     defaultSort: "name",
     defaultDir: "asc",
     limit: 10,
   });
   const poTs = tableState(params, {
     prefix: "po",
-    allowed: ["date", "number", "total"],
+    allowed: Object.keys(PO_SORT),
     defaultSort: "date",
+    defaultDir: "desc",
+    limit: 10,
+  });
+  const grnTs = tableState(params, {
+    prefix: "grn",
+    allowed: Object.keys(GRN_SORT),
+    defaultSort: "received",
     defaultDir: "desc",
     limit: 10,
   });
@@ -54,18 +84,38 @@ export default async function ProcurementPage({
   const canSupplierWrite = can(principal, "supplier:write");
   const canPurchaseWrite = can(principal, "purchase:write");
 
-  const [suppliers, supplierCount, orders, orderCount, receipts, openAgg, productsForPo] =
+  const supplierWhere = {
+    companyId,
+    ...(params.sup_q
+      ? { OR: [{ name: { contains: params.sup_q } }, { code: { contains: params.sup_q } }] }
+      : {}),
+  };
+  const poWhere = {
+    companyId,
+    ...(params.po_status ? { status: params.po_status } : {}),
+    ...(params.po_q
+      ? { OR: [{ number: { contains: params.po_q } }, { supplier: { name: { contains: params.po_q } } }] }
+      : {}),
+  };
+  const grnWhere = {
+    companyId,
+    ...(params.grn_q
+      ? { OR: [{ number: { contains: params.grn_q } }, { supplier: { name: { contains: params.grn_q } } }] }
+      : {}),
+  };
+
+  const [suppliers, supplierCount, orders, orderCount, receipts, receiptCount, totalReceipts, openAgg, productsForPo] =
     await Promise.all([
       db.supplier.findMany({
-        where: { companyId },
+        where: supplierWhere,
         include: { _count: { select: { purchaseOrders: true, goodsReceipts: true } } },
         orderBy: { [SUP_SORT[supTs.sort ?? "name"]]: supTs.dir } as Record<string, string>,
         take: supTs.limit,
         skip: (supTs.page - 1) * supTs.limit,
       }),
-      db.supplier.count({ where: { companyId } }),
+      db.supplier.count({ where: supplierWhere }),
       db.purchaseOrder.findMany({
-        where: { companyId },
+        where: poWhere,
         include: {
           supplier: { select: { name: true } },
           lines: { select: { quantity: true, received: true } },
@@ -74,17 +124,20 @@ export default async function ProcurementPage({
         take: poTs.limit,
         skip: (poTs.page - 1) * poTs.limit,
       }),
-      db.purchaseOrder.count({ where: { companyId } }),
+      db.purchaseOrder.count({ where: poWhere }),
       db.goodsReceipt.findMany({
-        where: { companyId },
+        where: grnWhere,
         include: {
           supplier: { select: { name: true } },
           location: { select: { name: true } },
           lines: { select: { quantity: true } },
         },
-        orderBy: { receivedAt: "desc" },
-        take: 20,
+        orderBy: { [GRN_SORT[grnTs.sort ?? "received"]]: grnTs.dir } as Record<string, string>,
+        take: grnTs.limit,
+        skip: (grnTs.page - 1) * grnTs.limit,
       }),
+      db.goodsReceipt.count({ where: grnWhere }),
+      db.goodsReceipt.count({ where: { companyId } }),
       db.purchaseOrder.aggregate({
         where: { companyId, status: { in: ["SENT", "PARTIALLY_RECEIVED"] } },
         _sum: { totalCents: true },
@@ -114,6 +167,10 @@ export default async function ProcurementPage({
     const next = toggleSort(poTs, key);
     return tableHref("/app/procurement", params, { po_sort: next.sort, po_dir: next.dir }, "po");
   };
+  const grnSortHrefFor = (key: string) => {
+    const next = toggleSort(grnTs, key);
+    return tableHref("/app/procurement", params, { grn_sort: next.sort, grn_dir: next.dir }, "grn");
+  };
 
   type SupRow = (typeof suppliers)[number];
   const supplierColumns: Array<Column<SupRow>> = [
@@ -133,6 +190,7 @@ export default async function ProcurementPage({
       key: "terms",
       header: "Terms",
       hideBelow: "sm",
+      sortKey: "terms",
       cell: (s) => <span className="text-content-muted text-xs">{s.paymentTermsDays}d</span>,
     },
     {
@@ -159,6 +217,7 @@ export default async function ProcurementPage({
       key: "status",
       header: "Status",
       align: "right",
+      sortKey: "status",
       cell: (s) => <StatusBadge status={s.status} />,
     },
     ...(canSupplierWrite
@@ -197,6 +256,7 @@ export default async function ProcurementPage({
       key: "expected",
       header: "Expected",
       hideBelow: "md",
+      sortKey: "expected",
       cell: (po) => (
         <span className="text-content-muted text-xs">
           {po.expectedAt?.toLocaleDateString("en-KE") ?? "—"}
@@ -228,8 +288,25 @@ export default async function ProcurementPage({
       key: "status",
       header: "Status",
       align: "right",
+      sortKey: "status",
       cell: (po) => <StatusBadge status={po.status} />,
     },
+  ];
+
+  type GrnRow = (typeof receipts)[number];
+  const grnColumns: Array<Column<GrnRow>> = [
+    { key: "number", header: "Number", sortKey: "number", cell: (g) => <span className="font-medium">{g.number}</span> },
+    { key: "supplier", header: "Supplier", cell: (g) => g.supplier.name },
+    { key: "into", header: "Into", hideBelow: "sm", cell: (g) => <span className="text-xs">{g.location.name}</span> },
+    {
+      key: "received",
+      header: "Received",
+      hideBelow: "md",
+      sortKey: "received",
+      cell: (g) => <span className="text-content-muted text-xs">{g.receivedAt.toLocaleDateString("en-KE")}</span>,
+    },
+    { key: "lines", header: "Lines", align: "right", numeric: true, cell: (g) => g.lines.length },
+    { key: "status", header: "Status", align: "right", sortKey: "status", cell: (g) => <StatusBadge status={g.status} /> },
   ];
 
   return (
@@ -257,7 +334,7 @@ export default async function ProcurementPage({
           value={String(openAgg._count)}
           hint={<><Money cents={openAgg._sum.totalCents ?? 0} compact /> committed</>}
         />
-        <StatCard label="Goods receipts" value={String(receipts.length)} hint="Most recent 20" />
+        <StatCard label="Goods receipts" value={String(totalReceipts)} hint="All time" />
         <StatCard
           label="Payables"
           value={<Money cents={payables} compact />}
@@ -267,6 +344,9 @@ export default async function ProcurementPage({
 
       <div>
         <SectionHeading title="Suppliers" description={`${supplierCount} suppliers`} />
+        <FilterBar action="/app/procurement" preserve={preserved(params, ["sup_q", "sup_page"])}>
+          <FilterSearch name="sup_q" value={params.sup_q} placeholder="Search supplier name, code…" />
+        </FilterBar>
         <DataTable
           columns={supplierColumns}
           rows={suppliers}
@@ -287,6 +367,10 @@ export default async function ProcurementPage({
 
       <div>
         <SectionHeading title="Purchase orders" description={`${orderCount} orders`} />
+        <FilterBar action="/app/procurement" preserve={preserved(params, ["po_q", "po_status", "po_page"])}>
+          <FilterSearch name="po_q" value={params.po_q} placeholder="Search PO number, supplier…" />
+          <FilterSelect name="po_status" value={params.po_status} allLabel="Any status" options={PO_STATUSES} />
+        </FilterBar>
         <DataTable
           columns={poColumns}
           rows={orders}
@@ -310,31 +394,26 @@ export default async function ProcurementPage({
           title="Goods received"
           description="Posting a receipt moves stock and updates the product's cost basis"
         />
+        <FilterBar action="/app/procurement" preserve={preserved(params, ["grn_q", "grn_page"])}>
+          <FilterSearch name="grn_q" value={params.grn_q} placeholder="Search GRN number, supplier…" />
+        </FilterBar>
         <DataTable
-          columns={[
-            { key: "number", header: "Number", cell: (g: GrnRow) => <span className="font-medium">{g.number}</span> },
-            { key: "supplier", header: "Supplier", cell: (g: GrnRow) => g.supplier.name },
-            { key: "into", header: "Into", hideBelow: "sm", cell: (g: GrnRow) => <span className="text-xs">{g.location.name}</span>, },
-            { key: "received", header: "Received", hideBelow: "md", cell: (g: GrnRow) => <span className="text-content-muted text-xs">{g.receivedAt.toLocaleDateString("en-KE")}</span>, },
-            { key: "lines", header: "Lines", align: "right" as const, cell: (g: GrnRow) => g.lines.length, },
-            { key: "status", header: "Status", align: "right" as const, cell: (g: GrnRow) => <StatusBadge status={g.status} />, },
-          ]}
+          columns={grnColumns}
           rows={receipts}
           getRowKey={(g) => g.id}
           caption="Goods receipts"
-          empty={{ title: "No goods receipts recorded" }}
+          sort={{ key: grnTs.sort, dir: grnTs.dir }}
+          sortHrefFor={grnSortHrefFor}
+          pagination={{
+            page: grnTs.page,
+            pages: Math.max(1, Math.ceil(receiptCount / grnTs.limit)),
+            total: receiptCount,
+            limit: grnTs.limit,
+            hrefFor: (p) => tableHref("/app/procurement", params, { grn_page: p }),
+          }}
+          empty={{ title: params.grn_q ? "No goods receipts match this search" : "No goods receipts recorded" }}
         />
       </div>
     </div>
   );
 }
-
-type GrnRow = {
-  id: string;
-  number: string;
-  status: string;
-  receivedAt: Date;
-  lines: { quantity: number }[];
-  supplier: { name: string };
-  location: { name: string };
-};

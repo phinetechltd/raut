@@ -46,6 +46,7 @@ const ROLES = [
       ["/app/settings", "Stock locations"],
       ["/app/settings/payments", "Payments &amp; Tax"],
       ["/app/settings/maps", "Map provider"],
+      ["/app/settings/vehicles", "Vehicle fleet"],
     ],
   },
   {

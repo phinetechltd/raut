@@ -1,7 +1,15 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { chargedLine, computeLine, computeTotals, creditLineAmounts, inclusiveTax } from "./money";
+import {
+  chargedLine,
+  computeLine,
+  computeTotals,
+  creditLineAmounts,
+  deriveInvoiceStatus,
+  inclusiveTax,
+  outstandingCents,
+} from "./money";
 
 /**
  * The single money engine. Orders, invoices and purchase orders all price a
@@ -145,5 +153,34 @@ describe("creditLineAmounts", () => {
       () => creditLineAmounts(discounted, [{ quantity: 8, lineTotalCents: 83_520 }], 3),
       /only 2 remain/,
     );
+  });
+});
+
+/**
+ * A credit note reduces what is owed exactly as a payment does. Allocation,
+ * status derivation and the invoices API all read these two functions, so a
+ * part-returned invoice cannot be over-collected by any of them.
+ */
+describe("outstandingCents and credited-aware status", () => {
+  it("nets credits off the outstanding figure and never goes below zero", () => {
+    assert.equal(outstandingCents({ totalCents: 23_200, paidCents: 0, creditedCents: 11_600 }), 11_600);
+    assert.equal(outstandingCents({ totalCents: 23_200, paidCents: 11_600, creditedCents: 11_600 }), 0);
+    assert.equal(outstandingCents({ totalCents: 23_200, paidCents: 20_000, creditedCents: 11_600 }), 0);
+    assert.equal(outstandingCents({ totalCents: 23_200, paidCents: 5_000 }), 18_200);
+  });
+
+  it("marks an invoice PAID once paid plus credited covers the total", () => {
+    const base = { totalCents: 23_200, dueDate: null, current: "PARTIALLY_PAID" };
+    assert.equal(deriveInvoiceStatus({ ...base, paidCents: 11_600, creditedCents: 11_600 }), "PAID");
+    assert.equal(deriveInvoiceStatus({ ...base, paidCents: 11_600, creditedCents: 0 }), "PARTIALLY_PAID");
+    assert.equal(deriveInvoiceStatus({ ...base, paidCents: 0, creditedCents: 11_600, current: "ISSUED" }), "ISSUED");
+  });
+
+  it("leaves DRAFT and CANCELLED alone and respects the due date", () => {
+    const past = new Date(Date.now() - 86_400_000);
+    assert.equal(deriveInvoiceStatus({ totalCents: 100, paidCents: 100, dueDate: null, current: "CANCELLED" }), "CANCELLED");
+    assert.equal(deriveInvoiceStatus({ totalCents: 100, paidCents: 0, dueDate: null, current: "DRAFT" }), "DRAFT");
+    assert.equal(deriveInvoiceStatus({ totalCents: 100, paidCents: 0, dueDate: past, current: "ISSUED" }), "OVERDUE");
+    assert.equal(deriveInvoiceStatus({ totalCents: 100, paidCents: 40, dueDate: past, current: "ISSUED" }), "OVERDUE");
   });
 });

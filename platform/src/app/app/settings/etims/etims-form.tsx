@@ -220,7 +220,10 @@ export function EtimsForm({
               </Select>
             </Field>
 
-            <Field label="Tax type">
+            <Field
+              label="Tax type"
+              hint="Products with a VAT rate use B or E from the rate. A zero rate is filed as C (zero-rated) unless the product itself is marked A (exempt)."
+            >
               <Select
                 value={state.defaultTaxTypeCode}
                 onChange={(e) => set("defaultTaxTypeCode", e.target.value)}

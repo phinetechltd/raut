@@ -42,6 +42,7 @@ export {
 export * from "./icons";
 
 export { TileMap } from "./tile-map";
+export type { MapTrack, TileMapProps } from "./map-shared";
 
 export { Modal, ModalButton } from "./modal";
 

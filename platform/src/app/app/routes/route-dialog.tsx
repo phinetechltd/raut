@@ -17,6 +17,11 @@ interface Option {
   name: string;
 }
 
+interface VehicleOption extends Option {
+  /** The rep this van is usually driven by; preselected when that rep is chosen. */
+  defaultRepId?: string | null;
+}
+
 /**
  * Plan a route. The optimiser (nearest-neighbour + 2-opt pass) runs on the
  * server: this dialog picks the rep, the day and the territory to cover, and
@@ -25,9 +30,11 @@ interface Option {
 export function RoutePlanDialog({
   reps,
   territories,
+  vehicles = [],
 }: {
   reps: Option[];
   territories: Option[];
+  vehicles?: VehicleOption[];
 }) {
   return (
     <ModalButton
@@ -36,7 +43,9 @@ export function RoutePlanDialog({
       description="Stops are sequenced by distance from the rep's start, then held stable for the day. Optionally creates the visits."
       width="max-w-lg"
     >
-      {(close) => <RouteForm reps={reps} territories={territories} onClose={() => close()} />}
+      {(close) => (
+        <RouteForm reps={reps} territories={territories} vehicles={vehicles} onClose={() => close()} />
+      )}
     </ModalButton>
   );
 }
@@ -44,23 +53,37 @@ export function RoutePlanDialog({
 function RouteForm({
   reps,
   territories,
+  vehicles,
   onClose,
 }: {
   reps: Option[];
   territories: Option[];
+  vehicles: VehicleOption[];
   onClose: () => void;
 }) {
   const { busy, error, submit } = useFormSubmit();
-  const [form, setForm] = useState({
-    repId: reps[0]?.id ?? "",
-    routeDate: new Date().toISOString().slice(0, 10),
-    name: "",
-    territoryId: territories[0]?.id ?? "",
-    startHour: "8",
-    serviceMinutes: "20",
-    createVisits: true,
+  const usualVehicleFor = (repId: string) => vehicles.find((v) => v.defaultRepId === repId)?.id ?? "";
+  const [form, setForm] = useState(() => {
+    const repId = reps[0]?.id ?? "";
+    return {
+      repId,
+      routeDate: new Date().toISOString().slice(0, 10),
+      name: "",
+      territoryId: territories[0]?.id ?? "",
+      vehicleId: usualVehicleFor(repId),
+      startHour: "8",
+      serviceMinutes: "20",
+      createVisits: true,
+    };
   });
   const set = (k: keyof typeof form, v: string | boolean) => setForm((f) => ({ ...f, [k]: v }));
+  // Changing the rep swaps in their usual van unless the planner chose one.
+  const setRep = (repId: string) =>
+    setForm((f) => ({
+      ...f,
+      repId,
+      vehicleId: f.vehicleId === "" || f.vehicleId === usualVehicleFor(f.repId) ? usualVehicleFor(repId) : f.vehicleId,
+    }));
 
   async function save() {
     await submit(async () => {
@@ -71,6 +94,7 @@ function RouteForm({
           routeDate: form.routeDate,
           name: form.name || undefined,
           territoryId: form.territoryId || undefined,
+          vehicleId: form.vehicleId || undefined,
           startHour: Number(form.startHour),
           serviceMinutes: Number(form.serviceMinutes),
           createVisits: form.createVisits,
@@ -89,7 +113,7 @@ function RouteForm({
     >
       <div className="grid gap-3 sm:grid-cols-2">
         <Field label="Rep" htmlFor="rt-rep" required>
-          <Select id="rt-rep" value={form.repId} onChange={(e) => set("repId", e.target.value)}>
+          <Select id="rt-rep" value={form.repId} onChange={(e) => setRep(e.target.value)}>
             {reps.map((r) => (
               <option key={r.id} value={r.id}>{r.name}</option>
             ))}
@@ -106,6 +130,16 @@ function RouteForm({
             ))}
           </Select>
         </Field>
+        {vehicles.length > 0 ? (
+          <Field label="Vehicle" htmlFor="rt-vehicle" hint="The van the trail and odometer are kept against">
+            <Select id="rt-vehicle" value={form.vehicleId} onChange={(e) => set("vehicleId", e.target.value)}>
+              <option value="">— no vehicle —</option>
+              {vehicles.map((v) => (
+                <option key={v.id} value={v.id}>{v.name}</option>
+              ))}
+            </Select>
+          </Field>
+        ) : null}
         <Field label="Day name" htmlFor="rt-name" hint="Shown on the rep's phone">
           <Input id="rt-name" value={form.name} onChange={(e) => set("name", e.target.value)} placeholder="Nairobi Central — Tuesday" />
         </Field>

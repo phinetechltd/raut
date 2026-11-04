@@ -32,6 +32,12 @@
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher"
         android:networkSecurityConfig="@xml/network_security_config">
+        <!-- Google Maps SDK key, injected from --dart-define=GOOGLE_MAPS_ANDROID_KEY
+             by build.gradle.kts. Empty when no key was supplied; the app then
+             draws OpenStreetMap instead. -->
+        <meta-data
+            android:name="com.google.android.geo.API_KEY"
+            android:value="${GOOGLE_MAPS_ANDROID_KEY}" />
         <activity
             android:name=".MainActivity"
             android:exported="true"
@@ -59,6 +65,15 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Module 08: the breadcrumb trail runs inside geolocator's foreground
+             service so it survives the screen locking and the app being swiped
+             away. Declared here as well as in the plugin so the service type is
+             pinned to "location", which Android 14 requires to start it. -->
+        <service
+            android:name="com.baseflow.geolocator.GeolocatorLocationService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="location" />
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

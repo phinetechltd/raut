@@ -1,13 +1,16 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/auth_service.dart';
+import '../core/outbox.dart';
 import '../core/map_links.dart';
 import '../core/sync_service.dart';
 import '../data/field_repository.dart';
 import '../models/models.dart';
 import '../theme.dart';
+import '../widgets/raut_map.dart';
 import 'visit_screen.dart';
 
 /// Today's itinerary — the screen on proposal page 12.
@@ -150,6 +153,31 @@ class _RouteScreenState extends State<RouteScreen> {
                   done: done,
                   routingEnabled: session.routingEnabled,
                 ),
+                const SizedBox(height: 12),
+                // The day on a map, on the basemap the office chose. Stops are
+                // numbered in the order the optimiser issued them.
+                RautMap(
+                  provider: session.mapProvider,
+                  height: 200,
+                  points: [
+                    for (final entry in data.visits.asMap().entries)
+                      if (data.customers[entry.value.customerId]?.latitude != null &&
+                          data.customers[entry.value.customerId]?.longitude != null)
+                        RautMapPoint(
+                          id: entry.value.id,
+                          lat: data.customers[entry.value.customerId]!.latitude!,
+                          lng: data.customers[entry.value.customerId]!.longitude!,
+                          label: data.customers[entry.value.customerId]!.name,
+                          sequence: entry.key + 1,
+                          tone: entry.value.isDone
+                              ? RautMapTone.success
+                              : entry.value.isCheckedIn
+                                  ? RautMapTone.warning
+                                  : RautMapTone.neutral,
+                        ),
+                  ],
+                  path: [for (final v in data.visits) v.id],
+                ),
                 const SizedBox(height: 16),
                 ...data.visits.asMap().entries.map((entry) {
                   final visit = entry.value;
@@ -193,7 +221,13 @@ class _RouteData {
   final Map<String, Customer> customers;
 }
 
-class _RouteHeader extends StatelessWidget {
+/// Day header: route name, progress, and the odometer readings for the van.
+///
+/// Readings are queued through the outbox as `route.odometer` operations, so a
+/// rep can note the dash at a depot with no signal and it reaches the office
+/// on the next sync. What was entered is remembered on the handset per route,
+/// so the header shows it back even before the server has it.
+class _RouteHeader extends StatefulWidget {
   const _RouteHeader({
     required this.route,
     required this.total,
@@ -205,6 +239,136 @@ class _RouteHeader extends StatelessWidget {
   final int total;
   final int done;
   final bool routingEnabled;
+
+  @override
+  State<_RouteHeader> createState() => _RouteHeaderState();
+}
+
+class _RouteHeaderState extends State<_RouteHeader> {
+  int? _startKm;
+  int? _endKm;
+
+  FieldRoute? get route => widget.route;
+  int get total => widget.total;
+  int get done => widget.done;
+  bool get routingEnabled => widget.routingEnabled;
+
+  String _prefKey(String which) => 'raut.odometer.${route!.id}.$which';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadReadings();
+  }
+
+  @override
+  void didUpdateWidget(covariant _RouteHeader oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.route?.id != widget.route?.id) _loadReadings();
+  }
+
+  Future<void> _loadReadings() async {
+    if (route == null) return;
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    setState(() {
+      _startKm = prefs.getInt(_prefKey('start'));
+      _endKm = prefs.getInt(_prefKey('end'));
+    });
+  }
+
+  /// Asks for a reading and queues it. `finish` records the end-of-day value.
+  Future<void> _enterReading({required bool finish}) async {
+    final current = finish ? _endKm : _startKm;
+    final controller = TextEditingController(text: current?.toString() ?? '');
+    final value = await showDialog<int>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(finish ? 'Finishing odometer' : 'Starting odometer'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          keyboardType: TextInputType.number,
+          decoration: const InputDecoration(
+            labelText: 'Reading on the dash (km)',
+            hintText: 'e.g. 84210',
+          ),
+          onSubmitted: (_) => Navigator.of(ctx).pop(int.tryParse(controller.text.trim())),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.of(ctx).pop(), child: const Text('Cancel')),
+          FilledButton(
+            onPressed: () => Navigator.of(ctx).pop(int.tryParse(controller.text.trim())),
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (value == null || value < 0 || !mounted || route == null) return;
+
+    if (finish && _startKm != null && value < _startKm!) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('The finishing reading cannot be below the starting one.')),
+      );
+      return;
+    }
+
+    await context.read<Outbox>().enqueue('route.odometer', {
+      'routeId': route!.id,
+      if (finish) 'odometerEndKm': value else 'odometerStartKm': value,
+    });
+
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_prefKey(finish ? 'end' : 'start'), value);
+    if (!mounted) return;
+    setState(() {
+      if (finish) {
+        _endKm = value;
+      } else {
+        _startKm = value;
+      }
+    });
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          finish ? 'Finishing reading saved — sends on the next sync.' : 'Starting reading saved — sends on the next sync.',
+        ),
+      ),
+    );
+  }
+
+  Widget _odometerRow(BuildContext context) {
+    final muted = TextStyle(fontSize: 12, color: Colors.grey.shade600);
+    final driven = (_startKm != null && _endKm != null) ? _endKm! - _startKm! : null;
+    return Padding(
+      padding: const EdgeInsets.only(top: 12),
+      child: Row(
+        children: [
+          Icon(Icons.speed, size: 18, color: Colors.grey.shade600),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              _startKm == null && _endKm == null
+                  ? 'Odometer not recorded'
+                  : 'Odometer ${_startKm ?? '…'} → ${_endKm ?? '…'} km'
+                      '${driven != null ? ' · $driven km driven' : ''}',
+              style: muted,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          TextButton(
+            onPressed: () => _enterReading(finish: false),
+            child: Text(_startKm == null ? 'Start' : 'Edit start'),
+          ),
+          TextButton(
+            onPressed: _startKm == null ? null : () => _enterReading(finish: true),
+            child: Text(_endKm == null ? 'Finish' : 'Edit finish'),
+          ),
+        ],
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -256,6 +420,7 @@ class _RouteHeader extends StatelessWidget {
                   ),
               ],
             ),
+            if (route != null && routingEnabled) _odometerRow(context),
           ],
         ),
       ),

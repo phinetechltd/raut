@@ -1,7 +1,17 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 
-import { Money, SectionHeading, StatCard, StatusBadge } from "@/components/ui";
+import {
+  CellStack,
+  DataTable,
+  FilterBar,
+  FilterSearch,
+  Money,
+  SectionHeading,
+  StatCard,
+  StatusBadge,
+  type Column,
+} from "@/components/ui";
 import { db } from "@/lib/db";
 import {
   CORE_PLATFORM_PRICE_CENTS,
@@ -11,6 +21,7 @@ import {
 } from "@/lib/modules";
 import { maskKey } from "@/lib/maps";
 import { ROLE_LABELS, type Role } from "@/lib/rbac";
+import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
 import { daysAgo, tenantDashboard } from "@/server/analytics";
 import { mapConfigFor, platformMapDefaults, readStoredMapSettings } from "@/server/maps";
 
@@ -19,30 +30,59 @@ import { ModuleToggle, StatusControl } from "./module-toggle";
 
 export const dynamic = "force-dynamic";
 
+const USR_SORT: Record<string, string> = {
+  name: "name",
+  role: "role",
+  status: "status",
+  lastLogin: "lastLoginAt",
+  created: "createdAt",
+};
+const BR_SORT: Record<string, string> = { name: "name", code: "code", mapped: "latitude" };
+
 export default async function CompanyDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const { id } = await params;
+  const sp = await searchParams;
+  const path = `/admin/companies/${id}`;
+
+  const usrTs = tableState(sp, {
+    prefix: "usr",
+    allowed: Object.keys(USR_SORT),
+    defaultSort: "created",
+    defaultDir: "asc",
+    limit: 10,
+  });
+  const brTs = tableState(sp, {
+    prefix: "br",
+    allowed: Object.keys(BR_SORT),
+    defaultSort: "name",
+    defaultDir: "asc",
+    limit: 10,
+  });
 
   const company = await db.company.findUnique({
     where: { id },
     include: {
       modules: true,
-      branches: true,
-      users: {
-        select: {
-          id: true, name: true, email: true, role: true,
-          status: true, lastLoginAt: true,
-        },
-        orderBy: { createdAt: "asc" },
-      },
-      _count: { select: { customers: true, products: true, invoices: true, visits: true } },
+      _count: { select: { customers: true, products: true, invoices: true, visits: true, users: true, branches: true } },
     },
   });
 
   if (!company) notFound();
+
+  const userWhere = {
+    companyId: company.id,
+    ...(sp.usr_q ? { OR: [{ name: { contains: sp.usr_q } }, { email: { contains: sp.usr_q } }] } : {}),
+  };
+  const branchWhere = {
+    companyId: company.id,
+    ...(sp.br_q ? { OR: [{ name: { contains: sp.br_q } }, { code: { contains: sp.br_q } }] } : {}),
+  };
 
   const enabledKeys = new Set(company.modules.filter((m) => m.enabled).map((m) => m.moduleKey));
   const moduleValue = company.modules
@@ -52,12 +92,77 @@ export default async function CompanyDetailPage({
   // Cross-tenant read, permitted because the layout restricts this route to
   // SUPER_ADMIN. Shown so the operator can see whether a tenant is actually
   // using what they bought.
-  const [metrics, mapStored, mapEffective] = await Promise.all([
+  const [metrics, mapStored, mapEffective, users, userCount, branches, branchCount] = await Promise.all([
     tenantDashboard(company.id, { from: daysAgo(29), to: new Date() }),
     readStoredMapSettings(company.id),
     mapConfigFor(company.id),
+    db.user.findMany({
+      where: userWhere,
+      select: { id: true, name: true, email: true, role: true, status: true, lastLoginAt: true },
+      orderBy: { [USR_SORT[usrTs.sort ?? "created"]]: usrTs.dir } as Record<string, "asc" | "desc">,
+      take: usrTs.limit,
+      skip: (usrTs.page - 1) * usrTs.limit,
+    }),
+    db.user.count({ where: userWhere }),
+    db.branch.findMany({
+      where: branchWhere,
+      orderBy: { [BR_SORT[brTs.sort ?? "name"]]: brTs.dir } as Record<string, "asc" | "desc">,
+      take: brTs.limit,
+      skip: (brTs.page - 1) * brTs.limit,
+    }),
+    db.branch.count({ where: branchWhere }),
   ]);
   const mapPlatform = platformMapDefaults();
+
+  const usrSortHrefFor = (key: string) => {
+    const next = toggleSort(usrTs, key);
+    return tableHref(path, sp, { usr_sort: next.sort, usr_dir: next.dir }, "usr");
+  };
+  const brSortHrefFor = (key: string) => {
+    const next = toggleSort(brTs, key);
+    return tableHref(path, sp, { br_sort: next.sort, br_dir: next.dir }, "br");
+  };
+
+  type UserRow = (typeof users)[number];
+  const userColumns: Array<Column<UserRow>> = [
+    {
+      key: "name",
+      header: "Name",
+      sortKey: "name",
+      cell: (u) => <CellStack primary={<span className="font-medium">{u.name}</span>} secondary={u.email} />,
+    },
+    { key: "role", header: "Role", sortKey: "role", cell: (u) => <span className="text-xs">{ROLE_LABELS[u.role as Role] ?? u.role}</span> },
+    { key: "status", header: "Status", sortKey: "status", cell: (u) => <StatusBadge status={u.status} /> },
+    {
+      key: "lastLogin",
+      header: "Last login",
+      hideBelow: "sm",
+      sortKey: "lastLogin",
+      cell: (u) => (
+        <span className="text-content-muted text-xs">
+          {u.lastLoginAt ? u.lastLoginAt.toLocaleDateString("en-KE") : "Never"}
+        </span>
+      ),
+    },
+  ];
+
+  type BranchRow = (typeof branches)[number];
+  const branchColumns: Array<Column<BranchRow>> = [
+    { key: "name", header: "Branch", sortKey: "name", cell: (b) => <span className="font-medium">{b.name}</span> },
+    { key: "code", header: "Code", sortKey: "code", cell: (b) => <span className="text-content-muted text-xs">{b.code}</span> },
+    {
+      key: "mapped",
+      header: "Mapped",
+      align: "right",
+      sortKey: "mapped",
+      cell: (b) =>
+        b.latitude != null ? (
+          <span className="badge bg-success-bg text-success border-success-border">yes</span>
+        ) : (
+          <span className="text-content-muted text-xs">no pin</span>
+        ),
+    },
+  ];
 
   return (
     <div className="space-y-8">
@@ -86,9 +191,9 @@ export default async function CompanyDetailPage({
         />
         <StatCard
           label="Seats"
-          value={`${company.users.length} / ${company.seatLimit}`}
+          value={`${company._count.users} / ${company.seatLimit}`}
           hint="Users against licence"
-          tone={company.users.length >= company.seatLimit ? "warning" : "neutral"}
+          tone={company._count.users >= company.seatLimit ? "warning" : "neutral"}
         />
         <StatCard
           label="30-day sales"
@@ -151,69 +256,52 @@ export default async function CompanyDetailPage({
 
       <div className="grid gap-6 lg:grid-cols-2">
         <div>
-          <SectionHeading title="Users" description={`${company.users.length} accounts`} />
-          <div className="scroll-x rounded-lg border border-border bg-surface shadow-sm">
-            <table className="w-full border-collapse text-base">
-              <thead>
-                <tr>
-                  <th>Name</th>
-                  <th>Role</th>
-                  <th>Status</th>
-                  <th>Last login</th>
-                </tr>
-              </thead>
-              <tbody>
-                {company.users.map((u) => (
-                  <tr key={u.id}>
-                    <td>
-                      <p className="font-medium">{u.name}</p>
-                      <p className="text-content-muted text-xs">{u.email}</p>
-                    </td>
-                    <td className="text-xs">{ROLE_LABELS[u.role as Role] ?? u.role}</td>
-                    <td>
-                      <StatusBadge status={u.status} />
-                    </td>
-                    <td className="text-content-muted text-xs">
-                      {u.lastLoginAt
-                        ? u.lastLoginAt.toLocaleDateString("en-KE")
-                        : "Never"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <SectionHeading title="Users" description={`${userCount} accounts`} />
+          <FilterBar action={path} preserve={preserved(sp, ["usr_q", "usr_page"])}>
+            <FilterSearch name="usr_q" value={sp.usr_q} placeholder="Search name, email…" />
+          </FilterBar>
+          <DataTable
+            columns={userColumns}
+            rows={users}
+            getRowKey={(u) => u.id}
+            caption="Tenant users"
+            dense
+            sort={{ key: usrTs.sort, dir: usrTs.dir }}
+            sortHrefFor={usrSortHrefFor}
+            pagination={{
+              page: usrTs.page,
+              pages: Math.max(1, Math.ceil(userCount / usrTs.limit)),
+              total: userCount,
+              limit: usrTs.limit,
+              hrefFor: (p) => tableHref(path, sp, { usr_page: p }),
+            }}
+            empty={{ title: sp.usr_q ? "No users match" : "No users yet" }}
+          />
         </div>
 
         <div className="space-y-6">
           <div>
-            <SectionHeading title="Branches" description={`${company.branches.length} locations`} />
-            <div className="scroll-x rounded-lg border border-border bg-surface shadow-sm">
-              <table className="w-full border-collapse text-base">
-                <thead>
-                  <tr>
-                    <th>Branch</th>
-                    <th>Code</th>
-                    <th>Mapped</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {company.branches.map((b) => (
-                    <tr key={b.id}>
-                      <td className="font-medium">{b.name}</td>
-                      <td className="text-content-text-content-muted">{b.code}</td>
-                      <td>
-                        {b.latitude != null ? (
-                          <span className="inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium bg-success-bg text-success">yes</span>
-                        ) : (
-                          <span className="text-content-muted text-xs">no pin</span>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <SectionHeading title="Branches" description={`${branchCount} locations`} />
+            <FilterBar action={path} preserve={preserved(sp, ["br_q", "br_page"])}>
+              <FilterSearch name="br_q" value={sp.br_q} placeholder="Search branch, code…" />
+            </FilterBar>
+            <DataTable
+              columns={branchColumns}
+              rows={branches}
+              getRowKey={(b) => b.id}
+              caption="Tenant branches"
+              dense
+              sort={{ key: brTs.sort, dir: brTs.dir }}
+              sortHrefFor={brSortHrefFor}
+              pagination={{
+                page: brTs.page,
+                pages: Math.max(1, Math.ceil(branchCount / brTs.limit)),
+                total: branchCount,
+                limit: brTs.limit,
+                hrefFor: (p) => tableHref(path, sp, { br_page: p }),
+              }}
+              empty={{ title: sp.br_q ? "No branches match" : "No branches yet" }}
+            />
           </div>
 
           <div className="rounded-lg border border-border bg-surface p-5 shadow-sm">

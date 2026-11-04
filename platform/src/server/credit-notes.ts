@@ -2,10 +2,11 @@ import "server-only";
 
 import { badRequest, conflict, notFound } from "@/lib/api";
 import { db } from "@/lib/db";
-import { creditLineAmounts } from "@/lib/money";
+import { creditLineAmounts, deriveInvoiceStatus } from "@/lib/money";
 import { nextNumber } from "@/lib/numbering";
 import { returnFromSale } from "./inventory";
 import { postCreditNote } from "./posting";
+import { recomputeCustomerBalance } from "./sales";
 
 /**
  * Credit notes.
@@ -166,12 +167,6 @@ export async function createCreditNote(input: CreateCreditNoteInput) {
         },
       });
 
-      // The customer owes less.
-      await tx.customer.update({
-        where: { id: invoice.customerId },
-        data: { balanceCents: { decrement: totalCents } },
-      });
-
       if (input.restock ?? true) {
         await returnFromSale(tx, {
           companyId: input.companyId,
@@ -207,7 +202,28 @@ export async function createCreditNote(input: CreateCreditNoteInput) {
           where: { id: invoice.id },
           data: { status: "CANCELLED" },
         });
+      } else {
+        // A part-credited invoice may now be settled: three-quarters paid and
+        // the last quarter returned leaves nothing owed, and it should say so.
+        const creditedCents =
+          priorLines.reduce((n, l) => n + l.lineTotalCents, 0) + totalCents;
+        await tx.invoice.update({
+          where: { id: invoice.id },
+          data: {
+            status: deriveInvoiceStatus({
+              totalCents: invoice.totalCents,
+              paidCents: invoice.paidCents,
+              creditedCents,
+              dueDate: invoice.dueDate,
+              current: invoice.status,
+            }),
+          },
+        });
       }
+
+      // The customer owes less. Rebuilt from the documents rather than
+      // decremented, so a replayed note cannot take the credit off twice.
+      await recomputeCustomerBalance(tx, invoice.customerId);
 
       return note;
     },

@@ -587,20 +587,58 @@ async function main() {
   });
   console.log(`✓ ${invoiceSeq - 1} invoices, ${paymentSeq - 1} payments`);
 
-  // Recompute customer balances from the ledger rather than tracking them
-  // through the loop — this is also a check that the derived field agrees.
+  // Recompute customer balances from the documents that define them — the
+  // same invariant `recomputeCustomerBalance` and check-consistency.mjs use:
+  // every non-draft invoice (cancelled ones included; their credit note
+  // offsets them) less every payment and every live credit note. The seed
+  // must never disagree with the server about what a customer owes.
   for (const customer of customers) {
-    const open = await db.invoice.findMany({
-      where: { customerId: customer.id, status: { in: ["ISSUED", "PARTIALLY_PAID", "OVERDUE"] } },
-      select: { totalCents: true, paidCents: true },
-    });
+    const [invoiced, paid, credited] = await Promise.all([
+      db.invoice.aggregate({
+        where: { customerId: customer.id, status: { not: "DRAFT" } },
+        _sum: { totalCents: true },
+      }),
+      db.payment.aggregate({ where: { customerId: customer.id }, _sum: { amountCents: true } }),
+      db.creditNote.aggregate({
+        where: { customerId: customer.id, status: { not: "CANCELLED" } },
+        _sum: { totalCents: true },
+      }),
+    ]);
     await db.customer.update({
       where: { id: customer.id },
-      data: { balanceCents: open.reduce((s, i) => s + (i.totalCents - i.paidCents), 0) },
+      data: {
+        balanceCents:
+          (invoiced._sum.totalCents ?? 0) -
+          (paid._sum.amountCents ?? 0) -
+          (credited._sum.totalCents ?? 0),
+      },
     });
   }
 
+  // ── vehicles (Module 07 · vehicle tracking) ─────────────────────────
+  // Two vans: James's Nairobi Hiace (the same KDG 445J his van stock location
+  // is named after) goes out on today's route below; Brian's Coast pick-up is
+  // his usual vehicle so his routes default to it.
+  const [vehicleJames] = await Promise.all([
+    db.vehicle.create({
+      data: {
+        companyId: tari.id, branchId: nairobiBranch.id, plate: "KDG 445J",
+        make: "Toyota", model: "Hiace", type: "VAN", defaultRepId: repJames.id,
+        odometerKm: 84_210,
+      },
+    }),
+    db.vehicle.create({
+      data: {
+        companyId: tari.id, branchId: mombasaBranch.id, plate: "KCY 456B",
+        make: "Isuzu", model: "D-Max", type: "PICKUP", defaultRepId: repBrian.id,
+        odometerKm: 132_045,
+      },
+    }),
+  ]);
+
   // ── today's field operations (proposal p.9) ─────────────────────────
+  // Dated relative to the day the seed runs, so "today's route" is always
+  // today's — a seed re-run is what refreshes it.
   const today = new Date();
   today.setHours(0, 0, 0, 0);
 
@@ -608,10 +646,11 @@ async function main() {
 
   const route = await db.route.create({
     data: {
-      companyId: tari.id, repId: repJames.id, territoryId: nboT.id,
+      companyId: tari.id, repId: repJames.id, territoryId: nboT.id, vehicleId: vehicleJames.id,
       name: "Today's Route — Nairobi Central", routeDate: today, status: "ACTIVE",
       startLat: nairobiBranch.latitude, startLng: nairobiBranch.longitude,
       totalDistanceM: 48_200, estimatedMin: 111, startedAt: new Date(today.getTime() + 8 * 3_600_000),
+      odometerStartKm: 84_210,
     },
   });
 

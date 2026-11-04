@@ -109,8 +109,12 @@ async function reconcile(companyId: string, name: string) {
     where: { companyId },
     select: { type: true, quantity: true, unitCostCents: true },
   });
+  // PURCHASE movements are excluded here because their value is added below
+  // from the posted goods receipts, which is also where the ledger books them.
+  // Counting both doubled every purchase and reported a shortfall that was
+  // never there. Transfers between the company's own locations change no value.
   const valued = movements
-    .filter((m) => !m.type.startsWith("TRANSFER"))
+    .filter((m) => !m.type.startsWith("TRANSFER") && m.type !== "PURCHASE")
     .reduce((n, m) => n + m.quantity * m.unitCostCents, 0);
 
   const receipts = await db.goodsReceipt.findMany({

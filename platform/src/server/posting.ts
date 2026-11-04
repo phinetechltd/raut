@@ -65,6 +65,12 @@ export async function postInvoice(
   },
   userId?: string | null,
 ) {
+  // A zero-value invoice — a free sample, a fully discounted line — has no
+  // receivable, no revenue and no VAT. postEntry would reject the empty entry
+  // and roll back a perfectly valid sale, so it is skipped the way a zero credit
+  // note is.
+  if (invoice.totalCents === 0) return null;
+
   const acc = await systemAccounts(
     invoice.companyId,
     ["ACCOUNTS_RECEIVABLE", "SALES", "VAT_OUTPUT"],

@@ -116,10 +116,122 @@ export const STOCK_MOVEMENTS = {
   ADJUSTMENT_OUT: "16",
 } as const;
 
-/** Maps a Raut tax rate onto the eTIMS taxation type. */
-export function taxTypeForRate(rateBp: number): TaxTypeCode {
+/**
+ * Maps a Raut tax rate onto the eTIMS taxation type.
+ *
+ * A rate of zero is ambiguous: KRA distinguishes a **zero-rated** supply (C,
+ * VAT at 0%, input tax reclaimable) from an **exempt** one (A, outside VAT
+ * altogether), and the two land on different lines of the return. The rate
+ * alone cannot tell them apart, so a product may carry an explicit
+ * `etimsTaxTypeCode` which wins over the rate whenever it is a known code.
+ * Without one, zero falls to C — the common case for a distributor's
+ * zero-rated staples — and the settings console flags the choice.
+ *
+ * The same function serves item registration and every sale line, so a product
+ * cannot be registered under one type and sold under another.
+ */
+export function taxTypeForRate(rateBp: number, override?: string | null): TaxTypeCode {
+  if (override && isTaxTypeCode(override)) return override;
   if (rateBp >= 1600) return "B";
   if (rateBp >= 800) return "E";
   return "C";
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+export function isTaxTypeCode(code: unknown): code is TaxTypeCode {
+  return typeof code === "string" && Object.hasOwn(TAX_TYPES, code);
+}
+
+export function isItemTypeCode(code: unknown): code is keyof typeof ITEM_TYPES {
+  return typeof code === "string" && Object.hasOwn(ITEM_TYPES, code);
+}
+
+/**
+ * An item classification code.
+ *
+ * The table above is a starting set, not KRA's whole list, which runs to
+ * thousands of UNSPSC-style codes. A company that has classified its stock
+ * properly must be able to store those, so any eight-digit code is accepted on
+ * a product; the *defaults* in settings are restricted to the table, because
+ * they are picked from it.
+ */
+export function isItemClassCode(code: unknown, opts?: { tableOnly?: boolean }): boolean {
+  if (typeof code !== "string") return false;
+  if (Object.hasOwn(ITEM_CLASSES, code)) return true;
+  return !opts?.tableOnly && /^\d{8}$/.test(code);
+}
+
+export function isQuantityUnit(code: unknown): code is keyof typeof QUANTITY_UNITS {
+  return typeof code === "string" && Object.hasOwn(QUANTITY_UNITS, code);
+}
+
+export function isPackageUnit(code: unknown): code is keyof typeof PACKAGE_UNITS {
+  return typeof code === "string" && Object.hasOwn(PACKAGE_UNITS, code);
+}
+
+/**
+ * A KRA PIN: A or P, nine digits, a check letter. `P051234567X`.
+ *
+ * Checked wherever a PIN is about to be put on a tax document — the stored
+ * Digitax TIN, the company's own PIN, a customer's PIN — because a malformed
+ * one is refused by KRA with a message that does not say which PIN it meant.
+ */
+export const KRA_PIN_RE = /^[AP]\d{9}[A-Z]$/;
+
+export function isValidKraPin(pin: unknown): pin is string {
+  return typeof pin === "string" && KRA_PIN_RE.test(pin.trim());
+}
+
+// ---------------------------------------------------------------------------
+// Dates and amounts on the wire
+// ---------------------------------------------------------------------------
+
+/**
+ * The calendar date in Nairobi, as `YYYY-MM-DD`.
+ *
+ * `issueDate` is stored as an instant. A sale rung up at 01:00 on the 2nd in
+ * Nairobi is 22:00 on the 1st in UTC, and `toISOString().slice(0, 10)` filed it
+ * on the wrong day — a date KRA compares against the day the invoice was
+ * issued. East Africa Time is a fixed UTC+3 with no daylight saving, so the
+ * offset is applied directly rather than through a locale formatter.
+ */
+export function nairobiDate(instant: Date): string {
+  return new Date(instant.getTime() + 3 * 60 * 60_000).toISOString().slice(0, 10);
+}
+
+/** Cents to a two-decimal amount, as a number: 12345 → 123.45. */
+export function toAmount(cents: number): number {
+  return Math.round(cents) / 100;
+}
+
+/**
+ * A unit price that multiplies back to the line total.
+ *
+ * The line total is authoritative; eTIMS checks `quantity × unit_price` against
+ * `total_amount` and rejects a line that does not add up. Dividing the total
+ * by the quantity and rounding to two places does not always survive the
+ * round trip — 3 units for KES 1.00 is 0.33 each, which is 0.99 — so the price
+ * is given as many decimals as it needs, up to six, for the product to round
+ * back to the total to the cent. `reconciles` is false in the rare case even
+ * that is not enough; the caller then relies on the explicit taxable and tax
+ * amounts it sends alongside.
+ */
+export function reconcileUnitPrice(
+  quantity: number,
+  totalCents: number,
+): { unitPrice: number; reconciles: boolean } {
+  if (quantity <= 0) return { unitPrice: 0, reconciles: totalCents === 0 };
+  const total = toAmount(totalCents);
+  for (let decimals = 2; decimals <= 6; decimals++) {
+    const factor = 10 ** decimals;
+    const unitPrice = Math.round((total / quantity) * factor) / factor;
+    if (Math.round(unitPrice * quantity * 100) === Math.round(totalCents)) {
+      return { unitPrice, reconciles: true };
+    }
+  }
+  return { unitPrice: Math.round((total / quantity) * 100) / 100, reconciles: false };
 }
 

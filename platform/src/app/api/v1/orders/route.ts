@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { handler, ok, pagination, paginationMeta, parseBody, withIdempotency } from "@/lib/api";
+import { handler, notFound, ok, pagination, paginationMeta, parseBody, withIdempotency } from "@/lib/api";
 import { auditAs } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { companyIdOf, scope } from "@/lib/tenant";
@@ -69,10 +69,14 @@ export const POST = handler(
     const companyId = companyIdOf(principal);
     const input = await parseBody(request, schema);
 
+    // A plain Error here became a 500; the service layer now 404s itself, but
+    // checking first keeps the idempotency key from being consumed by a
+    // request that could never succeed.
     const customer = await db.customer.findFirst({
       where: { id: input.customerId, companyId },
+      select: { id: true },
     });
-    if (!customer) throw new Error("Customer not found");
+    if (!customer) throw notFound("Customer not found");
 
     const { data: order, replayed } = await withIdempotency(
       principal,

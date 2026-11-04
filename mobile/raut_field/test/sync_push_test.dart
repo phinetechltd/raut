@@ -67,12 +67,13 @@ void main() {
 
   SyncService serviceFor(FakeApi api) => SyncService(api: api, db: db, outbox: outbox);
 
-  Future<void> bufferPings(int n) async {
+  Future<void> bufferPings(int n, {int? batteryPct}) async {
     final start = DateTime.utc(2026, 9, 19, 6);
     for (var i = 0; i < n; i++) {
       await db.insert('location_buffer', {
         'latitude': -1.28,
         'longitude': 36.82,
+        if (batteryPct != null) 'batteryPct': batteryPct,
         'recordedAt': start.add(Duration(minutes: i)).toIso8601String(),
       });
     }
@@ -131,6 +132,54 @@ void main() {
       await serviceFor(FakeApi((op) => refused(op))).sync();
 
       expect(await db.count('location_buffer'), 0);
+    });
+
+    test('the battery level rides along with each breadcrumb', () async {
+      await bufferPings(3, batteryPct: 42);
+      final api = FakeApi((op) => applied(op));
+
+      await serviceFor(api).sync();
+
+      final batch = api.pushed.singleWhere((op) => op['type'] == 'location.batch');
+      final pings = ((batch['payload'] as Map)['pings'] as List).cast<Map<String, dynamic>>();
+      expect(pings, hasLength(3));
+      expect(pings.every((p) => p['batteryPct'] == 42), isTrue);
+    });
+
+    test('an unknown battery level is omitted, not sent as null', () async {
+      await bufferPings(1);
+      final api = FakeApi((op) => applied(op));
+
+      await serviceFor(api).sync();
+
+      final batch = api.pushed.singleWhere((op) => op['type'] == 'location.batch');
+      final ping = (((batch['payload'] as Map)['pings'] as List).single) as Map;
+      expect(ping.containsKey('batteryPct'), isFalse);
+    });
+  });
+
+  group('Odometer readings', () {
+    test('are queued as route.odometer and drained like any other write', () async {
+      await outbox.enqueue('route.odometer', {'routeId': 'r1', 'odometerStartKm': 84210});
+      final api = FakeApi((op) => applied(op));
+
+      await serviceFor(api).sync();
+
+      final op = api.pushed.singleWhere((o) => o['type'] == 'route.odometer');
+      expect(op['payload'], {'routeId': 'r1', 'odometerStartKm': 84210});
+      expect(op['uuid'], isNotEmpty, reason: 'the server dedupes on the uuid');
+      expect(await outbox.pendingCount(), 0);
+    });
+
+    test('a reading the server could not apply is retried, and a refused one is shown as stuck', () async {
+      await outbox.enqueue('route.odometer', {'routeId': 'gone', 'odometerEndKm': 84300});
+      await serviceFor(FakeApi((op) => broken(op))).sync();
+      expect((await outbox.pending()).single.attempts, 1);
+      expect(await outbox.stuckCount(), 0);
+
+      await serviceFor(FakeApi((op) => refused(op))).sync();
+      expect(await outbox.stuckCount(), 1);
+      expect(await outbox.pendingCount(), 1, reason: 'the reading is kept for the rep to see');
     });
   });
 }

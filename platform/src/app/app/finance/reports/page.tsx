@@ -4,6 +4,9 @@ import {
   ButtonLink,
   Callout,
   Card,
+  DataTable,
+  FilterBar,
+  FilterSearch,
   FilterTabs,
   ModuleLocked,
   Money,
@@ -11,9 +14,11 @@ import {
   SectionHeading,
   StatCard,
   StatGrid,
+  type Column,
 } from "@/components/ui";
 import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
+import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
 import {
   balanceSheet,
   cashFlow,
@@ -107,7 +112,7 @@ const pct = (bp: number) => `${(bp / 100).toFixed(1)}%`;
 export default async function FinanceReportsPage({
   searchParams,
 }: {
-  searchParams: Promise<{ report?: string; month?: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
 }) {
   const { companyId, principal } = await requireTenant();
   if (!principal.enabledModules.has("FINANCE")) return <ModuleLocked module="FINANCE" />;
@@ -179,7 +184,7 @@ export default async function FinanceReportsPage({
       {report === "balance" && <BalanceSheetView companyId={companyId} asOf={period.to} />}
       {report === "cash" && <CashFlowView companyId={companyId} period={period} />}
       {report === "vat" && <VatView companyId={companyId} period={period} />}
-      {report === "stock" && <StockValuationView companyId={companyId} />}
+      {report === "stock" && <StockValuationView companyId={companyId} sp={sp} />}
     </div>
   );
 }
@@ -359,15 +364,73 @@ async function VatView({ companyId, period }: { companyId: string; period: Perio
   );
 }
 
-async function StockValuationView({ companyId }: { companyId: string }) {
+type ValuationRow = Awaited<ReturnType<typeof stockValuation>>["rows"][number];
+
+const VAL_SORT: Record<string, (r: ValuationRow) => string | number> = {
+  sku: (r) => r.sku.toLowerCase(),
+  product: (r) => r.name.toLowerCase(),
+  qty: (r) => r.quantity,
+  cost: (r) => r.unitCostCents,
+  value: (r) => r.valueCents,
+};
+
+const VAL_PATH = "/app/finance/reports";
+
+async function StockValuationView({
+  companyId,
+  sp,
+}: {
+  companyId: string;
+  sp: Record<string, string | undefined>;
+}) {
   const r = await stockValuation(companyId);
 
-  const byLocation = new Map<string, typeof r.rows>();
-  for (const row of r.rows) {
+  // One search box narrows every location's table at once; sort and page are
+  // per table (val0_, val1_, …) so one location can be re-ordered on its own.
+  const query = (sp.val_q ?? "").trim().toLowerCase();
+  const matched = query
+    ? r.rows.filter((row) => row.name.toLowerCase().includes(query) || row.sku.toLowerCase().includes(query))
+    : r.rows;
+
+  const byLocation = new Map<string, ValuationRow[]>();
+  for (const row of matched) {
     const list = byLocation.get(row.locationName) ?? [];
     list.push(row);
     byLocation.set(row.locationName, list);
   }
+
+  const ownedKeys = ["val_q", ...Object.keys(sp).filter((k) => /^val\d+_page$/.test(k))];
+
+  const valuationColumns = (): Array<Column<ValuationRow>> => [
+    {
+      key: "sku",
+      header: "SKU",
+      sortKey: "sku",
+      cell: (row) => <span className="tabular text-content-muted">{row.sku}</span>,
+    },
+    { key: "product", header: "Product", sortKey: "product", cell: (row) => row.name },
+    { key: "qty", header: "Qty", align: "right", numeric: true, sortKey: "qty", cell: (row) => row.quantity },
+    {
+      key: "cost",
+      header: "Unit cost",
+      align: "right",
+      numeric: true,
+      sortKey: "cost",
+      cell: (row) => <Money cents={row.unitCostCents} />,
+    },
+    {
+      key: "value",
+      header: "Value",
+      align: "right",
+      numeric: true,
+      sortKey: "value",
+      cell: (row) => (
+        <span className="font-medium">
+          <Money cents={row.valueCents} />
+        </span>
+      ),
+    },
+  ];
 
   return (
     <>
@@ -391,39 +454,71 @@ async function StockValuationView({ companyId }: { companyId: string }) {
         </Callout>
       )}
 
-      {[...byLocation.entries()].map(([location, rows]) => (
-        <Card key={location}>
-          <SectionHeading title={location} />
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left text-xs uppercase tracking-wide text-content-muted">
-                  <th className="py-2 pr-3 font-medium">SKU</th>
-                  <th className="py-2 pr-3 font-medium">Product</th>
-                  <th className="py-2 pr-3 text-right font-medium">Qty</th>
-                  <th className="py-2 pr-3 text-right font-medium">Unit cost</th>
-                  <th className="py-2 text-right font-medium">Value</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr key={row.productId} className="border-t border-border">
-                    <td className="py-2 pr-3 tabular text-content-muted">{row.sku}</td>
-                    <td className="py-2 pr-3">{row.name}</td>
-                    <td className="py-2 pr-3 text-right tabular">{row.quantity}</td>
-                    <td className="py-2 pr-3 text-right tabular">
-                      <Money cents={row.unitCostCents} />
-                    </td>
-                    <td className="py-2 text-right tabular font-medium">
-                      <Money cents={row.valueCents} />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+      <FilterBar action={VAL_PATH} preserve={preserved(sp, ownedKeys)}>
+        <FilterSearch name="val_q" value={sp.val_q} placeholder="Search product, SKU across locations…" />
+      </FilterBar>
+
+      {byLocation.size === 0 ? (
+        <Card>
+          <p className="text-content-muted text-sm">
+            {query ? "No stock lines match this search." : "No stock on hand."}
+          </p>
         </Card>
-      ))}
+      ) : null}
+
+      {[...byLocation.entries()].map(([location, rows], index) => {
+        const prefix = `val${index}`;
+        const ts = tableState(sp, {
+          prefix,
+          allowed: Object.keys(VAL_SORT),
+          defaultSort: "product",
+          defaultDir: "asc",
+          limit: 15,
+        });
+        const value = VAL_SORT[ts.sort ?? "product"];
+        const sorted = [...rows].sort((a, b) => {
+          const av = value(a);
+          const bv = value(b);
+          const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+          return ts.dir === "asc" ? cmp : -cmp;
+        });
+        const pages = Math.max(1, Math.ceil(sorted.length / ts.limit));
+        const page = Math.min(ts.page, pages);
+        const paged = sorted.slice((page - 1) * ts.limit, page * ts.limit);
+        const locationValue = rows.reduce((n, row) => n + row.valueCents, 0);
+
+        return (
+          <div key={location}>
+            <SectionHeading
+              title={location}
+              description={
+                <>
+                  {rows.length} line(s) · <Money cents={locationValue} />
+                </>
+              }
+            />
+            <DataTable
+              columns={valuationColumns()}
+              rows={paged}
+              getRowKey={(row) => row.productId}
+              caption={`Stock valuation at ${location}`}
+              dense
+              sort={{ key: ts.sort, dir: ts.dir }}
+              sortHrefFor={(key) => {
+                const next = toggleSort(ts, key);
+                return tableHref(VAL_PATH, sp, { [`${prefix}_sort`]: next.sort, [`${prefix}_dir`]: next.dir }, prefix);
+              }}
+              pagination={{
+                page,
+                pages,
+                total: sorted.length,
+                limit: ts.limit,
+                hrefFor: (p) => tableHref(VAL_PATH, sp, { [`${prefix}_page`]: p }),
+              }}
+            />
+          </div>
+        );
+      })}
     </>
   );
 }

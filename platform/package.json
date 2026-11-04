@@ -24,8 +24,10 @@
     "test:brand": "node scripts/check-brand.mjs",
     "test:contrast": "node scripts/check-contrast.mjs",
     "test:permissions": "node scripts/check-permissions.mjs",
+    "test:etims": "node scripts/smoke-etims.mjs --with-server",
     "test:encoding": "node scripts/check-encoding.mjs",
-    "verify": "npm run typecheck && npm run test:unit && npm run test:encoding && npm run test:contrast && npm run test:smoke && npm run test:pages && npm run test:brand && npm run test:permissions && npm run test:integration"
+    "test:consistency": "node scripts/check-consistency.mjs",
+    "verify": "npm run typecheck && npm run test:unit && npm run test:encoding && npm run test:contrast && npm run test:smoke && npm run test:pages && npm run test:brand && npm run test:permissions && npm run test:integration && npm run test:consistency"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts && npm run ledger:backfill"

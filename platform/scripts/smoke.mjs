@@ -141,10 +141,73 @@ async function main() {
     `${delta.json?.data?.counts?.customers} changed customers`,
   );
 
+  // ── vehicles & route planning ──────────────────────────────────────
+  // The route is planned here rather than borrowed from the seed: the seed's
+  // route is dated the day the seed ran, so on any later day "today's route"
+  // would be empty and every check below it would fail for the wrong reason.
+  console.log("\nVehicles & route planning");
+  const dispatcherLogin = await api("/auth/login", {
+    method: "POST",
+    body: { email: "admin@tarisolutions.co.ke", password: PASSWORD },
+  });
+  const dispatcherToken = dispatcherLogin.json?.data?.accessToken;
+  const repId = login.json?.data?.user?.id;
+  check("Dispatcher signs in", dispatcherLogin.status === 200 && typeof repId === "string");
+
+  const plate = `SMK ${Math.random().toString(36).slice(2, 5).toUpperCase()}${Math.floor(Math.random() * 900 + 100)}`;
+  const vehicleRes = await api("/vehicles", {
+    method: "POST",
+    token: dispatcherToken,
+    body: { plate: plate.toLowerCase(), make: "Toyota", model: "Hiace", type: "VAN", defaultRepId: repId },
+  });
+  const vehicle = vehicleRes.json?.data;
+  check("Vehicle created", vehicleRes.status === 201 && !!vehicle?.id, vehicleRes.json?.error?.message ?? "");
+  check("Plate is normalised to upper case", vehicle?.plate === plate, vehicle?.plate ?? "");
+
+  const dupPlate = await api("/vehicles", {
+    method: "POST",
+    token: dispatcherToken,
+    body: { plate },
+  });
+  check("Duplicate plate refused", dupPlate.status === 409, `HTTP ${dupPlate.status}`);
+
+  const vehicleSearch = await api(`/vehicles?q=${encodeURIComponent(plate.slice(0, 6))}&active=true`, {
+    token: dispatcherToken,
+  });
+  check(
+    "Vehicle found by plate search",
+    vehicleSearch.status === 200 && vehicleSearch.json?.data?.some((v) => v.id === vehicle?.id),
+  );
+  const repVehicles = await api("/vehicles", { token: repToken });
+  check("Rep can read the fleet", repVehicles.status === 200);
+  const repCreates = await api("/vehicles", { method: "POST", token: repToken, body: { plate: "NOPE 1" } });
+  check("Rep cannot add a vehicle", repCreates.status === 403, `HTTP ${repCreates.status}`);
+
+  const planned = await api("/routes", {
+    method: "POST",
+    token: dispatcherToken,
+    body: {
+      repId,
+      routeDate: new Date().toISOString(),
+      name: "Smoke route",
+      vehicleId: vehicle?.id,
+      createVisits: true,
+      serviceMinutes: 15,
+    },
+  });
+  const plannedRoute = planned.json?.data;
+  check(
+    "Route planned with the vehicle",
+    planned.status === 201 && plannedRoute?.vehicleId === vehicle?.id,
+    planned.json?.error?.message ?? `${plannedRoute?.stops?.length ?? 0} stops`,
+  );
+  check("Planned route carries the plate", plannedRoute?.vehicle?.plate === plate);
+
   // ── today's route ──────────────────────────────────────────────────
   console.log("\nField operations");
   const route = await api("/routes?today=true", { token: repToken });
   check("Today's route available", route.status === 200 && !!route.json?.data?.id);
+  check("Today's route is the one just planned, with its vehicle", route.json?.data?.vehicle?.plate === plate);
   const stops = route.json?.data?.stops ?? [];
   check("Route is sequenced", stops.length > 0, `${stops.length} stops`);
   check(
@@ -262,6 +325,138 @@ async function main() {
   );
   const replayOrder = replay.json?.data?.results?.find((r) => r.uuid === orderUuid);
   check("Replay resolves to the same order", replayOrder?.entityId === orderId);
+
+  // ── skip & re-route ────────────────────────────────────────────────
+  console.log("\nSmart re-routing");
+  const stopsBefore = plannedRoute?.stops ?? [];
+  const toSkip = stopsBefore.find((s) => s.sequence === 2) ?? stopsBefore[0];
+  const skipped = toSkip
+    ? await api(`/routes/${plannedRoute.id}/stops/${toSkip.id}`, {
+        method: "PATCH",
+        token: repToken,
+        body: { status: "SKIPPED", skipReason: "Shop closed for stock-take" },
+      })
+    : { status: 0, json: {} };
+  check("Rep skips a stop with a reason", skipped.status === 200 && skipped.json?.data?.status === "SKIPPED", skipped.json?.error?.message ?? "");
+  const missed = await api(`/visits?status=MISSED&customerId=${toSkip?.customerId}`, { token: repToken });
+  check(
+    "The skipped stop's visit is MISSED",
+    (missed.json?.data ?? []).some((v) => v.routeId === plannedRoute?.id),
+  );
+  const noDirectDone = await api(`/routes/${plannedRoute?.id}/stops/${toSkip?.id}`, {
+    method: "PATCH",
+    token: repToken,
+    body: { status: "DONE" },
+  });
+  check("A client cannot mark a stop DONE directly", noDirectDone.status === 422, `HTTP ${noDirectDone.status}`);
+
+  const nextPending = stopsBefore.find((s) => s.id !== toSkip?.id && s.status === "PENDING");
+  const resequenced = await api(`/routes/${plannedRoute?.id}/resequence`, {
+    method: "POST",
+    token: repToken,
+    body: nextPending?.customer
+      ? { latitude: nextPending.customer.latitude, longitude: nextPending.customer.longitude }
+      : {},
+  });
+  const rr = resequenced.json?.data;
+  check("Route re-sequenced from the rep's position", resequenced.status === 200 && Array.isArray(rr?.stops), resequenced.json?.error?.message ?? "");
+  check(
+    "Re-sequenced route is no longer than before",
+    rr?.totalDistanceM <= rr?.previousDistanceM,
+    `${rr?.previousDistanceM} m → ${rr?.totalDistanceM} m`,
+  );
+  check("Re-sequencing keeps every stop", rr?.stops?.length === stopsBefore.length);
+  check("Re-sequenced stops are numbered 1..n", (rr?.stops ?? []).every((s, i) => s.sequence === i + 1));
+  check("Skipped stop stays skipped", rr?.stops?.find((s) => s.id === toSkip?.id)?.status === "SKIPPED");
+  check("Skipping started the route", rr?.status === "ACTIVE");
+
+  // ── vehicle tracking ───────────────────────────────────────────────
+  console.log("\nVehicle tracking");
+  const origin = nextPending?.customer ?? mapped;
+  const t0 = Date.now() - 4 * 60_000;
+  const trail = Array.from({ length: 6 }, (_, i) => ({
+    latitude: origin.latitude + i * 0.0005,
+    longitude: origin.longitude + i * 0.0003,
+    accuracyM: 12,
+    speedMps: 8.3,
+    heading: 40,
+    batteryPct: 77,
+    isMoving: true,
+    recordedAt: new Date(t0 + i * 30_000).toISOString(),
+  }));
+  // A fix a kilometre wide: stored, but left out of the trail the console draws.
+  trail.push({
+    latitude: origin.latitude + 0.02,
+    longitude: origin.longitude,
+    accuracyM: 900,
+    speedMps: null,
+    heading: null,
+    batteryPct: 77,
+    isMoving: false,
+    recordedAt: new Date(t0 + 7 * 30_000).toISOString(),
+  });
+  const pingBatch = () => ({
+    deviceId,
+    operations: [
+      { uuid: uuid(), type: "location.batch", at: new Date().toISOString(), payload: { pings: trail } },
+    ],
+  });
+  const trailOf = async () =>
+    (await api(`/location/pings?userId=${repId}&routeId=${plannedRoute?.id}`, { token: dispatcherToken })).json?.data ?? [];
+
+  const trailBefore = (await trailOf()).length;
+  const push1 = await api("/sync/push", { method: "POST", token: repToken, body: pingBatch() });
+  check("Ping batch accepted", push1.json?.data?.summary?.applied === 1, JSON.stringify(push1.json?.data?.summary));
+  const trail1 = await trailOf();
+  check(
+    "Trail stored, noisy fix left out of the read",
+    trail1.length - trailBefore === 6,
+    `${trailBefore} → ${trail1.length}`,
+  );
+  const push2 = await api("/sync/push", { method: "POST", token: repToken, body: pingBatch() });
+  check("Resent batch accepted (new batch id)", push2.json?.data?.summary?.applied === 1);
+  const trail2 = await trailOf();
+  check("Resent batch adds no duplicate breadcrumbs", trail2.length === trail1.length, `${trail1.length} vs ${trail2.length}`);
+  const sample = trail2[trail2.length - 1];
+  check("Breadcrumbs are stamped with the route and vehicle", sample?.routeId === plannedRoute?.id && sample?.vehicleId === vehicle?.id);
+  check("Trail carries speed and accuracy", sample?.speedMps === 8.3 && sample?.accuracyM === 12);
+
+  const latest = await api("/location/latest", { token: dispatcherToken });
+  const me = latest.json?.data?.positions?.find((p) => p.userId === repId);
+  check("Live view lists the rep", latest.status === 200 && !!me);
+  check("Live view shows the plate", me?.vehicle?.plate === plate, me?.vehicle?.plate ?? "no vehicle");
+  check("Live fix is fresh", me?.tone === "success" && me?.stalenessS < 900, `${me?.stalenessS}s`);
+  check("Live view carries battery and speed", me?.batteryPct === 77 && me?.speedKmh === 30, `${me?.batteryPct}% ${me?.speedKmh} km/h`);
+  check("Live view carries route progress", me?.route?.id === plannedRoute?.id && me?.route?.skipped === 1);
+  const repFleet = await api("/location/latest", { token: repToken });
+  check("Rep is refused the fleet view", repFleet.status === 403, `HTTP ${repFleet.status}`);
+
+  const odometerOp = uuid();
+  const odo = await api("/sync/push", {
+    method: "POST",
+    token: repToken,
+    body: {
+      deviceId,
+      operations: [
+        { uuid: odometerOp, type: "route.odometer", at: new Date().toISOString(), payload: { routeId: plannedRoute?.id, odometerStartKm: 84_300 } },
+      ],
+    },
+  });
+  check("Odometer start reading accepted offline", odo.json?.data?.results?.[0]?.status === "applied", odo.json?.data?.results?.[0]?.error ?? "");
+  const odoEnd = await api(`/routes/${plannedRoute?.id}`, {
+    method: "PATCH",
+    token: dispatcherToken,
+    body: { odometerEndKm: 84_342 },
+  });
+  check("Odometer end reading recorded", odoEnd.status === 200 && odoEnd.json?.data?.odometerStartKm === 84_300 && odoEnd.json?.data?.odometerEndKm === 84_342);
+  const vehicleAfter = await api(`/vehicles/${vehicle?.id}`, { token: dispatcherToken });
+  check("Vehicle odometer moved forward", vehicleAfter.json?.data?.odometerKm === 84_342, `${vehicleAfter.json?.data?.odometerKm}`);
+  const badOdo = await api(`/routes/${plannedRoute?.id}`, { method: "PATCH", token: dispatcherToken, body: { odometerEndKm: 10 } });
+  check("An end reading below the start is refused", badOdo.status >= 400 && badOdo.status < 500, `HTTP ${badOdo.status}`);
+  const repSwapsVan = await api(`/routes/${plannedRoute?.id}`, { method: "PATCH", token: repToken, body: { vehicleId: null } });
+  check("Rep cannot change the vehicle on a route", repSwapsVan.status === 403, `HTTP ${repSwapsVan.status}`);
+  const retired = await api(`/vehicles/${vehicle?.id}`, { method: "PATCH", token: dispatcherToken, body: { active: false } });
+  check("Vehicle can be retired", retired.status === 200 && retired.json?.data?.active === false);
 
   // ── tenant visibility ──────────────────────────────────────────────
   console.log("\nBack-office visibility");

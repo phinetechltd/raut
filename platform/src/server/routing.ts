@@ -3,6 +3,8 @@ import "server-only";
 import { db } from "@/lib/db";
 import { optimiseRoute, type LatLng, type RoutePoint } from "@/lib/geo";
 
+import { recordActualDistance } from "./tracking";
+
 /**
  * Module 07 · Smart Routing.
  *
@@ -18,6 +20,8 @@ export interface BuildRouteInput {
   routeDate: Date;
   name?: string;
   territoryId?: string | null;
+  /** The van the rep drives this route in. Defaults to the rep's usual vehicle. */
+  vehicleId?: string | null;
   customerIds?: string[];
   /** Journey origin — usually the branch or the rep's depot. */
   start?: LatLng | null;
@@ -69,6 +73,8 @@ export async function buildRoute(input: BuildRouteInput) {
   const optimised = optimiseRoute(start, points);
   const legByCustomer = new Map(optimised.legs.map((l) => [l.id, l]));
 
+  const vehicleId = await resolveVehicle(input.companyId, input.repId, input.vehicleId);
+
   const serviceMinutes = input.serviceMinutes ?? 30;
   const startHour = input.startHour ?? 8;
 
@@ -88,6 +94,7 @@ export async function buildRoute(input: BuildRouteInput) {
         companyId: input.companyId,
         repId: input.repId,
         territoryId: input.territoryId ?? null,
+        vehicleId,
         name: label,
         routeDate: input.routeDate,
         status: "PLANNED",
@@ -139,9 +146,144 @@ export async function buildRoute(input: BuildRouteInput) {
         stops: { include: { customer: true }, orderBy: { sequence: "asc" } },
         rep: { select: { id: true, name: true } },
         territory: true,
+        vehicle: { select: { id: true, plate: true, make: true, model: true, type: true } },
       },
     });
   });
+}
+
+/**
+ * The vehicle a route goes out in. An explicit id must be an active vehicle
+ * of the same company — a handset or a crafted request naming another
+ * tenant's van is refused rather than linked. With no id, the rep's default
+ * vehicle is used when they have one.
+ */
+export async function resolveVehicle(
+  companyId: string,
+  repId: string,
+  vehicleId: string | null | undefined,
+): Promise<string | null> {
+  if (vehicleId) {
+    const vehicle = await db.vehicle.findFirst({
+      where: { id: vehicleId, companyId, active: true },
+      select: { id: true },
+    });
+    if (!vehicle) throw new Error("Vehicle not found or not active");
+    return vehicle.id;
+  }
+  const usual = await db.vehicle.findFirst({
+    where: { companyId, defaultRepId: repId, active: true },
+    select: { id: true },
+    orderBy: { updatedAt: "desc" },
+  });
+  return usual?.id ?? null;
+}
+
+/**
+ * Marks a stop SKIPPED with the reason, and the visit it drove MISSED. The
+ * stop keeps its sequence number — the plan is history — and the caller
+ * re-sequences what remains from where the rep actually is.
+ */
+export async function skipStop(input: {
+  routeId: string;
+  stopId: string;
+  companyId: string;
+  reason: string;
+  at?: Date;
+}) {
+  const stop = await db.routeStop.findFirst({
+    where: { id: input.stopId, routeId: input.routeId, route: { companyId: input.companyId } },
+    include: { route: { select: { status: true } } },
+  });
+  if (!stop) throw new Error("Stop not found");
+  if (stop.status === "DONE") throw new Error("A completed stop cannot be skipped");
+  if (stop.status === "SKIPPED") return stop;
+  if (stop.route.status === "COMPLETED" || stop.route.status === "CANCELLED") {
+    throw new Error("The route is already closed");
+  }
+
+  const at = input.at ?? new Date();
+
+  const updated = await db.$transaction(async (tx) => {
+    const skipped = await tx.routeStop.update({
+      where: { id: stop.id },
+      data: { status: "SKIPPED", skipReason: input.reason },
+    });
+
+    // The visit this stop scheduled is MISSED, not CANCELLED: the customer
+    // was due a call and did not get one, which is what the scorecard counts.
+    await tx.visit.updateMany({
+      where: {
+        routeId: input.routeId,
+        customerId: stop.customerId,
+        status: { in: ["SCHEDULED", "IN_PROGRESS"] },
+      },
+      data: { status: "MISSED", notes: `Skipped: ${input.reason}` },
+    });
+
+    await tx.route.updateMany({
+      where: { id: input.routeId, status: "PLANNED" },
+      data: { status: "ACTIVE", startedAt: at },
+    });
+
+    // Skipping the last outstanding stop closes the day like a check-out does.
+    const pending = await tx.routeStop.count({
+      where: { routeId: input.routeId, status: { in: ["PENDING", "ARRIVED"] } },
+    });
+    if (pending === 0) {
+      await tx.route.update({
+        where: { id: input.routeId },
+        data: { status: "COMPLETED", completedAt: at },
+      });
+    }
+
+    return { skipped, closed: pending === 0 };
+  });
+
+  if (updated.closed) await recordActualDistance(input.routeId).catch(() => undefined);
+  return updated.skipped;
+}
+
+/**
+ * Odometer readings off the dash, start and/or end of day. Reported by the
+ * handset (offline-safe through sync) or typed in on the console. The end
+ * reading also moves the vehicle's running odometer forward.
+ */
+export async function recordOdometer(input: {
+  routeId: string;
+  companyId: string;
+  odometerStartKm?: number | null;
+  odometerEndKm?: number | null;
+}) {
+  const route = await db.route.findFirst({
+    where: { id: input.routeId, companyId: input.companyId },
+    select: { id: true, vehicleId: true, odometerStartKm: true, odometerEndKm: true },
+  });
+  if (!route) throw new Error("Route not found");
+
+  const start = input.odometerStartKm === undefined ? route.odometerStartKm : input.odometerStartKm;
+  const end = input.odometerEndKm === undefined ? route.odometerEndKm : input.odometerEndKm;
+  if (start != null && end != null && end < start) {
+    throw new Error("The finishing odometer reading cannot be below the starting one");
+  }
+
+  const updated = await db.route.update({
+    where: { id: route.id },
+    data: {
+      ...(input.odometerStartKm !== undefined ? { odometerStartKm: input.odometerStartKm } : {}),
+      ...(input.odometerEndKm !== undefined ? { odometerEndKm: input.odometerEndKm } : {}),
+    },
+  });
+
+  const latest = end ?? start;
+  if (route.vehicleId && latest != null) {
+    await db.vehicle.updateMany({
+      where: { id: route.vehicleId, OR: [{ odometerKm: null }, { odometerKm: { lt: latest } }] },
+      data: { odometerKm: latest },
+    });
+  }
+
+  return updated;
 }
 
 /**
@@ -175,7 +317,16 @@ export async function resequenceRoute(routeId: string, from?: LatLng | null) {
   const legByCustomer = new Map(optimised.legs.map((l) => [l.id, l]));
 
   await db.$transaction(async (tx) => {
-    let sequence = done.length;
+    // Done and skipped stops keep their relative order but close up to 1..k,
+    // so a skipped stop #2 and the re-sequenced pending stops cannot share a
+    // number — the handset sorts by sequence and would show them interleaved.
+    let sequence = 0;
+    for (const stop of done) {
+      sequence++;
+      if (stop.sequence !== sequence) {
+        await tx.routeStop.update({ where: { id: stop.id }, data: { sequence } });
+      }
+    }
     for (const customerId of optimised.order) {
       sequence++;
       const leg = legByCustomer.get(customerId);
@@ -205,6 +356,7 @@ export async function resequenceRoute(routeId: string, from?: LatLng | null) {
     include: {
       stops: { include: { customer: true }, orderBy: { sequence: "asc" } },
       rep: { select: { id: true, name: true } },
+      vehicle: { select: { id: true, plate: true, make: true, model: true, type: true } },
     },
   });
 }
@@ -227,6 +379,7 @@ export async function todaysRoute(companyId: string, repId: string, date: Date) 
       stops: { include: { customer: true }, orderBy: { sequence: "asc" } },
       visits: { orderBy: { scheduledAt: "asc" } },
       territory: true,
+      vehicle: { select: { id: true, plate: true, make: true, model: true, type: true } },
     },
     orderBy: { createdAt: "desc" },
   });

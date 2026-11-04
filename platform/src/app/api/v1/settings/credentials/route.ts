@@ -2,6 +2,8 @@ import { z } from "zod";
 
 import { ApiError, handler, parseBody } from "@/lib/api";
 import { auditAs } from "@/lib/audit";
+import { baseUrlFor, digitaxAdapter, isValidKraPin } from "@/lib/etims";
+import { db } from "@/lib/db";
 import { providerFor, credsFor, type PaymentProviderName } from "@/lib/payments";
 import { secretsAvailable } from "@/lib/secrets";
 import { companyIdOf } from "@/lib/tenant";
@@ -72,6 +74,17 @@ export const POST = handler({ permission: "settings:write" }, async ({ principal
     );
   }
 
+  // A malformed KRA PIN would be stored, then refused at every transmission.
+  // Catch it where it is typed.
+  const tin = body.provider === "DIGITAX" ? body.values.DIGITAX_TIN : undefined;
+  if (tin !== undefined && !isValidKraPin(tin)) {
+    throw new ApiError(
+      422,
+      "INVALID_KRA_PIN",
+      `DIGITAX_TIN "${tin}" is not a valid KRA PIN (expected the form P051234567X)`,
+    );
+  }
+
   try {
     await saveCredential({
       companyId,
@@ -139,9 +152,67 @@ export const PATCH = handler({ permission: "settings:write" }, async ({ principa
   }
 
   if (provider === "DIGITAX") {
-    const ready = CREDENTIAL_KEYS.DIGITAX.every((k) => credsFor(creds)(k));
-    await recordTestResult(companyId, provider, ready, ready ? "Keys present" : "Keys missing");
-    return { ok: ready, note: ready ? "Keys present" : "Keys missing" };
+    // Three things can be wrong with a Digitax credential, and "keys present"
+    // catches none of them: a TIN that is not a KRA PIN, a key Digitax does
+    // not accept, and a key that belongs to a different taxpayer than the TIN
+    // says. The last one files this company's sales under someone else's
+    // registration, so the test asks Digitax whose key it is.
+    const get = credsFor(creds);
+    const missing = CREDENTIAL_KEYS.DIGITAX.filter((k) => !get(k));
+    if (missing.length > 0) {
+      const note = `Keys missing: ${missing.join(", ")}`;
+      await recordTestResult(companyId, provider, false, note);
+      return { ok: false, note };
+    }
+
+    const tin = get("DIGITAX_TIN")!.trim();
+    if (!isValidKraPin(tin)) {
+      const note = `DIGITAX_TIN "${tin}" is not a valid KRA PIN (expected the form P051234567X)`;
+      await recordTestResult(companyId, provider, false, note);
+      return { ok: false, note };
+    }
+
+    const config = await db.etimsConfig.findUnique({
+      where: { companyId },
+      select: { environment: true },
+    });
+    const info = await digitaxAdapter.info({
+      apiKey: get("DIGITAX_API_KEY")!,
+      taxPin: tin,
+      baseUrl: baseUrlFor(get("DIGITAX_BASE_URL"), config?.environment),
+      branchId: get("DIGITAX_BRANCH_ID"),
+    });
+
+    if (!info.ok) {
+      const note = `Digitax refused the key: ${info.error ?? "no response"}`;
+      await recordTestResult(companyId, provider, false, note);
+      return { ok: false, note };
+    }
+
+    const reported = typeof info.data?.tax_pin === "string" ? info.data.tax_pin.trim() : null;
+    if (reported && reported !== tin) {
+      const note = `The key belongs to PIN ${reported}, not ${tin}. Filing with it would use another taxpayer's registration.`;
+      await recordTestResult(companyId, provider, false, note);
+      return { ok: false, note };
+    }
+
+    const branch = typeof info.data?.branch_office_name === "string" ? info.data.branch_office_name : null;
+    const note = `Authenticated as ${reported ?? tin}${branch ? ` (${branch})` : ""}`;
+    await recordTestResult(companyId, provider, true, note);
+    await db.etimsConfig
+      .updateMany({
+        where: { companyId },
+        data: {
+          taxPin: reported ?? tin,
+          branchName: branch,
+          branchId: typeof info.data?.branch_id === "string" ? info.data.branch_id : undefined,
+          businessId: typeof info.data?.business_id === "string" ? info.data.business_id : undefined,
+          lastVerifiedAt: new Date(),
+          lastError: null,
+        },
+      })
+      .catch(() => undefined);
+    return { ok: true, note };
   }
 
   const adapter = providerFor(provider as PaymentProviderName);

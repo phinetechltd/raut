@@ -344,6 +344,10 @@ export interface MapPoint {
   /** Same vocabulary as every other component — one tone language, not two. */
   tone?: "neutral" | "success" | "warning" | "danger";
   sequence?: number;
+  /** A vehicle's live position draws as a van pin rather than a dot. */
+  kind?: "vehicle";
+  /** Optional second line in the pin's popup, e.g. plate and last-seen. */
+  detail?: string;
 }
 
 /**

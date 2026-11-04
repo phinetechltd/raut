@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { handler, ok, pagination, paginationMeta, parseBody, withIdempotency } from "@/lib/api";
+import { handler, notFound, ok, pagination, paginationMeta, parseBody, withIdempotency } from "@/lib/api";
 import { auditAs } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { nextNumber } from "@/lib/numbering";
@@ -58,18 +58,32 @@ export const POST = handler(
     const companyId = companyIdOf(principal);
     const input = await parseBody(request, schema);
 
+    // The category decides which ledger account the claim posts to on
+    // approval, so a foreign id would book this company's spend against
+    // another's chart.
+    if (input.categoryId) {
+      const category = await db.expenseCategory.findFirst({
+        where: { id: input.categoryId, companyId },
+        select: { id: true },
+      });
+      if (!category) throw notFound("Expense category not found");
+    }
+
+    // The work takes `tx`, so the number, the row and the idempotency key are
+    // one transaction: a failure burns no EXP number and leaves no key that
+    // would replay a claim that was never written.
     const { data: expense, replayed } = await withIdempotency(
       principal,
       input.clientUuid,
       "expense.create",
-      async () =>
-        db.expense.create({
+      async (tx) =>
+        tx.expense.create({
           data: {
             companyId,
             branchId: principal.branchId ?? null,
             categoryId: input.categoryId ?? null,
             userId: principal.userId,
-            number: await nextNumber(companyId, "EXPENSE"),
+            number: await nextNumber(companyId, "EXPENSE", tx),
             description: input.description,
             amountCents: input.amountCents,
             status: "SUBMITTED",

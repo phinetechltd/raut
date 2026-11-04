@@ -7,7 +7,9 @@ import { nextNumber } from "@/lib/numbering";
 import { denialReason, type Permission } from "@/lib/rbac";
 import { companyIdOf } from "@/lib/tenant";
 import { checkIn, checkOut } from "@/server/field";
+import { recordOdometer } from "@/server/routing";
 import { createInvoice, createSalesOrder, notifyPayment, recordPayment } from "@/server/sales";
+import { storePings } from "@/server/tracking";
 
 export const dynamic = "force-dynamic";
 
@@ -56,6 +58,7 @@ const operationSchema = z.object({
     "activity.create",
     "expense.create",
     "location.batch",
+    "route.odometer",
   ]),
   /** Client timestamp of when the rep performed the action. */
   at: z.string().optional(),
@@ -102,6 +105,9 @@ const OPERATION_PERMISSION: Record<z.infer<typeof operationSchema>["type"], Perm
   "activity.create": "activity:write",
   "expense.create": "expense:write",
   "location.batch": "field:self",
+  // The rep reads the dash of the van they are driving; it is their own
+  // field record, like a breadcrumb, not a route edit.
+  "route.odometer": "field:self",
 };
 
 export const POST = handler({}, async ({ principal, request }) => {
@@ -141,16 +147,23 @@ export const POST = handler({}, async ({ principal, request }) => {
 
     try {
       const outcome = await applyOperation(principal, companyId, op);
-      await db.idempotencyKey.create({
-        data: {
-          key: op.uuid,
-          userId: principal.userId,
-          endpoint: op.type,
-          response: JSON.stringify(outcome),
-          entityType: outcome.entityType,
-          entityId: outcome.entityId,
-        },
-      });
+      // The work has committed. A failure to record the key must not turn
+      // into a "failed" result — the handset would retry a write that
+      // already happened. Log it and report the truth: applied.
+      try {
+        await db.idempotencyKey.create({
+          data: {
+            key: op.uuid,
+            userId: principal.userId,
+            endpoint: op.type,
+            response: JSON.stringify(outcome),
+            entityType: outcome.entityType,
+            entityId: outcome.entityId,
+          },
+        });
+      } catch (keyError) {
+        console.error("[sync] applied but could not record idempotency key", op.uuid, keyError);
+      }
       results.push({ uuid: op.uuid, status: "applied", ...outcome });
     } catch (error) {
       results.push({
@@ -357,24 +370,28 @@ async function applyOperation(
       // a payload without a name created a customer called "undefined".
       const name = z.string().trim().min(1, "A customer needs a name").parse(p.name);
       const territoryId = await idInTenant("territory", companyId, str("territoryId"));
-      const code = str("code") ?? (await nextNumber(companyId, "CUSTOMER"));
-      const customer = await db.customer.create({
-        data: {
-          companyId,
-          code,
-          name,
-          type: str("type") ?? "RETAIL",
-          phone: str("phone") ?? null,
-          email: str("email") ?? null,
-          address: str("address") ?? null,
-          town: str("town") ?? null,
-          latitude: num("latitude") ?? null,
-          longitude: num("longitude") ?? null,
-          territoryId,
-          assignedRepId: principal.userId,
-          notes: str("notes") ?? null,
-          createdById: principal.userId,
-        },
+      // The code is numbered inside the same transaction as the row, so a
+      // failed insert burns no number and two reps cannot be handed the same.
+      const customer = await db.$transaction(async (tx) => {
+        const code = str("code") ?? (await nextNumber(companyId, "CUSTOMER", tx));
+        return tx.customer.create({
+          data: {
+            companyId,
+            code,
+            name,
+            type: str("type") ?? "RETAIL",
+            phone: str("phone") ?? null,
+            email: str("email") ?? null,
+            address: str("address") ?? null,
+            town: str("town") ?? null,
+            latitude: num("latitude") ?? null,
+            longitude: num("longitude") ?? null,
+            territoryId,
+            assignedRepId: principal.userId,
+            notes: str("notes") ?? null,
+            createdById: principal.userId,
+          },
+        });
       });
       return { entityId: customer.id, entityType: "Customer" };
     }
@@ -427,23 +444,26 @@ async function applyOperation(
       // The category decides which ledger account the expense posts to, so a
       // foreign id would book this company's spend against another's chart.
       const categoryId = await idInTenant("expenseCategory", companyId, str("categoryId"));
-      const number = await nextNumber(companyId, "EXPENSE");
-      const expense = await db.expense.create({
-        data: {
-          companyId,
-          branchId: principal.branchId ?? null,
-          categoryId,
-          userId: principal.userId,
-          number,
-          description,
-          amountCents,
-          status: "SUBMITTED",
-          incurredAt: at ?? new Date(),
-          paymentMethod: str("paymentMethod") ?? "CASH",
-          latitude: num("latitude") ?? null,
-          longitude: num("longitude") ?? null,
-          clientUuid: op.uuid,
-        },
+      // Number and row in one transaction — see customer.create.
+      const expense = await db.$transaction(async (tx) => {
+        const number = await nextNumber(companyId, "EXPENSE", tx);
+        return tx.expense.create({
+          data: {
+            companyId,
+            branchId: principal.branchId ?? null,
+            categoryId,
+            userId: principal.userId,
+            number,
+            description,
+            amountCents,
+            status: "SUBMITTED",
+            incurredAt: at ?? new Date(),
+            paymentMethod: str("paymentMethod") ?? "CASH",
+            latitude: num("latitude") ?? null,
+            longitude: num("longitude") ?? null,
+            clientUuid: op.uuid,
+          },
+        });
       });
       return { entityId: expense.id, entityType: "Expense" };
     }
@@ -472,22 +492,41 @@ async function applyOperation(
         )
         .parse(p.pings);
 
-      await db.locationPing.createMany({
-        data: pings.map((ping) => ({
-          companyId,
-          userId: principal.userId,
-          latitude: ping.latitude,
-          longitude: ping.longitude,
-          accuracyM: ping.accuracyM != null ? Math.round(ping.accuracyM) : null,
-          speedMps: ping.speedMps ?? null,
-          heading: ping.heading ?? null,
-          batteryPct: ping.batteryPct != null ? Math.round(ping.batteryPct) : null,
-          isMoving: ping.isMoving ?? true,
-          recordedAt: new Date(ping.recordedAt),
-        })),
-      });
+      // Stamped with the rep's route and vehicle for the day, and deduplicated
+      // on (rep, instant): the handset's synthetic batch uuid changes on every
+      // retry, so the idempotency table above cannot catch a resent trail —
+      // the unique key on the rows themselves does.
+      await storePings(
+        companyId,
+        principal.userId,
+        pings.map((ping) => ({ ...ping, recordedAt: new Date(ping.recordedAt) })),
+      );
 
       return { entityId: op.uuid, entityType: "LocationPing" };
+    }
+
+    case "route.odometer": {
+      // Start and finish readings off the dash, queued offline like any other
+      // field write. A rep may only report against their own route.
+      const routeId = z.string().min(1).parse(p.routeId);
+      const own = await db.route.findFirst({
+        where: { id: routeId, companyId, repId: principal.userId },
+        select: { id: true },
+      });
+      if (!own) throw new Error(`Route ${routeId} not found`);
+      const reading = z
+        .object({
+          odometerStartKm: z.number().int().nonnegative().nullish(),
+          odometerEndKm: z.number().int().nonnegative().nullish(),
+        })
+        .parse({ odometerStartKm: p.odometerStartKm, odometerEndKm: p.odometerEndKm });
+      const route = await recordOdometer({
+        routeId,
+        companyId,
+        ...(reading.odometerStartKm !== undefined ? { odometerStartKm: reading.odometerStartKm } : {}),
+        ...(reading.odometerEndKm !== undefined ? { odometerEndKm: reading.odometerEndKm } : {}),
+      });
+      return { entityId: route.id, entityType: "Route" };
     }
 
     default:

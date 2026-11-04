@@ -10,11 +10,12 @@ import {
   DEFAULT_EMPTY_CENTER,
   allCoordinates,
   dotPinHtml,
-  escapeHtml,
   pathPointsOf,
+  popupHtml,
   resolveThemeColours,
   sequencePinHtml,
   toneColour,
+  vehiclePinHtml,
   type TileMapProps,
 } from "./map-shared";
 
@@ -35,6 +36,7 @@ export default function GoogleMapInner({
   points,
   polygons = [],
   path = [],
+  tracks = [],
   height = 380,
   zoom = 13,
   emptyCenter = DEFAULT_EMPTY_CENTER,
@@ -191,6 +193,19 @@ export default function GoogleMapInner({
         overlaysRef.current.push({ remove: () => polygon.setMap(null) });
       }
 
+      for (const track of tracks) {
+        if (track.coords.length < 2) continue;
+        const trail = new g.maps.Polyline({
+          map,
+          path: track.coords.map(([lat, lng]) => ({ lat, lng })),
+          strokeColor: track.colour,
+          strokeOpacity: 0.7,
+          strokeWeight: 3,
+          clickable: false,
+        });
+        overlaysRef.current.push({ remove: () => trail.setMap(null) });
+      }
+
       const pathPoints = pathPointsOf(points, path);
       if (pathPoints.length > 1) {
         // Dashed line: a zero-opacity stroke carrying a repeated dash symbol.
@@ -219,27 +234,35 @@ export default function GoogleMapInner({
       for (const p of points) {
         const colour = toneColour(theme, p.tone);
         const content = document.createElement("div");
-        content.className = p.sequence ? "raut-seq-marker" : "raut-dot-marker";
-        content.innerHTML = p.sequence
-          ? sequencePinHtml(p.sequence, colour, theme)
-          : dotPinHtml(colour, theme);
+        const isVehicle = p.kind === "vehicle";
+        content.className = isVehicle
+          ? "raut-vehicle-marker"
+          : p.sequence
+            ? "raut-seq-marker"
+            : "raut-dot-marker";
+        content.innerHTML = isVehicle
+          ? vehiclePinHtml(colour, theme)
+          : p.sequence
+            ? sequencePinHtml(p.sequence, colour, theme)
+            : dotPinHtml(colour, theme);
         // Leaflet anchors its icons at the centre; Advanced Markers anchor at
         // the bottom-centre. Shift so both renderers put the dot on the point.
-        content.style.transform = p.sequence ? "translateY(11px)" : "translateY(7.5px)";
+        content.style.transform = isVehicle
+          ? "translateY(13px)"
+          : p.sequence
+            ? "translateY(11px)"
+            : "translateY(7.5px)";
 
         const marker = new AdvancedMarkerElement({
           map,
           position: { lat: p.lat, lng: p.lng },
           content,
           title: p.label,
+          ...(isVehicle ? { zIndex: 1000 } : {}),
         });
         marker.addEventListener("gmp-click", () => {
           if (!info || deadRef.current) return;
-          info.setContent(
-            `<div class="raut-gm-popup"><strong>${escapeHtml(p.label)}</strong>${
-              p.sequence ? `<br>Stop ${p.sequence}` : ""
-            }</div>`,
-          );
+          info.setContent(`<div class="raut-gm-popup">${popupHtml(p)}</div>`);
           info.open({ map, anchor: marker });
         });
         overlaysRef.current.push({
@@ -249,7 +272,7 @@ export default function GoogleMapInner({
         });
       }
 
-      const all = allCoordinates(points, polygons);
+      const all = allCoordinates(points, polygons, tracks);
       if (all.length === 1) {
         map.setCenter({ lat: all[0][0], lng: all[0][1] });
         map.setZoom(zoom);
@@ -264,7 +287,7 @@ export default function GoogleMapInner({
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [points, polygons, path, zoom]);
+  }, [points, polygons, path, tracks, zoom]);
 
   return (
     <div

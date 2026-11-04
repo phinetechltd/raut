@@ -2,6 +2,9 @@
 import {
   CellStack,
   DataTable,
+  FilterBar,
+  FilterSearch,
+  FilterSelect,
   Meter,
   ModuleLocked,
   Money,
@@ -17,6 +20,7 @@ import { db } from "@/lib/db";
 import { MAP_PROVIDER_LABELS, toClientConfig } from "@/lib/maps";
 import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
+import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
 import { repPerformance } from "@/server/field";
 import { mapConfigFor } from "@/server/maps";
 
@@ -24,14 +28,59 @@ import { VisitDialog } from "./visit-dialog";
 
 export const dynamic = "force-dynamic";
 
+const TV_SORT: Record<string, string> = {
+  time: "scheduledAt",
+  status: "status",
+  checked: "checkInAt",
+  verified: "geofenceVerified",
+  distance: "distanceFromCustomerM",
+};
+const CI_SORT: Record<string, string> = {
+  when: "checkInAt",
+  status: "status",
+  verified: "geofenceVerified",
+  distance: "distanceFromCustomerM",
+  duration: "durationMin",
+};
+
+const VISIT_STATUSES = [
+  { value: "SCHEDULED", label: "Scheduled" },
+  { value: "IN_PROGRESS", label: "In progress" },
+  { value: "COMPLETED", label: "Completed" },
+  { value: "MISSED", label: "Missed" },
+  { value: "CANCELLED", label: "Cancelled" },
+];
+
+const PATH = "/app/field";
+
 /** Module 06 · Field Sales — visits, check-ins, targets and rep performance. */
-export default async function FieldSalesPage() {
+export default async function FieldSalesPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
   const { companyId, principal } = await requireTenant();
   if (!principal.enabledModules.has("FIELD_SALES")) {
     return <ModuleLocked module="FIELD_SALES" />;
   }
 
+  const params = await searchParams;
   const geofencing = principal.enabledModules.has("GEOFENCING");
+
+  const tvTs = tableState(params, {
+    prefix: "tv",
+    allowed: Object.keys(TV_SORT),
+    defaultSort: "time",
+    defaultDir: "asc",
+    limit: 15,
+  });
+  const ciTs = tableState(params, {
+    prefix: "ci",
+    allowed: Object.keys(CI_SORT),
+    defaultSort: "when",
+    defaultDir: "desc",
+    limit: 15,
+  });
 
   const today = new Date();
   today.setHours(0, 0, 0, 0);
@@ -41,9 +90,40 @@ export default async function FieldSalesPage() {
   const selfScope = principal.role === "FIELD_REP" ? { repId: principal.userId } : {};
   const maps = await mapConfigFor(companyId);
 
-  const [todayVisits, reps, targets, recentVisits] = await Promise.all([
+  const searchFor = (q: string | undefined) =>
+    q
+      ? { OR: [{ customer: { name: { contains: q } } }, { rep: { name: { contains: q } } }] }
+      : {};
+
+  const todayScope = { companyId, ...selfScope, scheduledAt: { gte: today, lt: tomorrow } };
+  const tvWhere = {
+    ...todayScope,
+    ...(params.tv_status ? { status: params.tv_status } : {}),
+    ...searchFor(params.tv_q),
+  };
+  const ciWhere = {
+    companyId,
+    ...selfScope,
+    checkInAt: { not: null },
+    ...(params.ci_status ? { status: params.ci_status } : {}),
+    ...searchFor(params.ci_q),
+  };
+
+  const [todayAll, todayVisits, todayCount, reps, targets, recentVisits, recentCount] = await Promise.all([
+    // The stat cards and the map always show the whole day, whatever the
+    // table below is filtered to.
     db.visit.findMany({
-      where: { companyId, ...selfScope, scheduledAt: { gte: today, lt: tomorrow } },
+      where: todayScope,
+      select: {
+        id: true,
+        status: true,
+        geofenceVerified: true,
+        customer: { select: { name: true, town: true, latitude: true, longitude: true } },
+      },
+      orderBy: { scheduledAt: "asc" },
+    }),
+    db.visit.findMany({
+      where: tvWhere,
       include: {
         customer: {
           select: { id: true, name: true, town: true, latitude: true, longitude: true, balanceCents: true },
@@ -51,27 +131,41 @@ export default async function FieldSalesPage() {
         rep: { select: { id: true, name: true } },
         order: { select: { number: true, totalCents: true } },
       },
-      orderBy: { scheduledAt: "asc" },
+      orderBy: { [TV_SORT[tvTs.sort ?? "time"]]: tvTs.dir } as Record<string, "asc" | "desc">,
+      take: tvTs.limit,
+      skip: (tvTs.page - 1) * tvTs.limit,
     }),
+    db.visit.count({ where: tvWhere }),
     repPerformance(companyId, monthAgo, new Date()),
     db.salesTarget.findMany({
       where: { companyId, periodEnd: { gte: new Date() } },
       include: { rep: { select: { id: true, name: true } } },
     }),
     db.visit.findMany({
-      where: { companyId, ...selfScope, checkInAt: { not: null } },
+      where: ciWhere,
       include: {
         customer: { select: { name: true, town: true } },
         rep: { select: { name: true } },
       },
-      orderBy: { checkInAt: "desc" },
-      take: 25,
+      orderBy: { [CI_SORT[ciTs.sort ?? "when"]]: ciTs.dir } as Record<string, "asc" | "desc">,
+      take: ciTs.limit,
+      skip: (ciTs.page - 1) * ciTs.limit,
     }),
+    db.visit.count({ where: ciWhere }),
   ]);
 
-  const completedToday = todayVisits.filter((v) => v.status === "COMPLETED").length;
-  const verifiedToday = todayVisits.filter((v) => v.geofenceVerified).length;
-  const inProgress = todayVisits.filter((v) => v.status === "IN_PROGRESS").length;
+  const completedToday = todayAll.filter((v) => v.status === "COMPLETED").length;
+  const verifiedToday = todayAll.filter((v) => v.geofenceVerified).length;
+  const inProgress = todayAll.filter((v) => v.status === "IN_PROGRESS").length;
+
+  const tvSortHrefFor = (key: string) => {
+    const next = toggleSort(tvTs, key);
+    return tableHref(PATH, params, { tv_sort: next.sort, tv_dir: next.dir }, "tv");
+  };
+  const ciSortHrefFor = (key: string) => {
+    const next = toggleSort(ciTs, key);
+    return tableHref(PATH, params, { ci_sort: next.sort, ci_dir: next.dir }, "ci");
+  };
 
   const targetByRep = new Map(targets.filter((t) => t.repId).map((t) => [t.repId!, t]));
 
@@ -97,7 +191,7 @@ export default async function FieldSalesPage() {
       />
 
       <StatGrid>
-        <StatCard label="Scheduled today" value={String(todayVisits.length)} />
+        <StatCard label="Scheduled today" value={String(todayAll.length)} />
         <StatCard label="In progress" value={String(inProgress)} tone="warning" />
         <StatCard label="Completed today" value={String(completedToday)} tone="success" />
         <StatCard
@@ -119,7 +213,7 @@ export default async function FieldSalesPage() {
         />
         <TileMap
           map={toClientConfig(maps)}
-          points={todayVisits
+          points={todayAll
             .filter((v) => v.customer.latitude != null)
             .map((v, i) => ({
               id: v.id,
@@ -141,12 +235,17 @@ export default async function FieldSalesPage() {
       </div>
 
       <div>
-        <SectionHeading title="Today's visits" />
+        <SectionHeading title="Today's visits" description={`${todayCount} visit(s)`} />
+        <FilterBar action={PATH} preserve={preserved(params, ["tv_q", "tv_status", "tv_page"])}>
+          <FilterSearch name="tv_q" value={params.tv_q} placeholder="Search customer, rep…" />
+          <FilterSelect name="tv_status" value={params.tv_status} allLabel="Any status" options={VISIT_STATUSES} />
+        </FilterBar>
         <DataTable
           columns={[
             {
               key: "time",
               header: "Time",
+              sortKey: "time",
               cell: (v) => (
                 <span className="font-medium tabular">
                   {v.scheduledAt.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" })}
@@ -161,11 +260,12 @@ export default async function FieldSalesPage() {
               ),
             },
             { key: "rep", header: "Rep", hideBelow: "sm", cell: (v) => <span className="text-xs">{v.rep.name}</span> },
-            { key: "status", header: "Status", cell: (v) => <StatusBadge status={v.status} /> },
+            { key: "status", header: "Status", sortKey: "status", cell: (v) => <StatusBadge status={v.status} /> },
             {
               key: "checked",
               header: "Checked in",
               hideBelow: "md",
+              sortKey: "checked",
               cell: (v) => (
                 <span className="text-content-muted text-xs">
                   {v.checkInAt
@@ -178,6 +278,7 @@ export default async function FieldSalesPage() {
               key: "verified",
               header: "Verified",
               align: "right",
+              sortKey: "verified",
               cell: (v) =>
                 v.geofenceVerified ? (
                   <span className="badge bg-success-bg text-success border-success-border">yes</span>
@@ -192,6 +293,7 @@ export default async function FieldSalesPage() {
               header: "Distance",
               align: "right",
               hideBelow: "lg",
+              sortKey: "distance",
               cell: (v) => (
                 <span className={(v.distanceFromCustomerM ?? 0) > 200 ? "text-warning" : "text-content-muted"}>
                   {v.distanceFromCustomerM != null ? `${v.distanceFromCustomerM}m` : "—"}
@@ -218,7 +320,18 @@ export default async function FieldSalesPage() {
           rows={todayVisits}
           getRowKey={(v) => v.id}
           caption="Visits scheduled today"
-          empty={{ title: "No visits scheduled for today" }}
+          sort={{ key: tvTs.sort, dir: tvTs.dir }}
+          sortHrefFor={tvSortHrefFor}
+          pagination={{
+            page: tvTs.page,
+            pages: Math.max(1, Math.ceil(todayCount / tvTs.limit)),
+            total: todayCount,
+            limit: tvTs.limit,
+            hrefFor: (p) => tableHref(PATH, params, { tv_page: p }),
+          }}
+          empty={{
+            title: params.tv_q || params.tv_status ? "No visits match this filter" : "No visits scheduled for today",
+          }}
         />
       </div>
 
@@ -308,11 +421,16 @@ export default async function FieldSalesPage() {
 
       <div>
         <SectionHeading title="Recent check-ins" description="Evidence trail across the team" />
+        <FilterBar action={PATH} preserve={preserved(params, ["ci_q", "ci_status", "ci_page"])}>
+          <FilterSearch name="ci_q" value={params.ci_q} placeholder="Search customer, rep…" />
+          <FilterSelect name="ci_status" value={params.ci_status} allLabel="Any status" options={VISIT_STATUSES} />
+        </FilterBar>
         <DataTable
           columns={[
             {
               key: "when",
               header: "When",
+              sortKey: "when",
               cell: (v) => (
                 <span className="text-content-muted text-xs">
                   {v.checkInAt?.toLocaleString("en-KE", { day: "2-digit", month: "short", hour: "2-digit", minute: "2-digit" })}
@@ -325,10 +443,11 @@ export default async function FieldSalesPage() {
               header: "Customer",
               cell: (v) => <CellStack primary={v.customer.name} secondary={v.customer.town ?? ""} />,
             },
-            { key: "status", header: "Status", cell: (v) => <StatusBadge status={v.status} /> },
+            { key: "status", header: "Status", sortKey: "status", cell: (v) => <StatusBadge status={v.status} /> },
             {
               key: "verified",
               header: "Verified",
+              sortKey: "verified",
               cell: (v) =>
                 v.geofenceVerified ? (
                   <span className="badge bg-success-bg text-success border-success-border">verified</span>
@@ -341,6 +460,7 @@ export default async function FieldSalesPage() {
               header: "Distance from pin",
               align: "right",
               hideBelow: "md",
+              sortKey: "distance",
               cell: (v) => (
                 <span className={(v.distanceFromCustomerM ?? 0) > 200 ? "text-warning" : "text-content-muted"}>
                   {v.distanceFromCustomerM != null ? `${v.distanceFromCustomerM}m` : "—"}
@@ -352,6 +472,7 @@ export default async function FieldSalesPage() {
               header: "Duration",
               align: "right",
               hideBelow: "lg",
+              sortKey: "duration",
               cell: (v) => (
                 <span className="text-content-muted text-xs">
                   {v.durationMin != null ? `${v.durationMin}m` : "—"}
@@ -362,7 +483,16 @@ export default async function FieldSalesPage() {
           rows={recentVisits}
           getRowKey={(v) => v.id}
           caption="Recent check-ins"
-          empty={{ title: "No check-ins yet" }}
+          sort={{ key: ciTs.sort, dir: ciTs.dir }}
+          sortHrefFor={ciSortHrefFor}
+          pagination={{
+            page: ciTs.page,
+            pages: Math.max(1, Math.ceil(recentCount / ciTs.limit)),
+            total: recentCount,
+            limit: ciTs.limit,
+            hrefFor: (p) => tableHref(PATH, params, { ci_page: p }),
+          }}
+          empty={{ title: params.ci_q || params.ci_status ? "No check-ins match this filter" : "No check-ins yet" }}
         />
       </div>
     </div>

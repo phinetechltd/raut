@@ -16,25 +16,27 @@ import {
 } from "@/components/ui";
 import { db } from "@/lib/db";
 import { FULL_PLATFORM_PRICE_CENTS, MODULE_LIST } from "@/lib/modules";
-import { platformOverview, type PlatformOverview } from "@/server/analytics";
+import { tableHref, tableState, toggleSort } from "@/lib/table";
+import { platformOverview } from "@/server/analytics";
 
 export const dynamic = "force-dynamic";
 export const metadata: Metadata = { title: "Platform Overview" };
 
-type CompanyRow = PlatformOverview["recentCompanies"][number];
+const PATH = "/admin";
 
-async function recentAudit() {
-  return db.auditLog.findMany({
-    orderBy: { createdAt: "desc" },
-    take: 10,
-    include: {
-      user: { select: { name: true } },
-      company: { select: { name: true } },
-    },
-  });
-}
-
-type AuditRow = Awaited<ReturnType<typeof recentAudit>>[number];
+const CO_SORT: Record<string, (dir: "asc" | "desc") => Record<string, unknown>> = {
+  name: (dir) => ({ name: dir }),
+  status: (dir) => ({ status: dir }),
+  users: (dir) => ({ users: { _count: dir } }),
+  created: (dir) => ({ createdAt: dir }),
+};
+const ACT_SORT: Record<string, (dir: "asc" | "desc") => Record<string, unknown>> = {
+  when: (dir) => ({ createdAt: dir }),
+  company: (dir) => ({ company: { name: dir } }),
+  user: (dir) => ({ user: { name: dir } }),
+  action: (dir) => ({ action: dir }),
+  entity: (dir) => ({ entity: dir }),
+};
 
 /**
  * Super Admin dashboard — proposal page 5.
@@ -44,17 +46,72 @@ type AuditRow = Awaited<ReturnType<typeof recentAudit>>[number];
  * fabricated metric. Licensed platform value replaces it — a number the system
  * can actually derive.
  */
-export default async function PlatformOverviewPage() {
-  const [overview, audit] = await Promise.all([platformOverview(), recentAudit()]);
+export default async function PlatformOverviewPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
+  const params = await searchParams;
+
+  const coTs = tableState(params, {
+    prefix: "co",
+    allowed: Object.keys(CO_SORT),
+    defaultSort: "created",
+    defaultDir: "desc",
+    limit: 8,
+  });
+  const actTs = tableState(params, {
+    prefix: "act",
+    allowed: Object.keys(ACT_SORT),
+    defaultSort: "when",
+    defaultDir: "desc",
+    limit: 10,
+  });
+
+  const [overview, companies, companyCount, audit, auditCount] = await Promise.all([
+    platformOverview(),
+    db.company.findMany({
+      orderBy: CO_SORT[coTs.sort ?? "created"](coTs.dir) as never,
+      take: coTs.limit,
+      skip: (coTs.page - 1) * coTs.limit,
+      select: {
+        id: true,
+        name: true,
+        status: true,
+        createdAt: true,
+        _count: { select: { users: true } },
+        modules: { where: { enabled: true }, select: { id: true } },
+      },
+    }),
+    db.company.count(),
+    db.auditLog.findMany({
+      orderBy: ACT_SORT[actTs.sort ?? "when"](actTs.dir) as never,
+      take: actTs.limit,
+      skip: (actTs.page - 1) * actTs.limit,
+      include: {
+        user: { select: { name: true } },
+        company: { select: { name: true } },
+      },
+    }),
+    db.auditLog.count(),
+  ]);
 
   const adoption = new Map(overview.moduleCounts.map((m) => [m.moduleKey, m.companies]));
   const slots = overview.companies * MODULE_LIST.length;
   const sold = overview.moduleCounts.reduce((s, m) => s + m.companies, 0);
 
+  const sortHref = (ts: typeof coTs, prefix: string) => (key: string) => {
+    const next = toggleSort(ts, key);
+    return tableHref(PATH, params, { [`${prefix}_sort`]: next.sort, [`${prefix}_dir`]: next.dir }, prefix);
+  };
+  const pageHref = (prefix: string) => (p: number) => tableHref(PATH, params, { [`${prefix}_page`]: p });
+
+  type CompanyRow = (typeof companies)[number];
   const companyColumns: Array<Column<CompanyRow>> = [
     {
       key: "name",
       header: "Company",
+      sortKey: "name",
       cell: (c) => (
         <CellStack
           primary={c.name}
@@ -62,15 +119,22 @@ export default async function PlatformOverviewPage() {
         />
       ),
     },
-    { key: "status", header: "Status", cell: (c) => <StatusBadge status={c.status} /> },
-    { key: "users", header: "Users", align: "right", numeric: true, cell: (c) => c.users },
+    { key: "status", header: "Status", sortKey: "status", cell: (c) => <StatusBadge status={c.status} /> },
+    { key: "users", header: "Users", align: "right", numeric: true, sortKey: "users", cell: (c) => c._count.users },
     {
       key: "modules",
       header: "Modules",
       align: "right",
       numeric: true,
       hideBelow: "sm",
-      cell: (c) => `${c.modules}/${MODULE_LIST.length}`,
+      cell: (c) => `${c.modules.length}/${MODULE_LIST.length}`,
+    },
+    {
+      key: "created",
+      header: "Onboarded",
+      hideBelow: "lg",
+      sortKey: "created",
+      cell: (c) => <span className="text-content-muted text-xs">{c.createdAt.toLocaleDateString("en-KE")}</span>,
     },
     {
       key: "manage",
@@ -85,10 +149,12 @@ export default async function PlatformOverviewPage() {
     },
   ];
 
+  type AuditRow = (typeof audit)[number];
   const auditColumns: Array<Column<AuditRow>> = [
     {
       key: "when",
       header: "When",
+      sortKey: "when",
       cell: (l) => (
         <span className="text-sm text-content-muted">
           {l.createdAt.toLocaleString("en-KE", {
@@ -97,14 +163,15 @@ export default async function PlatformOverviewPage() {
         </span>
       ),
     },
-    { key: "company", header: "Company", hideBelow: "sm", cell: (l) => l.company?.name ?? "—" },
-    { key: "user", header: "User", cell: (l) => l.user?.name ?? "—" },
-    { key: "action", header: "Action", cell: (l) => <StatusBadge status={l.action} /> },
+    { key: "company", header: "Company", hideBelow: "sm", sortKey: "company", cell: (l) => l.company?.name ?? "—" },
+    { key: "user", header: "User", sortKey: "user", cell: (l) => l.user?.name ?? "—" },
+    { key: "action", header: "Action", sortKey: "action", cell: (l) => <StatusBadge status={l.action} /> },
     {
       key: "entity",
       header: "Entity",
       align: "right",
       hideBelow: "md",
+      sortKey: "entity",
       cell: (l) => <span className="text-content-muted">{l.entity}</span>,
     },
   ];
@@ -195,9 +262,18 @@ export default async function PlatformOverviewPage() {
         />
         <DataTable
           columns={companyColumns}
-          rows={overview.recentCompanies}
+          rows={companies}
           getRowKey={(c) => c.id}
           caption="Most recently onboarded companies"
+          sort={{ key: coTs.sort, dir: coTs.dir }}
+          sortHrefFor={sortHref(coTs, "co")}
+          pagination={{
+            page: coTs.page,
+            pages: Math.max(1, Math.ceil(companyCount / coTs.limit)),
+            total: companyCount,
+            limit: coTs.limit,
+            hrefFor: pageHref("co"),
+          }}
           empty={{
             title: "No companies yet",
             description: "Onboard the first tenant to get started.",
@@ -212,10 +288,19 @@ export default async function PlatformOverviewPage() {
           rows={audit}
           getRowKey={(l) => l.id}
           caption="Recent audit log entries"
+          sort={{ key: actTs.sort, dir: actTs.dir }}
+          sortHrefFor={sortHref(actTs, "act")}
+          pagination={{
+            page: actTs.page,
+            pages: Math.max(1, Math.ceil(auditCount / actTs.limit)),
+            total: auditCount,
+            limit: actTs.limit,
+            hrefFor: pageHref("act"),
+          }}
           empty={{ title: "No activity recorded yet" }}
           footer={
             <span>
-              Showing the {audit.length} most recent events ·{" "}
+              {auditCount.toLocaleString("en-KE")} audited events ·{" "}
               <a href="/admin/audit" className="text-accent hover:underline">
                 full audit log
               </a>

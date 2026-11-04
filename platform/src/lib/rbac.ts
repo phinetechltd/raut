@@ -84,6 +84,8 @@ export type Permission =
   // Routing
   | "route:read"
   | "route:write"
+  | "vehicle:read"
+  | "vehicle:write"
   // Geofencing
   | "geofence:read"
   | "geofence:write"
@@ -146,6 +148,8 @@ const PERMISSION_MODULE: Partial<Record<Permission, ModuleKey>> = {
 
   "route:read": "ROUTING",
   "route:write": "ROUTING",
+  "vehicle:read": "ROUTING",
+  "vehicle:write": "ROUTING",
 
   "geofence:read": "GEOFENCING",
   "geofence:write": "GEOFENCING",
@@ -212,6 +216,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "target:write",
     "route:read",
     "route:write",
+    "vehicle:read",
+    "vehicle:write",
     "geofence:read",
     "geofence:write",
     "sms:read",
@@ -249,6 +255,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "visit:write",
     "route:read",
     "route:write",
+    "vehicle:read",
     "geofence:read",
     "sms:read",
     "sms:send",
@@ -278,6 +285,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "target:write",
     "route:read",
     "route:write",
+    "vehicle:read",
+    "vehicle:write",
     "geofence:read",
     "geofence:write",
     "sms:read",
@@ -342,6 +351,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "visit:read",
     "visit:write",
     "route:read",
+    // The plate and odometer of the van they are driving today, nothing more.
+    "vehicle:read",
     "expense:read",
     "expense:write",
     "field:self",

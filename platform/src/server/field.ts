@@ -3,6 +3,8 @@ import "server-only";
 import { db } from "@/lib/db";
 import { isInsideTerritory, verifyVisitLocation, type LatLng } from "@/lib/geo";
 
+import { recordActualDistance } from "./tracking";
+
 /**
  * Module 06 · Field Sales, with Module 08 · Geofencing folded into check-in.
  *
@@ -188,6 +190,10 @@ export async function checkOut(input: CheckOutInput) {
         where: { id: visit.routeId },
         data: { status: "COMPLETED", completedAt: at },
       });
+      // The day is over: what the van actually drove, from its breadcrumbs,
+      // sits beside the plan on the console. Never fatal — a trail is
+      // telemetry, the check-out is the record.
+      await recordActualDistance(visit.routeId).catch(() => undefined);
     }
   }
 

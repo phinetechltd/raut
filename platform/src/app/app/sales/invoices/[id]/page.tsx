@@ -1,10 +1,21 @@
 import { notFound } from "next/navigation";
 import QRCode from "qrcode";
 
-import { Badge, ButtonLink, Card, Money, SectionHeading } from "@/components/ui";
+import {
+  Badge,
+  ButtonLink,
+  Card,
+  DataTable,
+  FilterBar,
+  FilterSearch,
+  Money,
+  SectionHeading,
+  type Column,
+} from "@/components/ui";
 import { db } from "@/lib/db";
 import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
+import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
 
 import { CreditNoteButton } from "./credit-note-button";
 import { PaymentDialog } from "../../../finance/payment-dialog";
@@ -42,9 +53,26 @@ type EtimsKey = keyof typeof ETIMS_LABEL;
 const asKey = (v: string | null | undefined): EtimsKey =>
   v && v in ETIMS_LABEL ? (v as EtimsKey) : "NOT_APPLICABLE";
 
-export default async function InvoicePage({ params }: { params: Promise<{ id: string }> }) {
+const LINE_SORT = ["item", "qty", "unit", "vat", "total"] as const;
+type LineSortKey = (typeof LINE_SORT)[number];
+
+export default async function InvoicePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | undefined>>;
+}) {
   const { companyId, principal } = await requireTenant();
   const { id } = await params;
+  const sp = await searchParams;
+  const path = `/app/sales/invoices/${id}`;
+
+  const lineTs = tableState(sp, {
+    prefix: "line",
+    allowed: [...LINE_SORT],
+    limit: 25,
+  });
 
   const invoice = await db.invoice.findFirst({
     // Scoped by company: an id belonging to another tenant is simply not found.
@@ -79,6 +107,91 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
     .filter((c) => c.status !== "CANCELLED")
     .reduce((n, c) => n + c.totalCents, 0);
   const outstandingCents = invoice.totalCents - invoice.paidCents - credited;
+
+  // Lines are already loaded with the invoice (an invoice has a handful, not
+  // thousands), so search, sort and paging happen here rather than in SQL.
+  type Line = (typeof invoice.lines)[number];
+  const lineQuery = (sp.line_q ?? "").trim().toLowerCase();
+  const matchedLines = lineQuery
+    ? invoice.lines.filter(
+        (l) =>
+          l.product.name.toLowerCase().includes(lineQuery) ||
+          l.product.sku.toLowerCase().includes(lineQuery) ||
+          l.description.toLowerCase().includes(lineQuery),
+      )
+    : invoice.lines;
+  const lineValue = (l: Line, key: LineSortKey): string | number => {
+    switch (key) {
+      case "item":
+        return `${l.product.sku} ${l.description}`.toLowerCase();
+      case "qty":
+        return l.quantity;
+      case "unit":
+        return l.unitPriceCents;
+      case "vat":
+        return l.taxRateBp;
+      case "total":
+        return l.lineTotalCents;
+    }
+  };
+  const sortedLines = lineTs.sort
+    ? [...matchedLines].sort((a, b) => {
+        const av = lineValue(a, lineTs.sort as LineSortKey);
+        const bv = lineValue(b, lineTs.sort as LineSortKey);
+        const cmp = typeof av === "number" && typeof bv === "number" ? av - bv : String(av).localeCompare(String(bv));
+        return lineTs.dir === "asc" ? cmp : -cmp;
+      })
+    : matchedLines;
+  const linePages = Math.max(1, Math.ceil(sortedLines.length / lineTs.limit));
+  const linePage = Math.min(lineTs.page, linePages);
+  const pagedLines = sortedLines.slice((linePage - 1) * lineTs.limit, linePage * lineTs.limit);
+
+  const lineSortHrefFor = (key: string) => {
+    const next = toggleSort(lineTs, key);
+    return tableHref(path, sp, { line_sort: next.sort, line_dir: next.dir }, "line");
+  };
+
+  const lineColumns: Array<Column<Line>> = [
+    {
+      key: "item",
+      header: "Item",
+      sortKey: "item",
+      cell: (l) => (
+        <>
+          <span className="tabular text-xs text-content-muted">{l.product.sku}</span> {l.description}
+        </>
+      ),
+    },
+    { key: "qty", header: "Qty", align: "right", numeric: true, sortKey: "qty", cell: (l) => l.quantity },
+    {
+      key: "unit",
+      header: "Unit",
+      align: "right",
+      numeric: true,
+      sortKey: "unit",
+      cell: (l) => <Money cents={l.unitPriceCents} />,
+    },
+    {
+      key: "vat",
+      header: "VAT",
+      align: "right",
+      numeric: true,
+      sortKey: "vat",
+      cell: (l) => `${l.taxRateBp / 100}%`,
+    },
+    {
+      key: "total",
+      header: "Total",
+      align: "right",
+      numeric: true,
+      sortKey: "total",
+      cell: (l) => (
+        <span className="font-medium">
+          <Money cents={l.lineTotalCents} />
+        </span>
+      ),
+    },
+  ];
 
   return (
     <div className="space-y-5">
@@ -207,36 +320,29 @@ export default async function InvoicePage({ params }: { params: Promise<{ id: st
           )}
         </div>
 
-        <div className="mt-6 overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border text-left text-xs uppercase tracking-wide text-content-muted">
-                <th className="py-2 pr-3 font-medium">Item</th>
-                <th className="py-2 pr-3 text-right font-medium">Qty</th>
-                <th className="py-2 pr-3 text-right font-medium">Unit</th>
-                <th className="py-2 pr-3 text-right font-medium">VAT</th>
-                <th className="py-2 text-right font-medium">Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {invoice.lines.map((l) => (
-                <tr key={l.id} className="border-b border-border">
-                  <td className="py-2 pr-3">
-                    <span className="tabular text-xs text-content-muted">{l.product.sku}</span>{" "}
-                    {l.description}
-                  </td>
-                  <td className="py-2 pr-3 text-right tabular">{l.quantity}</td>
-                  <td className="py-2 pr-3 text-right tabular">
-                    <Money cents={l.unitPriceCents} />
-                  </td>
-                  <td className="py-2 pr-3 text-right tabular">{l.taxRateBp / 100}%</td>
-                  <td className="py-2 text-right tabular font-medium">
-                    <Money cents={l.lineTotalCents} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="mt-6">
+          {invoice.lines.length > 5 || sp.line_q ? (
+            <FilterBar action={path} preserve={preserved(sp, ["line_q", "line_page"])}>
+              <FilterSearch name="line_q" value={sp.line_q} placeholder="Search product, SKU…" />
+            </FilterBar>
+          ) : null}
+          <DataTable
+            columns={lineColumns}
+            rows={pagedLines}
+            getRowKey={(l) => l.id}
+            caption="Invoice lines"
+            dense
+            sort={{ key: lineTs.sort, dir: lineTs.dir }}
+            sortHrefFor={lineSortHrefFor}
+            pagination={{
+              page: linePage,
+              pages: linePages,
+              total: sortedLines.length,
+              limit: lineTs.limit,
+              hrefFor: (p) => tableHref(path, sp, { line_page: p }),
+            }}
+            empty={{ title: lineQuery ? "No lines match this search" : "No lines on this invoice" }}
+          />
         </div>
 
         <div className="mt-4 flex justify-end">

@@ -4,7 +4,8 @@ import { handler, ok, pagination, paginationMeta, parseBody, withIdempotency } f
 import { auditAs } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { companyIdOf, scope } from "@/lib/tenant";
-import { createInvoice, refreshOverdueStatuses } from "@/server/sales";
+import { creditedByInvoice, createInvoice, refreshOverdueStatuses } from "@/server/sales";
+import { outstandingCents } from "@/lib/money";
 
 export const dynamic = "force-dynamic";
 
@@ -42,8 +43,20 @@ export const GET = handler(
       db.invoice.count({ where }),
     ]);
 
+    // Outstanding is total less paid less credited. A credit note reduces the
+    // debt exactly as a payment does, and the console, the mobile app and the
+    // allocation logic in recordPayment all read the same figure.
+    const credited = await creditedByInvoice(db, items.map((i) => i.id));
+
     return ok(
-      items.map((i) => ({ ...i, outstandingCents: i.totalCents - i.paidCents })),
+      items.map((i) => {
+        const creditedCents = credited.get(i.id) ?? 0;
+        return {
+          ...i,
+          creditedCents,
+          outstandingCents: outstandingCents({ ...i, creditedCents }),
+        };
+      }),
       paginationMeta(page, total),
     );
   },

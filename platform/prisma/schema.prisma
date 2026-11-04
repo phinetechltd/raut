@@ -75,6 +75,7 @@ model Company {
   visits            Visit[]
   salesTargets      SalesTarget[]
   routes            Route[]
+  vehicles          Vehicle[]
   geofenceEvents    GeofenceEvent[]
   locationPings     LocationPing[]
   smsTemplates      SmsTemplate[]
@@ -1206,11 +1207,41 @@ model SalesTarget {
 //  MODULE 07 · SMART ROUTING
 // ═══════════════════════════════════════════════════════════════════════
 
+/// A company vehicle a rep drives a route in. Tracked so the office can see
+/// which van is where, and so odometer readings reconcile against the planned
+/// and GPS-measured distance of each day.
+model Vehicle {
+  id        String  @id @default(cuid())
+  companyId String
+  branchId  String?
+  /// Registration plate, e.g. KDA 123A. Unique within the company.
+  plate     String
+  make      String?
+  model     String?
+  /// VAN | PICKUP | MOTORBIKE | TRUCK | CAR
+  type      String  @default("VAN")
+  /// The rep who usually drives it; routes default to it when planned.
+  defaultRepId String?
+  odometerKm   Int?
+  active       Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  routes  Route[]
+  pings   LocationPing[]
+
+  @@unique([companyId, plate])
+  @@index([companyId, active])
+}
+
 model Route {
   id          String  @id @default(cuid())
   companyId   String
   repId       String
   territoryId String?
+  vehicleId   String?
 
   name      String
   routeDate DateTime
@@ -1224,6 +1255,13 @@ model Route {
   startLat       Float?
   startLng       Float?
 
+  /// Odometer at departure / return, as the rep reads it off the dash
+  odometerStartKm Int?
+  odometerEndKm   Int?
+  /// Distance actually driven, summed from the day's GPS breadcrumbs at
+  /// completion. Compared against totalDistanceM (the plan) on the console.
+  actualDistanceM Int?
+
   startedAt   DateTime?
   completedAt DateTime?
 
@@ -1233,9 +1271,11 @@ model Route {
   company   Company    @relation(fields: [companyId], references: [id], onDelete: Cascade)
   rep       User       @relation(fields: [repId], references: [id], onDelete: Cascade)
   territory Territory? @relation(fields: [territoryId], references: [id], onDelete: SetNull)
+  vehicle   Vehicle?   @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
 
   stops  RouteStop[]
   visits Visit[]
+  pings  LocationPing[]
 
   @@index([companyId, repId, routeDate])
   @@index([companyId, updatedAt])
@@ -1297,6 +1337,10 @@ model LocationPing {
   id        String @id @default(cuid())
   companyId String
   userId    String
+  /// Stamped server-side from the rep's active route for the day, so a trail
+  /// can be replayed per vehicle and per route without a join on dates.
+  vehicleId String?
+  routeId   String?
 
   latitude   Float
   longitude  Float
@@ -1308,10 +1352,17 @@ model LocationPing {
   recordedAt DateTime
   createdAt  DateTime @default(now())
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  company Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  vehicle Vehicle? @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  route   Route?   @relation(fields: [routeId], references: [id], onDelete: SetNull)
 
+  /// A handset that resends a batch cannot double a breadcrumb: one fix per
+  /// rep per instant. Inserts use skipDuplicates against this.
+  @@unique([userId, recordedAt])
   @@index([companyId, userId, recordedAt])
+  @@index([companyId, vehicleId, recordedAt])
+  @@index([companyId, routeId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1386,7 +1437,9 @@ model PaymentIntent {
   payerPhone String?
   payerEmail String?
 
-  /// PENDING | PROCESSING | SUCCEEDED | FAILED | CANCELLED | EXPIRED
+  /// PENDING | PROCESSING | SETTLING | SUCCEEDED | FAILED | CANCELLED | EXPIRED
+  /// (SETTLING is the transient claim a settlement holds while it books the
+  /// payment, so a callback and a poll cannot both book it.)
   status        String  @default("PENDING")
   failureReason String?
 

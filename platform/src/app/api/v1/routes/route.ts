@@ -40,6 +40,7 @@ export const GET = handler(
       include: {
         rep: { select: { id: true, name: true } },
         territory: { select: { id: true, name: true, colour: true } },
+        vehicle: { select: { id: true, plate: true, make: true, model: true, type: true } },
         stops: {
           include: { customer: { select: { id: true, name: true, latitude: true, longitude: true } } },
           orderBy: { sequence: "asc" },
@@ -56,6 +57,8 @@ const schema = z.object({
   routeDate: z.string(),
   name: z.string().optional(),
   territoryId: z.string().optional(),
+  /** The van for the day; omitted, the rep's usual vehicle is used. */
+  vehicleId: z.string().nullish(),
   customerIds: z.array(z.string()).optional(),
   startLat: z.number().optional(),
   startLng: z.number().optional(),
@@ -84,6 +87,7 @@ export const POST = handler(
       routeDate: new Date(input.routeDate),
       name: input.name,
       territoryId: input.territoryId ?? null,
+      vehicleId: input.vehicleId ?? null,
       customerIds: input.customerIds,
       start:
         input.startLat != null && input.startLng != null
@@ -99,7 +103,7 @@ export const POST = handler(
       "CREATE",
       "Route",
       route.id,
-      { stops: route.stops.length, distanceM: route.totalDistanceM },
+      { stops: route.stops.length, distanceM: route.totalDistanceM, vehicleId: route.vehicleId },
       request,
     );
 

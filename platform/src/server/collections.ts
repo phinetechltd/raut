@@ -7,6 +7,7 @@ import {
   PAYMENT_PROVIDERS,
   providerFor,
   type PaymentProviderName,
+  type VerifyResult,
 } from "@/lib/payments";
 
 import { recordPayment } from "./sales";
@@ -115,38 +116,99 @@ export async function initiateCollection(input: InitiateCollectionInput) {
   });
 }
 
+/** How long a claim may sit in SETTLING before it is presumed abandoned. */
+const STALE_CLAIM_MS = 2 * 60_000;
+
+/** The Payment.clientUuid an intent's payment is booked under. */
+export const intentClientUuid = (intentId: string) => `intent:${intentId}`;
+
+export interface SettleOptions {
+  /**
+   * Replaces the provider round trip. Tests use it to script a verdict; nothing
+   * in production passes it, so the gateway stays the only source of truth.
+   */
+  verify?: (intent: {
+    provider: string;
+    providerRef: string;
+    companyId: string;
+  }) => Promise<VerifyResult>;
+}
+
 /**
  * Asks the provider what happened, and books the money if it succeeded.
  *
  * Safe to call repeatedly — from polling, from a callback, or from both at once.
- * A terminal intent short-circuits, and settlement runs inside a check that the
- * intent is still unsettled, so a duplicate callback cannot create a second
- * Payment for the same collection.
+ * A terminal intent short-circuits. Booking is guarded three ways, because the
+ * callback and the poll routinely arrive within milliseconds of each other and
+ * both see a PROCESSING intent and a SUCCEEDED verdict:
+ *
+ *   1. The intent is **claimed first** with a conditional update
+ *      (PROCESSING → SETTLING, exactly one row). The loser of the race sees
+ *      zero rows and returns the intent as it stands.
+ *   2. The Payment is booked under a clientUuid derived from the intent id,
+ *      so `Payment.clientUuid @unique` refuses a second booking even if the
+ *      claim were somehow bypassed.
+ *   3. The intent → payment link is written **inside the payment's own
+ *      transaction**, so there is no moment at which a Payment exists that the
+ *      intent does not point at. A crash cannot leave the two half-joined.
+ *
+ * A failed booking releases the claim so the next poll can try again; a claim
+ * left behind by a crashed process is re-taken once it is stale.
  */
-export async function settleIntent(intentId: string) {
+export async function settleIntent(intentId: string, opts: SettleOptions = {}) {
   const intent = await db.paymentIntent.findUnique({ where: { id: intentId } });
   if (!intent) throw new ApiError(404, "NOT_FOUND", "Payment intent not found");
 
   if (intent.status === "SUCCEEDED" || intent.status === "FAILED") return intent;
   if (!intent.providerRef) return intent;
 
-  const adapter = providerFor(intent.provider);
-  if (!adapter) return intent;
+  if (intent.status === "SETTLING") {
+    // Another request holds the claim, or a crashed one abandoned it. The link
+    // is written with the payment, so a booked payment under this intent's
+    // uuid with the intent still SETTLING should not occur — repair it anyway
+    // rather than assume.
+    const booked = await db.payment.findUnique({
+      where: { clientUuid: intentClientUuid(intent.id) },
+      select: { id: true },
+    });
+    if (booked) {
+      return db.paymentIntent.update({
+        where: { id: intent.id },
+        data: { status: "SUCCEEDED", paymentId: booked.id, completedAt: new Date() },
+      });
+    }
+    if (Date.now() - intent.updatedAt.getTime() < STALE_CLAIM_MS) return intent;
+    // Stale: fall through and compete for the claim like any other caller.
+  }
 
-  const creds = await resolveCredentials(intent.companyId, intent.provider as never);
-  const verdict = await adapter.verify(intent.providerRef, creds ?? undefined);
+  const adapter = providerFor(intent.provider);
+  if (!adapter && !opts.verify) return intent;
+
+  const verdict = opts.verify
+    ? await opts.verify({
+        provider: intent.provider,
+        providerRef: intent.providerRef,
+        companyId: intent.companyId,
+      })
+    : await adapter!.verify(
+        intent.providerRef,
+        (await resolveCredentials(intent.companyId, intent.provider as never)) ?? undefined,
+      );
   const raw = verdict.raw == null ? null : JSON.stringify(verdict.raw).slice(0, 8000);
 
   if (verdict.status === "PENDING") {
-    return db.paymentIntent.update({
-      where: { id: intent.id },
+    // Only while still live: a verdict that raced a successful settlement must
+    // not overwrite the receipt's payload.
+    await db.paymentIntent.updateMany({
+      where: { id: intent.id, status: { in: ["PENDING", "PROCESSING"] } },
       data: { providerPayload: raw },
     });
+    return db.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } });
   }
 
   if (verdict.status === "FAILED") {
-    return db.paymentIntent.update({
-      where: { id: intent.id },
+    await db.paymentIntent.updateMany({
+      where: { id: intent.id, status: { in: ["PENDING", "PROCESSING", "SETTLING"] } },
       data: {
         status: "FAILED",
         failureReason: verdict.failureReason ?? "The payment did not complete",
@@ -154,10 +216,25 @@ export async function settleIntent(intentId: string) {
         completedAt: new Date(),
       },
     });
+    return db.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } });
   }
 
-  // Succeeded. Book it, then attach the Payment to the intent.
-  //
+  // Succeeded. Claim the intent before booking anything: exactly one caller
+  // moves it to SETTLING, everyone else returns what they find.
+  const claimed = await db.paymentIntent.updateMany({
+    where: {
+      id: intent.id,
+      OR: [
+        { status: { in: ["PENDING", "PROCESSING"] } },
+        { status: "SETTLING", updatedAt: { lt: new Date(Date.now() - STALE_CLAIM_MS) } },
+      ],
+    },
+    data: { status: "SETTLING" },
+  });
+  if (claimed.count !== 1) {
+    return db.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } });
+  }
+
   // The provider is authoritative on the amount too: if it reports a different
   // figure from what we asked for — a partial payment, or a customer editing
   // the amount at the till — the ledger records what actually arrived.
@@ -166,30 +243,60 @@ export async function settleIntent(intentId: string) {
   const method =
     PAYMENT_PROVIDERS.find((p) => p.name === intent.provider)?.method ?? "MPESA";
 
-  const { payment } = await recordPayment({
-    companyId: intent.companyId,
-    customerId: intent.customerId,
-    amountCents: settledCents,
-    method,
-    reference: verdict.receiptRef ?? intent.providerRef,
-    visitId: intent.visitId ?? undefined,
-    createdById: intent.createdById ?? undefined,
-    note:
-      settledCents === intent.amountCents
-        ? undefined
-        : `Requested ${intent.amountCents / 100}, settled ${settledCents / 100}`,
-  });
+  const link = {
+    status: "SUCCEEDED",
+    receiptRef: verdict.receiptRef ?? null,
+    providerPayload: raw,
+    completedAt: new Date(),
+  };
 
-  return db.paymentIntent.update({
-    where: { id: intent.id },
-    data: {
-      status: "SUCCEEDED",
-      receiptRef: verdict.receiptRef ?? null,
-      providerPayload: raw,
-      paymentId: payment.id,
-      completedAt: new Date(),
-    },
-  });
+  try {
+    await recordPayment({
+      companyId: intent.companyId,
+      customerId: intent.customerId,
+      amountCents: settledCents,
+      method,
+      reference: verdict.receiptRef ?? intent.providerRef,
+      visitId: intent.visitId ?? undefined,
+      createdById: intent.createdById ?? undefined,
+      // The backstop: Payment.clientUuid is unique, so a second booking for
+      // this intent is refused by the database whatever else goes wrong.
+      clientUuid: intentClientUuid(intent.id),
+      note:
+        settledCents === intent.amountCents
+          ? undefined
+          : `Requested ${intent.amountCents / 100}, settled ${settledCents / 100}`,
+      // Same transaction as the Payment: the intent cannot be SUCCEEDED without
+      // its payment, nor the payment exist without the intent pointing at it.
+      inTransaction: async (tx, payment) => {
+        await tx.paymentIntent.update({
+          where: { id: intent.id },
+          data: { ...link, paymentId: payment.id },
+        });
+      },
+    });
+  } catch (error) {
+    // Was the money already booked for this intent after all? Then the unique
+    // clientUuid did its job: link it and finish rather than fail.
+    const booked = await db.payment.findUnique({
+      where: { clientUuid: intentClientUuid(intent.id) },
+      select: { id: true },
+    });
+    if (booked) {
+      return db.paymentIntent.update({
+        where: { id: intent.id },
+        data: { ...link, paymentId: booked.id },
+      });
+    }
+    // Release the claim so the next poll or callback can try again.
+    await db.paymentIntent.updateMany({
+      where: { id: intent.id, status: "SETTLING" },
+      data: { status: "PROCESSING" },
+    });
+    throw error;
+  }
+
+  return db.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } });
 }
 
 /**

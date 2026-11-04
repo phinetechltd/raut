@@ -192,13 +192,33 @@ export function creditLineAmounts(
 }
 
 /**
- * Invoice status derived from what has been paid and when it fell due.
- * Kept in one place so the console, the API and the SMS reminder job cannot
- * disagree about whether an invoice is overdue.
+ * What is still owed on an invoice: the total, less what has been paid, less
+ * what has been credited back. A credit note reduces the debt exactly as a
+ * payment does — the goods came back instead of the money — so anything that
+ * reads total − paid alone over-collects by the credited amount.
+ */
+export function outstandingCents(invoice: {
+  totalCents: number;
+  paidCents: number;
+  creditedCents?: number | null;
+}): number {
+  return Math.max(0, invoice.totalCents - invoice.paidCents - (invoice.creditedCents ?? 0));
+}
+
+/**
+ * Invoice status derived from what has been paid and credited, and when it
+ * fell due. Kept in one place so the console, the API and the SMS reminder job
+ * cannot disagree about whether an invoice is overdue.
+ *
+ * Credits count towards settlement: an invoice three-quarters paid and
+ * one-quarter credited is PAID, not partially paid for ever. A fully credited
+ * invoice is CANCELLED by the credit note itself and passes through here as
+ * `current`.
  */
 export function deriveInvoiceStatus(params: {
   totalCents: number;
   paidCents: number;
+  creditedCents?: number | null;
   dueDate: Date | null;
   current: string;
   now?: Date;
@@ -206,7 +226,8 @@ export function deriveInvoiceStatus(params: {
   const { totalCents, paidCents, dueDate, current } = params;
   if (current === "DRAFT" || current === "CANCELLED") return current;
 
-  if (paidCents >= totalCents && totalCents > 0) return "PAID";
+  const creditedCents = params.creditedCents ?? 0;
+  if (totalCents > 0 && paidCents + creditedCents >= totalCents) return "PAID";
 
   const now = params.now ?? new Date();
   const overdue = dueDate != null && dueDate < now;

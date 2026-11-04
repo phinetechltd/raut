@@ -33,10 +33,29 @@ class AppConfig {
 
   static const String appVersion = '1.0.0';
 
+  /// Google Maps SDK key for Android, compiled in with
+  /// `--dart-define=GOOGLE_MAPS_ANDROID_KEY=…`. The same define is read by
+  /// android/app/build.gradle.kts and placed in the manifest, so one flag
+  /// configures both the native SDK and this flag. Without it the in-app map
+  /// falls back to OpenStreetMap whatever the company chose; Directions links
+  /// are unaffected because they open the rep's own maps app.
+  static const String googleMapsAndroidKey = String.fromEnvironment(
+    'GOOGLE_MAPS_ANDROID_KEY',
+    defaultValue: '',
+  );
+
+  static bool get hasGoogleMapsKey => googleMapsAndroidKey.isNotEmpty;
+
   /// How often the background location sampler records a fix while a route is
   /// active. Ten metres is fine-grained enough to reconstruct a rep's day
   /// without flattening the battery.
   static const int locationDistanceFilterM = 10;
+
+  /// How often a stationary handset still reports. The distance filter alone
+  /// goes silent the moment the van stops, and a rep in traffic for an hour
+  /// looked to the office like a phone that had died. One fix a minute while
+  /// parked is cheap and keeps the "last seen" honest.
+  static const Duration locationHeartbeat = Duration(seconds: 60);
 
   /// Cap on breadcrumbs held locally before the oldest are dropped. A day of
   /// tracking is worth keeping offline; a fortnight is not.

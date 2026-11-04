@@ -37,7 +37,12 @@ export function tableState(
   const rawSort = params[`${p}sort`] ?? opts.defaultSort ?? null;
   const sort =
     rawSort && (!opts.allowed || opts.allowed.includes(rawSort)) ? rawSort : null;
-  const dir: SortDir = params[`${p}dir`] === "asc" ? "asc" : (opts.defaultDir ?? "desc");
+  // Honour an explicit direction either way; only fall back to the default
+  // when the URL says nothing. Treating anything but "asc" as the default
+  // meant a table that defaults to ascending could never be flipped.
+  const rawDir = params[`${p}dir`];
+  const dir: SortDir =
+    rawDir === "asc" || rawDir === "desc" ? rawDir : (opts.defaultDir ?? "desc");
   const page = Math.max(1, Number(params[`${p}page`]) || 1);
   const limit = Math.min(100, Math.max(5, Number(params[`${p}limit`]) || (opts.limit ?? 15)));
   return { page, limit, sort, dir };

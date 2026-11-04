@@ -25,12 +25,14 @@ import { PrismaClient } from "@prisma/client";
 
 import {
   postCogs,
+  postCreditNote,
   postExpense,
   postGoodsReceiptEntry,
   postInvoice,
   postOpeningStock,
   postPayment,
   postStockAdjustment,
+  postSupplierInvoice,
 } from "../src/server/posting";
 import { ensureChartOfAccounts, trialBalanceTotals } from "../src/server/ledger";
 
@@ -51,7 +53,15 @@ async function backfillCompany(companyId: string, name: string) {
   const created = await ensureChartOfAccounts(companyId);
   if (created > 0) console.log(`  chart of accounts: ${created} created`);
 
-  const counts = { invoices: 0, cogs: 0, payments: 0, receipts: 0, expenses: 0 };
+  const counts = {
+    invoices: 0,
+    creditNotes: 0,
+    cogs: 0,
+    payments: 0,
+    receipts: 0,
+    supplierInvoices: 0,
+    expenses: 0,
+  };
 
   // postEntry returns the existing entry when a document is already posted, so
   // the counters below say "documents replayed", not "entries written". Take
@@ -71,6 +81,22 @@ async function backfillCompany(companyId: string, name: string) {
     await db.$transaction(async (tx) => {
       const entry = await postInvoice(tx, inv, inv.createdById);
       if (entry) counts.invoices++;
+    }, { timeout: 15_000 });
+  }
+
+  // Credit notes reverse part of a sale. Left out, receivables and revenue
+  // stay overstated by exactly what was credited, and the VAT reclaimed on the
+  // return is never reclaimed in the books.
+  const creditNotes = await db.creditNote.findMany({
+    where: { companyId, status: { not: "CANCELLED" } },
+    orderBy: { issueDate: "asc" },
+  });
+  for (const note of creditNotes) {
+    if (note.totalCents === 0) continue;
+    if (dryRun) { counts.creditNotes++; continue; }
+    await db.$transaction(async (tx) => {
+      const entry = await postCreditNote(tx, note, note.createdById);
+      if (entry) counts.creditNotes++;
     }, { timeout: 15_000 });
   }
 
@@ -118,6 +144,33 @@ async function backfillCompany(companyId: string, name: string) {
     }, { timeout: 15_000 });
   }
 
+  const supplierInvoices = await db.supplierInvoice.findMany({
+    where: { companyId, status: { not: "CANCELLED" } },
+    orderBy: { issueDate: "asc" },
+  });
+  for (const inv of supplierInvoices) {
+    if (inv.totalCents === 0) continue;
+    if (dryRun) { counts.supplierInvoices++; continue; }
+    await db.$transaction(async (tx) => {
+      const entry = await postSupplierInvoice(
+        tx,
+        {
+          id: inv.id,
+          companyId,
+          number: inv.number,
+          invoiceDate: inv.issueDate,
+          subtotalCents: inv.totalCents,
+          // The model carries no tax split, so the whole amount is booked to
+          // GRNI and nothing to VAT recoverable until it does.
+          taxCents: 0,
+          totalCents: inv.totalCents,
+        },
+        null,
+      );
+      if (entry) counts.supplierInvoices++;
+    }, { timeout: 15_000 });
+  }
+
   const payments = await db.payment.findMany({
     where: { companyId },
     orderBy: { paidAt: "asc" },
@@ -155,7 +208,7 @@ async function backfillCompany(companyId: string, name: string) {
   }
 
   console.log(
-    `  replayed: invoices ${counts.invoices} · stock ${counts.cogs} · receipts ${counts.receipts} · payments ${counts.payments} · expenses ${counts.expenses}`,
+    `  replayed: invoices ${counts.invoices} · credit notes ${counts.creditNotes} · stock ${counts.cogs} · receipts ${counts.receipts} · supplier invoices ${counts.supplierInvoices} · payments ${counts.payments} · expenses ${counts.expenses}`,
   );
 
   if (!dryRun) {

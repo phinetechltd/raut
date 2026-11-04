@@ -263,6 +263,20 @@
     border: 2px solid;
     box-shadow: var(--shadow-sm);
   }
+  /* A vehicle's live position: the van glyph on a tone-coloured disc. Sized
+     above the stop pins so it reads as the thing moving between them. */
+  .raut-vehicle-pin {
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    border-radius: 9999px;
+    border: 2px solid;
+    box-shadow: var(--shadow-md);
+  }
+  .raut-vehicle-pin svg {
+    display: block;
+  }
 
   /* ── Google Maps ──────────────────────────────────────────────────────
      The Maps JavaScript API injects its own UI; these pull the parts that
