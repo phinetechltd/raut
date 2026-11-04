@@ -92,6 +92,7 @@ model Company {
   etimsSubmissions  EtimsSubmission[]
   creditNotes       CreditNote[]
   productVariants   ProductVariant[]
+  deliveryNotes     DeliveryNote[]
 
   @@index([status])
 }
@@ -144,6 +145,7 @@ model Branch {
   quotations     Quotation[]
   purchaseOrders PurchaseOrder[]
   expenses       Expense[]
+  deliveryNotes  DeliveryNote[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -185,6 +187,7 @@ model User {
   geofenceEvents    GeofenceEvent[]
   locationPings     LocationPing[]
   auditLogs         AuditLog[]
+  deliveriesMade    DeliveryNote[]     @relation("DeliveryNoteDeliveredBy")
 
   @@index([companyId, role])
   @@index([companyId, status])
@@ -381,6 +384,7 @@ model Customer {
   smsMessages    SmsMessage[]
   paymentIntents PaymentIntent[]
   creditNotes    CreditNote[]
+  deliveryNotes  DeliveryNote[]
 
   @@unique([companyId, code])
   @@index([companyId, status])
@@ -518,6 +522,7 @@ model Product {
   poLines         PurchaseOrderLine[]
   grnLines        GoodsReceiptLine[]
   creditNoteLines CreditNoteLine[]
+  deliveryNoteLines DeliveryNoteLine[]
   variants        ProductVariant[]
   transferLines   StockTransferLine[]
 
@@ -551,6 +556,7 @@ model StockLocation {
   transfersIn   StockTransfer[] @relation("TransferTo")
   invoices      Invoice[]
   goodsReceipts GoodsReceipt[]
+  deliveryNotes DeliveryNote[]
 
   @@unique([companyId, code])
   @@index([companyId])
@@ -584,7 +590,8 @@ model StockMovement {
   productId  String
   locationId String
 
-  /// PURCHASE | SALE | TRANSFER_IN | TRANSFER_OUT | ADJUSTMENT | RETURN | OPENING
+  /// PURCHASE | SALE | TRANSFER_IN | TRANSFER_OUT | ADJUSTMENT | WRITE_OFF | RETURN | OPENING
+  /// | REPACK_OUT | REPACK_IN (a split/repack between two products; both legs share refType REPACK)
   type          String
   /// Signed: positive increases the location's stock
   quantity      Int
@@ -613,12 +620,15 @@ model StockTransfer {
   number         String
   fromLocationId String
   toLocationId   String
-  /// DRAFT | IN_TRANSIT | RECEIVED | CANCELLED
+  /// DRAFT | PARTIALLY_DISPATCHED | IN_TRANSIT | PARTIALLY_RECEIVED | RECEIVED | CANCELLED
   status         String  @default("DRAFT")
   note           String?
 
   dispatchedAt DateTime?
   receivedAt   DateTime?
+  /// Set when the transfer was closed short: goods dispatched but never
+  /// received were returned to the source on paper and written off there.
+  shortClosedAt DateTime?
   createdById  String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
@@ -637,6 +647,8 @@ model StockTransferLine {
   transferId String
   productId  String
   quantity   Int
+  /// Cumulative units that have left the source; 0 ≤ received ≤ dispatched ≤ quantity
+  dispatched Int    @default(0)
   received   Int    @default(0)
 
   transfer StockTransfer @relation(fields: [transferId], references: [id], onDelete: Cascade)
@@ -735,6 +747,7 @@ model SalesOrder {
   visit     Visit?           @relation(fields: [visitId], references: [id], onDelete: SetNull)
   lines     SalesOrderLine[]
   invoices  Invoice[]
+  deliveryNotes DeliveryNote[]
 
   @@unique([companyId, number])
   @@index([companyId, status])
@@ -822,6 +835,7 @@ model Invoice {
   lines       InvoiceLine[]
   allocations PaymentAllocation[]
   creditNotes CreditNote[]
+  deliveryNotes DeliveryNote[]
 
   @@unique([companyId, number])
   @@index([companyId, status])
@@ -1013,6 +1027,10 @@ model GoodsReceiptLine {
   productId     String
   quantity      Int
   unitCostCents Int
+  /// Where this line lands; null means the receipt's own location
+  locationId    String?
+  /// The purchase order line this line fulfils; null falls back to matching by product
+  poLineId      String?
 
   grn     GoodsReceipt @relation(fields: [grnId], references: [id], onDelete: Cascade)
   product Product      @relation(fields: [productId], references: [id])
@@ -1231,6 +1249,7 @@ model Vehicle {
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   routes  Route[]
   pings   LocationPing[]
+  deliveryNotes DeliveryNote[]
 
   @@unique([companyId, plate])
   @@index([companyId, active])
@@ -1276,6 +1295,7 @@ model Route {
   stops  RouteStop[]
   visits Visit[]
   pings  LocationPing[]
+  deliveryNotes DeliveryNote[]
 
   @@index([companyId, repId, routeDate])
   @@index([companyId, updatedAt])
@@ -1437,7 +1457,9 @@ model PaymentIntent {
   payerPhone String?
   payerEmail String?
 
-  /// PENDING | PROCESSING | SETTLING | SUCCEEDED | FAILED | CANCELLED | EXPIRED
+  /// PENDING | PROCESSING | SETTLING | SUCCEEDED | FAILED | CANCELLED | EXPIRED | REVERSED
+  /// (REVERSED: the provider reversed/refunded a charge after we booked it; the
+  /// ledger is NOT auto-reversed — Finance → Collections surfaces it.)
   /// (SETTLING is the transient claim a settlement holds while it books the
   /// payment, so a callback and a poll cannot both book it.)
   status        String  @default("PENDING")
@@ -1448,6 +1470,8 @@ model PaymentIntent {
   providerRef     String?
   /// The provider's confirmation code shown to the customer (M-Pesa receipt).
   receiptRef      String?
+  /// Hosted checkout URL for redirect providers (Paystack authorization_url).
+  redirectUrl     String?
   /// Raw callback body, kept verbatim for dispute resolution. SQLite has no
   /// JSON type, so this is the serialised string.
   providerPayload String?
@@ -1849,4 +1873,102 @@ model ProductVariant {
 
   @@unique([companyId, sku])
   @@index([companyId, productId, active])
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+//  MODULE 02 · DELIVERY NOTES
+// ═══════════════════════════════════════════════════════════════════════
+
+/// Proof that goods left and who took them.
+///
+/// A delivery note is a **dispatch and acknowledgement record, not a stock
+/// document**. Stock leaves the shelf when the invoice is issued, so a note
+/// raised against an issued invoice moves nothing; a note raised against an
+/// order that has not been invoiced yet moves nothing either — the invoice
+/// that follows will. What the note does carry is the quantity that physically
+/// went out on this trip, which lines were short, who signed for them, and what
+/// came back. Several notes may cover one invoice or order, and the service
+/// refuses to deliver more than was sold across all of them.
+model DeliveryNote {
+  id            String  @id @default(cuid())
+  companyId     String
+  branchId      String?
+  number        String
+  /// At least one of invoiceId / orderId is set; the service enforces it.
+  invoiceId     String?
+  orderId       String?
+  customerId    String
+  /// Where the goods were picked from, when known.
+  locationId    String?
+  /// The rep or driver who handed the goods over.
+  deliveredById String?
+  vehicleId     String?
+  routeId       String?
+  /// The visit this delivery happened on, when it was a field delivery.
+  visitId       String?
+
+  /// DRAFT | ISSUED | DELIVERED | RETURNED | CANCELLED
+  status      String    @default("DRAFT")
+  issueDate   DateTime  @default(now())
+  deliveredAt DateTime?
+
+  /// The customer's address as it was when the note was raised. Snapshotted so
+  /// moving a customer later does not rewrite where the goods were taken.
+  deliveryAddress     String?
+  receivedByName      String?
+  receivedByPhone     String?
+  /// Either a typed name or a data: URL of a drawn signature.
+  receivedBySignature String?
+  notes               String?
+
+  clientUuid  String?  @unique
+  createdById String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  company     Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch      Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  invoice     Invoice?       @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  order       SalesOrder?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  customer    Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  location    StockLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  deliveredBy User?          @relation("DeliveryNoteDeliveredBy", fields: [deliveredById], references: [id], onDelete: SetNull)
+  vehicle     Vehicle?       @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  route       Route?         @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  lines       DeliveryNoteLine[]
+
+  @@unique([companyId, number])
+  @@index([companyId, status])
+  @@index([companyId, customerId])
+  @@index([companyId, invoiceId])
+  @@index([companyId, orderId])
+  @@index([companyId, updatedAt])
+}
+
+model DeliveryNoteLine {
+  id             String  @id @default(cuid())
+  deliveryNoteId String
+  productId      String
+  /// The invoice or order line this delivery fulfils, so partial deliveries
+  /// can be summed back against what was sold.
+  invoiceLineId  String?
+  orderLineId    String?
+  variantId      String?
+  variantName    String?
+
+  description  String
+  /// What the source document says was sold, in the unit sold.
+  orderedQty   Int
+  /// What went out on this note, in the unit sold.
+  deliveredQty Int
+  /// deliveredQty in base units, mirroring the invoice line.
+  baseQuantity Int     @default(0)
+  /// What the customer handed back on this note, in the unit sold.
+  returnedQty  Int     @default(0)
+  note         String?
+
+  deliveryNote DeliveryNote @relation(fields: [deliveryNoteId], references: [id], onDelete: Cascade)
+  product      Product      @relation(fields: [productId], references: [id])
+
+  @@index([deliveryNoteId])
 }

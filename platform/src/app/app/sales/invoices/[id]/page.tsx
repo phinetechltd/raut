@@ -10,6 +10,7 @@ import {
   FilterSearch,
   Money,
   SectionHeading,
+  StatusBadge,
   type Column,
 } from "@/components/ui";
 import { db } from "@/lib/db";
@@ -18,6 +19,7 @@ import { requireTenant } from "@/lib/session";
 import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
 
 import { CreditNoteButton } from "./credit-note-button";
+import { DeliveryNoteButton } from "./delivery-note-button";
 import { PaymentDialog } from "../../../finance/payment-dialog";
 import { TransmitButton } from "./transmit-button";
 
@@ -81,6 +83,11 @@ export default async function InvoicePage({
       customer: true,
       lines: { include: { product: { select: { sku: true, name: true } } } },
       creditNotes: { orderBy: { issueDate: "desc" } },
+      deliveryNotes: {
+        where: { status: { not: "CANCELLED" } },
+        select: { id: true, number: true, status: true },
+        orderBy: { issueDate: "desc" },
+      },
     },
   });
   if (!invoice) notFound();
@@ -206,6 +213,25 @@ export default async function InvoicePage({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone={ETIMS_TONE[status]}>{ETIMS_LABEL[status]}</Badge>
+          {/* Printing happens on /print, outside the Shell, so the paper carries
+              no sidebar and the same layout as every other document. */}
+          <ButtonLink href={`/print/invoice/${invoice.id}`} target="_blank" variant="secondary" size="sm">
+            Print
+          </ButtonLink>
+          {invoice.status === "PAID" && (
+            <ButtonLink
+              href={`/print/invoice/${invoice.id}?format=thermal`}
+              target="_blank"
+              variant="ghost"
+              size="sm"
+              title="80 mm till-roll receipt"
+            >
+              Thermal receipt
+            </ButtonLink>
+          )}
+          {can(principal, "delivery:write") && invoice.status !== "DRAFT" && invoice.status !== "CANCELLED" && (
+            <DeliveryNoteButton invoiceId={invoice.id} />
+          )}
           {can(principal, "payment:write") && outstandingCents > 0 && (
             <PaymentDialog
               customers={[{ id: invoice.customer.id, name: invoice.customer.name, balanceCents: invoice.customer.balanceCents }]}
@@ -422,6 +448,37 @@ export default async function InvoicePage({
               <span className="tabular font-medium">
                 <Money cents={c.totalCents} />
               </span>
+              <ButtonLink href={`/print/credit-note/${c.id}`} target="_blank" variant="ghost" size="sm">
+                Print
+              </ButtonLink>
+            </div>
+          ))}
+        </Card>
+      )}
+
+      {invoice.deliveryNotes.length > 0 && (
+        <Card className="print:hidden">
+          <SectionHeading
+            title="Delivery notes"
+            actions={
+              can(principal, "delivery:read") ? (
+                <ButtonLink href={`/app/sales/delivery-notes?dn_q=${encodeURIComponent(invoice.number)}`} variant="ghost" size="sm">
+                  Manage
+                </ButtonLink>
+              ) : null
+            }
+          />
+          {invoice.deliveryNotes.map((d) => (
+            <div
+              key={d.id}
+              className="flex flex-wrap items-baseline justify-between gap-2 border-b border-border py-2 last:border-0"
+            >
+              <span className="tabular font-medium">{d.number}</span>
+              <span className="flex-1" />
+              <StatusBadge status={d.status} />
+              <ButtonLink href={`/print/delivery-note/${d.id}`} target="_blank" variant="ghost" size="sm">
+                Print
+              </ButtonLink>
             </div>
           ))}
         </Card>

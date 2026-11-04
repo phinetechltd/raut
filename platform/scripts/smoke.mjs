@@ -15,6 +15,14 @@ const PASSWORD = "Raut@2026";
 let passed = 0;
 let failed = 0;
 
+/** A plausible, unique M-Pesa receipt code (`^[A-Z0-9]{10}$`). */
+function mpesaCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "S";
+  for (let i = 0; i < 9; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return s;
+}
+
 function check(name, condition, detail = "") {
   if (condition) {
     passed++;
@@ -41,6 +49,17 @@ async function api(path, { method = "GET", token, body } = {}) {
 
 function uuid() {
   return `smoke-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** A console session cookie, for pages that are not part of /api/v1. */
+async function sessionCookie(email) {
+  const res = await fetch(`${BASE}/api/v1/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password: PASSWORD }),
+  });
+  const jar = res.headers.getSetCookie?.() ?? [];
+  return jar.find((c) => c.startsWith("raut_session="))?.split(";")[0] ?? "";
 }
 
 async function main() {
@@ -296,7 +315,9 @@ async function main() {
           customerId: customerForOrder.id,
           amountCents: 50_000_00,
           method: "MPESA",
-          reference: "SMOKE-TEST",
+          // A real M-Pesa code: ten upper-case alphanumerics, unique per
+          // company. The server refuses anything else, and a reused code.
+          reference: mpesaCode(),
         },
       },
     ],
@@ -373,7 +394,9 @@ async function main() {
   // ── vehicle tracking ───────────────────────────────────────────────
   console.log("\nVehicle tracking");
   const origin = nextPending?.customer ?? mapped;
-  const t0 = Date.now() - 4 * 60_000;
+  // Six fixes thirty seconds apart, the last one right now: "latest" must be
+  // this batch, not a ping another script (integration.mjs) wrote a minute ago.
+  const t0 = Date.now() - 5 * 30_000;
   const trail = Array.from({ length: 6 }, (_, i) => ({
     latitude: origin.latitude + i * 0.0005,
     longitude: origin.longitude + i * 0.0003,
@@ -393,7 +416,8 @@ async function main() {
     heading: null,
     batteryPct: 77,
     isMoving: false,
-    recordedAt: new Date(t0 + 7 * 30_000).toISOString(),
+    // Mid-trail rather than last, so it is never the newest fix on record.
+    recordedAt: new Date(t0 + 75_000).toISOString(),
   });
   const pingBatch = () => ({
     deviceId,
@@ -667,7 +691,17 @@ async function main() {
       token: adminToken,
       body: { provider: "PAYSTACK", values: { PAYSTACK_SECRET_KEY: probe } },
     });
-    check("A company can store its own gateway key", saved.status === 200);
+    // A production server (NODE_ENV=production without PAYMENTS_ALLOW_TEST_KEYS)
+    // refuses a sk_test_ key by design; that refusal is the correct answer
+    // there, and the vault checks below need a stored key to mean anything.
+    const refusedTestKey =
+      saved.status === 422 && /test key/i.test(saved.json?.error?.message ?? "");
+    check(
+      "A company can store its own gateway key",
+      saved.status === 200 || refusedTestKey,
+      refusedTestKey ? "production refuses test keys (expected)" : "",
+    );
+    if (saved.status === 200) {
 
     const readBack = await api("/settings/credentials", { token: adminToken });
     const serialised = JSON.stringify(readBack.json ?? {});
@@ -695,6 +729,7 @@ async function main() {
       otherPs?.configured === false && !JSON.stringify(otherView.json ?? {}).includes(probe),
       `configured=${otherPs?.configured}`,
     );
+    }
   }
 
 
@@ -920,6 +955,286 @@ async function main() {
     wrongVariant.status >= 400,
     `HTTP ${wrongVariant.status}`,
   );
+
+  console.log("\nSplit stock & transfers");
+
+  // Two different tracked products: stock is one pool per product, so a split
+  // only means anything between two products. Both get a known quantity at the
+  // main store first so the lifecycle below is deterministic.
+  const splitCatalogue = (await api("/products?limit=50", { token: adminToken })).json?.data ?? [];
+  const splitTracked = splitCatalogue.filter((p) => p.trackStock && p.costPriceCents > 0);
+  const splitCarton = splitTracked[0];
+  const splitPiece = splitTracked.find((p) => p.id !== splitCarton?.id);
+  const stockRes = (await api("/stock", { token: adminToken })).json?.data;
+  const warehouses = (stockRes?.locations ?? []).filter((l) => l.type === "WAREHOUSE");
+  const mainStore = warehouses[0];
+  const otherStore = (stockRes?.locations ?? []).find((l) => l.id !== mainStore?.id);
+  check("Two tracked products and two locations exist", Boolean(splitCarton && splitPiece && mainStore && otherStore));
+
+  const levelAt = async (productId, locationId) => {
+    const res = await api("/stock", { token: adminToken });
+    const level = (res.json?.data?.levels ?? []).find((l) => l.productId === productId);
+    return level?.byLocation.find((b) => b.locationId === locationId)?.quantity ?? 0;
+  };
+
+  await api("/stock", {
+    method: "POST",
+    token: adminToken,
+    body: { productId: splitCarton.id, locationId: mainStore.id, quantity: 40, note: "Smoke: seed for split and transfers" },
+  });
+
+  // ── split / repack ──
+  const cartonBefore = await levelAt(splitCarton.id, mainStore.id);
+  const pieceBefore = await levelAt(splitPiece.id, mainStore.id);
+  const splitRes = await api("/stock/repack", {
+    method: "POST",
+    token: adminToken,
+    body: { locationId: mainStore.id, fromProductId: splitCarton.id, fromQuantity: 2, toProductId: splitPiece.id, toQuantity: 7 },
+  });
+  check("A split is recorded", splitRes.status === 201, splitRes.json?.error?.message ?? "");
+  const splitData = splitRes.json?.data;
+  check("Both legs share one reference", splitData?.out?.refId === splitData?.refId && splitData?.in?.refId === splitData?.refId);
+  check(
+    "Value out = value in + rounding written off",
+    splitData && -splitData.out.quantity * splitData.out.unitCostCents === splitData.in.quantity * splitData.in.unitCostCents + splitData.remainderCents,
+    splitData ? `${-splitData.out.quantity * splitData.out.unitCostCents} = ${splitData.in.quantity * splitData.in.unitCostCents} + ${splitData.remainderCents}` : "",
+  );
+  check("Rounding is smaller than the units produced", splitData && splitData.remainderCents < splitData.in.quantity);
+  check("Source shelf went down by the split quantity", (await levelAt(splitCarton.id, mainStore.id)) === cartonBefore - 2);
+  check("Target shelf went up by the units produced", (await levelAt(splitPiece.id, mainStore.id)) === pieceBefore + 7);
+
+  const splitTooMany = await api("/stock/repack", {
+    method: "POST",
+    token: adminToken,
+    body: { locationId: mainStore.id, fromProductId: splitCarton.id, fromQuantity: 1_000_000, toProductId: splitPiece.id, toQuantity: 1 },
+  });
+  check("A split beyond what is on hand is refused", splitTooMany.status === 422, `HTTP ${splitTooMany.status}`);
+  const splitSame = await api("/stock/repack", {
+    method: "POST",
+    token: adminToken,
+    body: { locationId: mainStore.id, fromProductId: splitCarton.id, fromQuantity: 1, toProductId: splitCarton.id, toQuantity: 12 },
+  });
+  check("A split of a product into itself is refused", splitSame.status === 422, `HTTP ${splitSame.status}`);
+
+  // ── transfer lifecycle in parts ──
+  const srcBefore = await levelAt(splitCarton.id, mainStore.id);
+  const dstBefore = await levelAt(splitCarton.id, otherStore.id);
+  const trfCreated = await api("/transfers", {
+    method: "POST",
+    token: adminToken,
+    body: { fromLocationId: mainStore.id, toLocationId: otherStore.id, lines: [{ productId: splitCarton.id, quantity: 10 }] },
+  });
+  check("A transfer is created as a draft", trfCreated.status === 201 && trfCreated.json?.data?.status === "DRAFT", trfCreated.json?.error?.message ?? "");
+  const trfMain = trfCreated.json?.data;
+  const lineId = trfMain?.lines?.[0]?.id;
+
+  const trfPart1 = await api(`/transfers/${trfMain?.id}/dispatch`, {
+    method: "POST",
+    token: adminToken,
+    body: { lines: [{ lineId, quantity: 4 }] },
+  });
+  check("Part of a line can be dispatched", trfPart1.json?.data?.status === "PARTIALLY_DISPATCHED", `${trfPart1.status} ${trfPart1.json?.data?.status ?? trfPart1.json?.error?.message}`);
+  check("Source dropped by what was dispatched", (await levelAt(splitCarton.id, mainStore.id)) === srcBefore - 4);
+
+  const trfRecv1 = await api(`/transfers/${trfMain?.id}/receive`, {
+    method: "POST",
+    token: adminToken,
+    body: { lines: [{ lineId, quantity: 4 }] },
+  });
+  check("What arrived can be received while more is still to ship", trfRecv1.json?.data?.status === "PARTIALLY_RECEIVED", `${trfRecv1.json?.data?.status ?? trfRecv1.json?.error?.message}`);
+
+  const overDispatch = await api(`/transfers/${trfMain?.id}/dispatch`, {
+    method: "POST",
+    token: adminToken,
+    body: { lines: [{ lineId, quantity: 7 }] },
+  });
+  check("Dispatching more than remains is refused", overDispatch.status === 422, `HTTP ${overDispatch.status}`);
+
+  const trfPart2 = await api(`/transfers/${trfMain?.id}/dispatch`, { method: "POST", token: adminToken, body: {} });
+  check("The rest dispatches with a bare POST", trfPart2.json?.data?.lines?.[0]?.dispatched === 10, `dispatched ${trfPart2.json?.data?.lines?.[0]?.dispatched}`);
+  const overReceive = await api(`/transfers/${trfMain?.id}/receive`, {
+    method: "POST",
+    token: adminToken,
+    body: { lines: [{ lineId, quantity: 7 }] },
+  });
+  check("Receiving more than is in transit is refused", overReceive.status === 422, `HTTP ${overReceive.status}`);
+  const trfRecv2 = await api(`/transfers/${trfMain?.id}/receive`, { method: "POST", token: adminToken, body: {} });
+  check("Receiving the rest completes the transfer", trfRecv2.json?.data?.status === "RECEIVED" && Boolean(trfRecv2.json?.data?.receivedAt), `${trfRecv2.json?.data?.status}`);
+  check("Destination rose by the whole transfer", (await levelAt(splitCarton.id, otherStore.id)) === dstBefore + 10);
+  const trfAgain = await api(`/transfers/${trfMain?.id}/dispatch`, { method: "POST", token: adminToken, body: {} });
+  check("A completed transfer cannot be dispatched again", trfAgain.status === 409, `HTTP ${trfAgain.status}`);
+
+  // Cancel a draft; refuse to cancel once goods have moved.
+  const trfDraft = await api("/transfers", {
+    method: "POST",
+    token: adminToken,
+    body: { fromLocationId: mainStore.id, toLocationId: otherStore.id, lines: [{ productId: splitCarton.id, quantity: 3 }] },
+  });
+  const trfCancelled = await api(`/transfers/${trfDraft.json?.data?.id}/cancel`, { method: "POST", token: adminToken, body: {} });
+  check("A draft can be cancelled", trfCancelled.json?.data?.status === "CANCELLED");
+  const cancelDone = await api(`/transfers/${trfMain?.id}/cancel`, { method: "POST", token: adminToken, body: {} });
+  check("A completed transfer cannot be cancelled", cancelDone.status === 409, `HTTP ${cancelDone.status}`);
+
+  // Short close: 5 leave, 2 arrive, 3 are written off at the source.
+  const shortSrcBefore = await levelAt(splitCarton.id, mainStore.id);
+  const shortT = (
+    await api("/transfers", {
+      method: "POST",
+      token: adminToken,
+      body: { fromLocationId: mainStore.id, toLocationId: otherStore.id, dispatch: true, lines: [{ productId: splitCarton.id, quantity: 5 }] },
+    })
+  ).json?.data;
+  check("Create-and-dispatch goes straight in transit", shortT?.status === "IN_TRANSIT", `${shortT?.status}`);
+  await api(`/transfers/${shortT?.id}/receive`, {
+    method: "POST",
+    token: adminToken,
+    body: { lines: [{ lineId: shortT?.lines?.[0]?.id, quantity: 2 }] },
+  });
+  const trfClosed = await api(`/transfers/${shortT?.id}/close-short`, {
+    method: "POST",
+    token: adminToken,
+    body: { note: "Smoke: three cartons lost in transit" },
+  });
+  check("A transfer can be closed short", trfClosed.json?.data?.status === "RECEIVED" && Boolean(trfClosed.json?.data?.shortClosedAt), trfClosed.json?.error?.message ?? "");
+  check("The source is down by everything dispatched", (await levelAt(splitCarton.id, mainStore.id)) === shortSrcBefore - 5);
+  const fromOther = await api("/transfers", {
+    method: "POST",
+    token: adminToken,
+    body: { fromLocationId: mainStore.id, toLocationId: mainStore.id, lines: [{ productId: splitCarton.id, quantity: 1 }] },
+  });
+  check("A transfer to the same location is refused", fromOther.status === 422, `HTTP ${fromOther.status}`);
+
+  const trfListed = await api(`/transfers?status=RECEIVED&q=${encodeURIComponent(trfMain?.number ?? "")}`, { token: adminToken });
+  check("Transfers can be listed and filtered", trfListed.status === 200 && (trfListed.json?.data ?? []).some((t) => t.id === trfMain?.id));
+
+  // ── multi-location adjustment ──
+  const relocSrc = await levelAt(splitCarton.id, mainStore.id);
+  const relocDst = await levelAt(splitCarton.id, otherStore.id);
+  const adjReloc = await api("/stock", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      productId: splitCarton.id,
+      note: "Smoke: found in the other store",
+      lines: [
+        { locationId: mainStore.id, quantity: -3 },
+        { locationId: otherStore.id, quantity: 3 },
+      ],
+    },
+  });
+  check("A zero-net count is recorded as a relocation", adjReloc.json?.data?.kind === "RELOCATION" && adjReloc.json?.data?.transfers?.[0]?.status === "RECEIVED", adjReloc.json?.error?.message ?? "");
+  check("Relocation moved the units", (await levelAt(splitCarton.id, mainStore.id)) === relocSrc - 3 && (await levelAt(splitCarton.id, otherStore.id)) === relocDst + 3);
+  const adjMulti = await api("/stock", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      productId: splitCarton.id,
+      note: "Smoke: cycle count",
+      lines: [
+        { locationId: mainStore.id, quantity: 2 },
+        { locationId: otherStore.id, quantity: -1 },
+      ],
+    },
+  });
+  check("A count that does not net to zero is valued adjustments", adjMulti.json?.data?.kind === "ADJUSTMENT" && adjMulti.json?.data?.movements?.length === 2);
+  const adjSingle = await api("/stock", {
+    method: "POST",
+    token: adminToken,
+    body: { productId: splitCarton.id, locationId: mainStore.id, quantity: 1, note: "Smoke: single" },
+  });
+  check("The single-location body still returns one movement", adjSingle.status === 201 && adjSingle.json?.data?.type === "ADJUSTMENT");
+
+  // ── goods receipts against a purchase order with duplicate product lines ──
+  const supplierList = (await api("/suppliers", { token: adminToken })).json?.data ?? [];
+  const grnSupplier = supplierList[0];
+  const grnPo = (
+    await api("/purchase-orders", {
+      method: "POST",
+      token: adminToken,
+      body: {
+        supplierId: grnSupplier?.id,
+        send: true,
+        lines: [
+          { productId: splitPiece.id, quantity: 10, unitCostCents: splitPiece.costPriceCents },
+          { productId: splitPiece.id, quantity: 5, unitCostCents: splitPiece.costPriceCents },
+        ],
+      },
+    })
+  ).json?.data;
+  check("A purchase order with two lines for one product is raised", Boolean(grnPo?.id) && grnPo?.lines?.length === 2);
+  const grnMainBefore = await levelAt(splitPiece.id, mainStore.id);
+  const grnOtherBefore = await levelAt(splitPiece.id, otherStore.id);
+  const grnFirst = await api("/goods-receipts", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      poId: grnPo?.id,
+      locationId: mainStore.id,
+      post: true,
+      lines: [
+        { productId: splitPiece.id, quantity: 8 },
+        { productId: splitPiece.id, quantity: 4, locationId: otherStore.id },
+      ],
+    },
+  });
+  check("Goods are received and posted in one call", grnFirst.status === 201 && grnFirst.json?.data?.status === "POSTED", grnFirst.json?.error?.message ?? "");
+  check("Each receipt line landed at its own location", (await levelAt(splitPiece.id, mainStore.id)) === grnMainBefore + 8 && (await levelAt(splitPiece.id, otherStore.id)) === grnOtherBefore + 4);
+  const poAfter = ((await api("/purchase-orders?status=PARTIALLY_RECEIVED", { token: adminToken })).json?.data ?? []).find((p) => p.id === grnPo?.id);
+  check(
+    "PO lines were filled in order: 10 then 2",
+    poAfter?.lines?.[0]?.received === 10 && poAfter?.lines?.[1]?.received === 2,
+    `${poAfter?.lines?.map((l) => l.received).join("/")}`,
+  );
+  const grnOver = await api("/goods-receipts", {
+    method: "POST",
+    token: adminToken,
+    body: { poId: grnPo?.id, locationId: mainStore.id, post: true, lines: [{ productId: splitPiece.id, quantity: 5 }] },
+  });
+  check("Receiving beyond the order is refused", grnOver.status === 422, `HTTP ${grnOver.status}`);
+  const grnAllowed = await api("/goods-receipts", {
+    method: "POST",
+    token: adminToken,
+    body: { poId: grnPo?.id, locationId: mainStore.id, allowOver: true, lines: [{ productId: splitPiece.id, quantity: 5 }] },
+  });
+  check("…unless over-receipt is allowed, which leaves a draft", grnAllowed.status === 201 && grnAllowed.json?.data?.status === "DRAFT", grnAllowed.json?.error?.message ?? "");
+  const grnPosted = await api(`/goods-receipts/${grnAllowed.json?.data?.id}/post`, { method: "POST", token: adminToken, body: { allowOver: true } });
+  check("A draft receipt posts", grnPosted.json?.data?.status === "POSTED", grnPosted.json?.error?.message ?? "");
+  const grnTwice = await api(`/goods-receipts/${grnAllowed.json?.data?.id}/post`, { method: "POST", token: adminToken, body: {} });
+  check("Posting twice is refused", grnTwice.status === 409, `HTTP ${grnTwice.status}`);
+  const poDone = ((await api("/purchase-orders?status=RECEIVED", { token: adminToken })).json?.data ?? []).find((p) => p.id === grnPo?.id);
+  check("The purchase order is fully received", Boolean(poDone));
+  const grnList = await api(`/goods-receipts?poId=${grnPo?.id}`, { token: adminToken });
+  check("Receipts can be listed by purchase order", grnList.status === 200 && grnList.json?.data?.length === 2);
+
+  // The identity the valuation report promises still holds after all of it.
+  const svAfter = await api("/reports/stock-valuation", { token: adminToken });
+  check(
+    "Stock valuation identity still holds after splits, transfers and receipts",
+    svAfter.json?.data?.variesBy === svAfter.json?.data?.totalCents - svAfter.json?.data?.ledgerCents,
+  );
+  const tbSplit = await api("/reports/trial-balance", { token: adminToken });
+  check("The books still balance", tbSplit.json?.data?.balanced === true);
+
+  // Storekeepers may do all of this; a field rep may not.
+  const storesLogin = await api("/auth/login", { method: "POST", body: { email: "stores@tarisolutions.co.ke", password: PASSWORD } });
+  const storesTransfers = await api("/transfers", { token: storesLogin.json?.data?.accessToken });
+  check("A storekeeper can see transfers", storesTransfers.status === 200);
+  const repTransfer = await api("/transfers", {
+    method: "POST",
+    token: repToken,
+    body: { fromLocationId: mainStore.id, toLocationId: otherStore.id, lines: [{ productId: splitCarton.id, quantity: 1 }] },
+  });
+  check("A field rep cannot create transfers", repTransfer.status === 403, `HTTP ${repTransfer.status}`);
+
+  // Against a local server the books can be audited directly.
+  if (/localhost|127\.0\.0\.1/.test(BASE)) {
+    const { spawnSync } = await import("node:child_process");
+    const { existsSync } = await import("node:fs");
+    if (existsSync("scripts/check-consistency.mjs")) {
+      const run = spawnSync(process.execPath, ["scripts/check-consistency.mjs", "--company", "tari", "--quiet"], { encoding: "utf8" });
+      check("check-consistency passes for the demo company", run.status === 0, run.status === 0 ? "" : (run.stdout + run.stderr).split("\n").filter((l) => /FAIL/.test(l)).join(" | "));
+    }
+  }
 
   console.log("\neTIMS");
 
@@ -1232,6 +1547,265 @@ async function main() {
     const r = await api(path, { token: otherToken });
     check(`An unlicensed company is refused ${path}`, r.status === 402 || r.status === 403, `HTTP ${r.status}`);
   }
+
+  // ── delivery notes & printing ──────────────────────────────────────
+  // The API lifecycle of a delivery note, then every print page fetched with
+  // a console session cookie and checked for the text that only its own
+  // document carries. A 200 with the wrong title would mean a page rendered
+  // something, not the thing asked for.
+  console.log("\nDelivery notes & printing");
+
+  const adminCookie = await sessionCookie("admin@tarisolutions.co.ke");
+  check("Console session cookie issued", Boolean(adminCookie));
+
+  const dnInvoiceRes = await api("/invoices", {
+    method: "POST",
+    token: adminToken,
+    body: {
+      customerId: customerForOrder.id,
+      issue: true,
+      clientUuid: uuid(),
+      lines: [{ productId: productA.id, quantity: 6, unitPriceCents: 20000 }],
+    },
+  });
+  const dnInvoice = dnInvoiceRes.json?.data?.invoice ?? dnInvoiceRes.json?.data;
+  check("An invoice to deliver is raised", Boolean(dnInvoice?.id), `HTTP ${dnInvoiceRes.status}`);
+  const dnInvoiceLine = (await api(`/invoices/${dnInvoice?.id}`, { token: adminToken })).json?.data?.invoice
+    ?.lines?.[0];
+
+  const dnUuid = uuid();
+  const dnCreate = await api("/delivery-notes", {
+    method: "POST",
+    token: adminToken,
+    body: { invoiceId: dnInvoice?.id, clientUuid: dnUuid },
+  });
+  const dn = dnCreate.json?.data?.deliveryNote;
+  check(
+    "Delivery note raised from the invoice",
+    dnCreate.status === 201 && Boolean(dn?.id),
+    `HTTP ${dnCreate.status} ${dnCreate.json?.error?.message ?? ""}`,
+  );
+  check("Numbered DN-nnnn on its own counter", /^DN-\d{4}$/.test(dn?.number ?? ""), dn?.number ?? "");
+  check(
+    "Issued, with the whole invoice quantity by default",
+    dn?.status === "ISSUED" && dn?.lines?.[0]?.deliveredQty === 6,
+    `${dn?.status} ${dn?.lines?.[0]?.deliveredQty}`,
+  );
+
+  const dnReplay = await api("/delivery-notes", {
+    method: "POST",
+    token: adminToken,
+    body: { invoiceId: dnInvoice?.id, clientUuid: dnUuid },
+  });
+  check(
+    "A replayed create returns the same note",
+    dnReplay.status === 200 &&
+      dnReplay.json?.data?.deliveryNote?.id === dn?.id &&
+      dnReplay.json?.meta?.replayed === true,
+  );
+
+  const over = await api("/delivery-notes", {
+    method: "POST",
+    token: adminToken,
+    body: { invoiceId: dnInvoice?.id, lines: [{ invoiceLineId: dnInvoiceLine?.id, deliveredQty: 1 }] },
+  });
+  check(
+    "Delivering more than was sold is refused as a conflict",
+    over.status === 409,
+    `HTTP ${over.status}: ${over.json?.error?.message ?? ""}`,
+  );
+
+  const unsigned = await api(`/delivery-notes/${dn?.id}`, {
+    method: "PATCH",
+    token: adminToken,
+    body: { action: "deliver" },
+  });
+  check("DELIVERED needs the receiver name", unsigned.status === 422 || unsigned.status === 400, `HTTP ${unsigned.status}`);
+
+  const delivered = await api(`/delivery-notes/${dn?.id}`, {
+    method: "PATCH",
+    token: adminToken,
+    body: { action: "deliver", receivedByName: "Smoke Receiver", receivedByPhone: "0700000001" },
+  });
+  check(
+    "Marked delivered with the receiver name",
+    delivered.json?.data?.deliveryNote?.status === "DELIVERED" &&
+      delivered.json?.data?.deliveryNote?.receivedByName === "Smoke Receiver",
+    `HTTP ${delivered.status}`,
+  );
+
+  const returned = await api(`/delivery-notes/${dn?.id}`, {
+    method: "PATCH",
+    token: adminToken,
+    body: { action: "return", lines: [{ lineId: dn?.lines?.[0]?.id, returnedQty: 2 }] },
+  });
+  check(
+    "A return records returnedQty per line",
+    returned.json?.data?.deliveryNote?.status === "RETURNED" &&
+      returned.json?.data?.deliveryNote?.lines?.[0]?.returnedQty === 2,
+    `HTTP ${returned.status}`,
+  );
+
+  const second = await api("/delivery-notes", { method: "POST", token: adminToken, body: { invoiceId: dnInvoice?.id } });
+  const dn2 = second.json?.data?.deliveryNote;
+  check("The returned two can go out on a second note", dn2?.lines?.[0]?.deliveredQty === 2, `${dn2?.lines?.[0]?.deliveredQty}`);
+  const cancelled = await api(`/delivery-notes/${dn2?.id}`, { method: "PATCH", token: adminToken, body: { action: "cancel" } });
+  check("An issued note can be cancelled", cancelled.json?.data?.deliveryNote?.status === "CANCELLED");
+  const cancelDelivered = await api(`/delivery-notes/${dn?.id}`, { method: "PATCH", token: adminToken, body: { action: "cancel" } });
+  check("A delivered note cannot be cancelled", cancelDelivered.status === 409);
+
+  const dnList = await api(`/delivery-notes?q=${encodeURIComponent(dn?.number ?? "")}`, { token: adminToken });
+  check(
+    "Delivery notes list and search",
+    dnList.status === 200 && (dnList.json?.data ?? []).some((n) => n.id === dn?.id),
+    `${dnList.json?.data?.length ?? 0} rows`,
+  );
+
+  const repView = await api(`/delivery-notes/${dn?.id}`, { token: repToken });
+  check("A rep cannot read a note they neither raised nor drive", repView.status === 404, `HTTP ${repView.status}`);
+  const acaciaDn = await api("/delivery-notes", { token: acaciaToken });
+  check("Unlicensed tenant is refused delivery notes with 402", acaciaDn.status === 402, `HTTP ${acaciaDn.status}`);
+
+  // ── print pages ──
+  const printPage = async (path, cookie = adminCookie) => {
+    const res = await fetch(`${BASE}${path}`, { headers: { Cookie: cookie }, redirect: "manual" });
+    return { status: res.status, html: await res.text() };
+  };
+  const printCheck = async (label, path, markers, cookie) => {
+    const r = await printPage(path, cookie);
+    const missing = markers.filter((m) => !r.html.includes(m));
+    const noShell = !r.html.includes('aria-label="Sections"');
+    check(
+      label,
+      r.status === 200 && missing.length === 0 && noShell && r.html.includes("Powered by Raut"),
+      r.status !== 200
+        ? `HTTP ${r.status}`
+        : missing.length
+          ? `missing ${missing.join(", ")}`
+          : noShell
+            ? ""
+            : "console chrome leaked onto the page",
+    );
+    return r;
+  };
+
+  // With eTIMS on and a reachable Digitax the fresh invoice may already be
+  // filed, so the page is either a TAX INVOICE with its control code or an
+  // INVOICE that says plainly it is not one yet. Both are correct; a page
+  // claiming neither is not.
+  const invoicePage = await printCheck("Invoice prints", `/print/invoice/${dnInvoice?.id}`, [
+    "INVOICE",
+    dnInvoice?.number ?? "",
+  ]);
+  check(
+    "It says which it is: TAX INVOICE with a control code, or NOT A TAX INVOICE",
+    (invoicePage.html.includes("TAX INVOICE") && invoicePage.html.includes("Control code")) ||
+      invoicePage.html.includes("NOT A TAX INVOICE"),
+  );
+  const copyPage = await printPage(`/print/invoice/${dnInvoice?.id}?copy=1`);
+  check("?copy=1 stamps DUPLICATE", copyPage.html.includes("Duplicate"));
+  const thermal = await printPage(`/print/invoice/${dnInvoice?.id}?format=thermal`);
+  check(
+    "Thermal invoice is the 80 mm sales receipt",
+    thermal.status === 200 &&
+      (thermal.html.includes("SALES RECEIPT") || thermal.html.includes("TAX INVOICE")) &&
+      thermal.html.includes("size: 80mm"),
+  );
+  await printCheck("Delivery note prints without prices", `/print/delivery-note/${dn?.id}`, [
+    "DELIVERY NOTE",
+    dn?.number ?? "",
+    "Smoke Receiver",
+    "shows no prices",
+  ]);
+  const priced = await printPage(`/print/delivery-note/${dn?.id}?prices=1`);
+  check("?prices=1 adds prices to the delivery note", priced.html.includes("Unit price") && priced.html.includes("Goods value"));
+
+  const filedForPrint = (await api("/invoices?limit=200", { token: adminToken })).json?.data?.find(
+    (i) => i.etimsStatus === "ACCEPTED" && i.etimsQrUrl,
+  );
+  if (filedForPrint) {
+    const taxPage = await printCheck("A filed invoice prints as a TAX INVOICE", `/print/invoice/${filedForPrint.id}`, [
+      "TAX INVOICE",
+      "Control code",
+    ]);
+    check("...with the KRA QR as inline SVG", taxPage.html.includes("<svg"));
+  } else {
+    check("A filedForPrint invoice exists to print", false, "no ACCEPTED invoice in the data");
+  }
+
+  const creditNoteRow = (await api("/credit-notes", { token: adminToken })).json?.data?.rows?.[0];
+  if (creditNoteRow) {
+    await printCheck("Credit note prints", `/print/credit-note/${creditNoteRow.id}`, [
+      creditNoteRow.etimsStatus === "ACCEPTED" ? "CREDIT NOTE" : "RETURN NOTE",
+      creditNoteRow.number,
+    ]);
+  }
+  const paymentRow = (await api("/payments?limit=1", { token: adminToken })).json?.data?.[0];
+  if (paymentRow) {
+    await printCheck("Payment receipt prints", `/print/receipt/${paymentRow.id}`, [
+      "PAYMENT RECEIPT",
+      paymentRow.number,
+      "Amount received",
+    ]);
+    const thermalReceipt = await printPage(`/print/receipt/${paymentRow.id}?format=thermal`);
+    check("Thermal receipt variant renders", thermalReceipt.status === 200 && thermalReceipt.html.includes("size: 80mm"));
+  }
+  const orderRow = (await api("/orders?limit=1", { token: adminToken })).json?.data?.[0];
+  if (orderRow) await printCheck("Order prints as a proforma", `/print/order/${orderRow.id}`, ["PROFORMA INVOICE", orderRow.number]);
+
+  let poRow = (await api("/purchase-orders?limit=1", { token: adminToken })).json?.data?.[0];
+  if (!poRow) {
+    const supplier = (await api("/suppliers", { token: adminToken })).json?.data?.[0];
+    poRow = (
+      await api("/purchase-orders", {
+        method: "POST",
+        token: adminToken,
+        body: { supplierId: supplier?.id, lines: [{ productId: productA.id, quantity: 2, unitCostCents: 5000 }] },
+      })
+    ).json?.data;
+  }
+  check("A purchase order exists to print", Boolean(poRow?.id));
+  if (poRow) await printCheck("Purchase order prints", `/print/purchase-order/${poRow.id}`, ["PURCHASE ORDER", poRow.number]);
+
+  let grnRow = (await api("/goods-receipts?limit=1", { token: adminToken })).json?.data?.[0];
+  if (!grnRow) {
+    // A free-standing draft receipt, not posted: the print check must not move
+    // stock, and a draft purchase order cannot be received against.
+    const location = (await api("/stock", { token: adminToken })).json?.data?.locations?.[0];
+    const supplier = (await api("/suppliers", { token: adminToken })).json?.data?.[0];
+    const grnRes = await api("/goods-receipts", {
+      method: "POST",
+      token: adminToken,
+      body: {
+        supplierId: supplier?.id,
+        locationId: location?.id,
+        lines: [{ productId: productA.id, quantity: 1, unitCostCents: 5000 }],
+      },
+    });
+    grnRow = grnRes.json?.data;
+    if (!grnRow?.id) console.log(`    (GRN create: HTTP ${grnRes.status} ${grnRes.json?.error?.message ?? ""})`);
+  }
+  if (grnRow?.id) await printCheck("Goods received note prints", `/print/grn/${grnRow.id}`, ["GOODS RECEIVED NOTE", grnRow.number]);
+  else check("A goods receipt exists to print", false, "none in the data and none could be created");
+
+  await printCheck("Customer statement prints with a running balance", `/print/statement/${customerForOrder.id}`, [
+    "STATEMENT OF ACCOUNT",
+    "Opening balance",
+    "Closing balance",
+    customerForOrder.name,
+  ]);
+  const routeRow = (await api("/routes", { token: adminToken })).json?.data?.[0];
+  if (routeRow) {
+    await printCheck("Route sheet prints", `/print/route-sheet/${routeRow.id}`, ["ROUTE SHEET", "Odometer out", "Collected (KES)"]);
+  }
+
+  const acaciaCookie = await sessionCookie("admin@acacia.example");
+  const crossPrint = await printPage(`/print/invoice/${dnInvoice?.id}`, acaciaCookie);
+  check("Another tenant cannot find the invoice on /print", crossPrint.status === 404, `HTTP ${crossPrint.status}`);
+  const bogus = await printPage(`/print/invoice/does-not-exist`);
+  check("An unknown id is a 404", bogus.status === 404, `HTTP ${bogus.status}`);
+  const unknownType = await printPage(`/print/payslip/${dnInvoice?.id}`);
+  check("An unknown document type is a 404", unknownType.status === 404, `HTTP ${unknownType.status}`);
 
   console.log("\nSuper Admin");
   const superLogin = await api("/auth/login", {

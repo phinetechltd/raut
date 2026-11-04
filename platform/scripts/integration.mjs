@@ -21,6 +21,14 @@ let passed = 0;
 let failed = 0;
 const failures = [];
 
+/** A plausible, unique M-Pesa receipt code (`^[A-Z0-9]{10}$`). */
+function mpesaCode() {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let s = "I";
+  for (let i = 0; i < 9; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
+  return s;
+}
+
 function check(name, condition, detail = "") {
   if (condition) {
     passed++;
@@ -174,7 +182,9 @@ async function main() {
           customerId: customer.id,
           amountCents: 25_000_00,
           method: "MPESA",
-          reference: "INTEGRATION-TEST",
+          // Ten upper-case alphanumerics, unique per company, as a real
+          // M-Pesa code is; the server refuses anything else.
+          reference: mpesaCode(),
         },
       },
       {

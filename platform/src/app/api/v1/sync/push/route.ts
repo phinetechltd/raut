@@ -1,12 +1,14 @@
 import { z } from "zod";
 
-import { handler, parseBody } from "@/lib/api";
+import { ApiError, handler, parseBody } from "@/lib/api";
 import { auditAs } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { nextNumber } from "@/lib/numbering";
+import { GATEWAY_METHODS } from "@/lib/payments";
 import { denialReason, type Permission } from "@/lib/rbac";
 import { companyIdOf } from "@/lib/tenant";
 import { checkIn, checkOut } from "@/server/field";
+import { markDelivered } from "@/server/delivery";
 import { recordOdometer } from "@/server/routing";
 import { createInvoice, createSalesOrder, notifyPayment, recordPayment } from "@/server/sales";
 import { storePings } from "@/server/tracking";
@@ -59,6 +61,7 @@ const operationSchema = z.object({
     "expense.create",
     "location.batch",
     "route.odometer",
+    "delivery.deliver",
   ]),
   /** Client timestamp of when the rep performed the action. */
   at: z.string().optional(),
@@ -108,6 +111,7 @@ const OPERATION_PERMISSION: Record<z.infer<typeof operationSchema>["type"], Perm
   // The rep reads the dash of the van they are driving; it is their own
   // field record, like a breadcrumb, not a route edit.
   "route.odometer": "field:self",
+  "delivery.deliver": "delivery:write",
 };
 
 export const POST = handler({}, async ({ principal, request }) => {
@@ -338,11 +342,23 @@ async function applyOperation(
     }
 
     case "payment.create": {
+      // A handset records money it was handed; it never books a gateway
+      // collection. Those methods belong to settleIntent, which books under an
+      // `intent:` uuid — so neither the method nor that uuid shape may arrive
+      // from a device. 422 is permanent: retrying cannot make it valid.
+      const pushedMethod = str("method") ?? "CASH";
+      if (GATEWAY_METHODS.has(pushedMethod) || op.uuid.startsWith("intent:")) {
+        throw new ApiError(
+          422,
+          "INVALID_METHOD",
+          `${pushedMethod} payments are booked by the gateway when it confirms the collection, not from the handset`,
+        );
+      }
       const { payment, customer } = await recordPayment({
         companyId,
         customerId: await customerInTenant(companyId, p.customerId),
         amountCents: Number(p.amountCents),
-        method: str("method") ?? "CASH",
+        method: pushedMethod,
         reference: str("reference") ?? null,
         paidAt: at,
         note: str("note") ?? null,
@@ -527,6 +543,35 @@ async function applyOperation(
         ...(reading.odometerEndKm !== undefined ? { odometerEndKm: reading.odometerEndKm } : {}),
       });
       return { entityId: route.id, entityType: "Route" };
+    }
+
+    case "delivery.deliver": {
+      // The rep confirms a drop from the handset. Only a note they raised or
+      // are the named driver on; a foreign id is not found, not forbidden.
+      const deliveryNoteId = z.string().min(1).parse(p.deliveryNoteId);
+      const own = await db.deliveryNote.findFirst({
+        where: {
+          id: deliveryNoteId,
+          companyId,
+          OR: [{ createdById: principal.userId }, { deliveredById: principal.userId }],
+        },
+        select: { id: true },
+      });
+      if (!own) throw new Error(`Delivery note ${deliveryNoteId} not found`);
+      const note = await markDelivered(
+        companyId,
+        deliveryNoteId,
+        {
+          receivedByName: z.string().min(1).parse(p.receivedByName),
+          receivedByPhone: str("receivedByPhone") ?? null,
+          receivedBySignature: str("receivedBySignature") ?? null,
+          deliveredAt: at ?? null,
+          deliveredById: principal.userId,
+          notes: str("notes") ?? null,
+        },
+        principal.userId,
+      );
+      return { entityId: note.id, entityType: "DeliveryNote" };
     }
 
     default:

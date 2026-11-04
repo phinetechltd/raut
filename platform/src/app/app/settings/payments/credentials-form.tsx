@@ -42,7 +42,8 @@ const LABELS: Record<string, { title: string; blurb: string }> = {
   },
   PAYSTACK: {
     title: "Paystack",
-    blurb: "Cards, bank and mobile money through a hosted checkout link.",
+    blurb:
+      "Cards, bank and mobile money through a hosted checkout link. On the Paystack dashboard set the webhook URL to <your domain>/api/v1/payments/callbacks/paystack.",
   },
   KCB_BUNI: {
     title: "KCB Buni",
@@ -66,6 +67,7 @@ const KEY_LABELS: Record<string, string> = {
   MPESA_ENV: "Environment (sandbox / production)",
   MPESA_TRANSACTION_TYPE: "Transaction type",
   MPESA_PARTY_B: "Party B (defaults to shortcode)",
+  MPESA_BASE_URL: "API base URL",
   KCB_CONSUMER_KEY: "Consumer key",
   KCB_CONSUMER_SECRET: "Consumer secret",
   KCB_TILL_NUMBER: "Till number",
@@ -219,7 +221,9 @@ function ProviderCard({
                   required={required}
                   value={values[key] ?? ""}
                   onChange={(e) => setValues((v) => ({ ...v, [key]: e.target.value }))}
-                  placeholder={state.configured ? "•••••• (unchanged)" : ""}
+                  // Optional keys left blank keep their stored value; required
+                  // keys must be typed again, which is what "Replace" means.
+                  placeholder={state.configured ? (required ? "•••••• (type the new value)" : "•••••• (kept as stored)") : ""}
                 />
               </Field>
             );

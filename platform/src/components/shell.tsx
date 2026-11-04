@@ -57,7 +57,7 @@ export function Shell({
   return (
     <div className="flex min-h-screen bg-bg">
       {/* ── sidebar ─────────────────────────────────────────────── */}
-      <aside className="sticky top-0 hidden h-screen w-sidebar shrink-0 flex-col text-sidebar-content lg:flex relative">
+      <aside className="sticky top-0 hidden h-screen w-sidebar shrink-0 flex-col text-sidebar-content lg:flex relative print:hidden">
         {/* Layered gradient over the navy base keeps the panel deep rather than
             flat; tokens split so the dark scheme can lift it a step. */}
         <div className="absolute inset-0 bg-sidebar-bg2" />
@@ -140,7 +140,7 @@ export function Shell({
 
       {/* ── mobile header ───────────────────────────────────────── */}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-20 border-b border-border bg-surface/85 backdrop-blur lg:hidden">
+        <header className="sticky top-0 z-20 border-b border-border bg-surface/85 backdrop-blur lg:hidden print:hidden">
           <div className="flex items-center justify-between gap-3 px-4 py-2.5">
             <div className="flex min-w-0 items-center gap-2">
               <RautMark size={28} className="h-7 w-7 shrink-0" />
@@ -170,7 +170,7 @@ export function Shell({
           </nav>
         </header>
 
-        <main className="min-w-0 flex-1 animate-fade-in p-4 sm:p-6 lg:p-8">
+        <main className="min-w-0 flex-1 animate-fade-in p-4 sm:p-6 lg:p-8 print:p-0">
           <div className="mx-auto w-full max-w-[1440px]">{children}</div>
         </main>
       </div>

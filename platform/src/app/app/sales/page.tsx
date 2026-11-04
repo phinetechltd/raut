@@ -1,6 +1,7 @@
 ﻿import Link from "next/link";
 
 import {
+  ButtonLink,
   CellStack,
   DataTable,
   ExportLink,
@@ -230,6 +231,22 @@ export default async function SalesPage({
       sortKey: "status",
       cell: (o) => <StatusBadge status={o.status} />,
     },
+    {
+      key: "print",
+      header: "Print",
+      align: "right",
+      srOnlyHeader: true,
+      cell: (o) => (
+        <Link
+          href={`/print/order/${o.id}`}
+          target="_blank"
+          className="text-xs text-content-muted hover:text-accent print:hidden"
+          title="Print as a proforma invoice"
+        >
+          Proforma
+        </Link>
+      ),
+    },
   ];
 
   type Row = (typeof invoices)[number];
@@ -317,6 +334,21 @@ export default async function SalesPage({
       sortKey: "status",
       cell: (inv) => <StatusBadge status={inv.status} />,
     },
+    {
+      key: "print",
+      header: "Print",
+      align: "right",
+      srOnlyHeader: true,
+      cell: (inv) => (
+        <Link
+          href={`/print/invoice/${inv.id}`}
+          target="_blank"
+          className="text-xs text-content-muted hover:text-accent print:hidden"
+        >
+          Print
+        </Link>
+      ),
+    },
   ];
 
   return (
@@ -325,9 +357,16 @@ export default async function SalesPage({
         title="Sales & POS"
         description="Quotations, orders, invoices, receipts and discounts."
         actions={
-          can(principal, "invoice:write") ? (
-            <InvoiceDialog customers={customers} products={products} />
-          ) : null
+          <>
+            {can(principal, "delivery:read") ? (
+              <ButtonLink href="/app/sales/delivery-notes" variant="secondary">
+                Delivery notes
+              </ButtonLink>
+            ) : null}
+            {can(principal, "invoice:write") ? (
+              <InvoiceDialog customers={customers} products={products} />
+            ) : null}
+          </>
         }
       />
 

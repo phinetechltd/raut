@@ -369,6 +369,53 @@ export async function postStockAdjustment(
 }
 
 /**
+ * The cents a repack could not carry across.
+ *
+ *   Dr Stock adjustments    remainder
+ *     Cr Inventory          remainder
+ *
+ * A carton worth 1 240 00 split into 12 pieces values each at 10 333 cents and
+ * leaves 4 cents nowhere. The two REPACK legs post nothing themselves — goods
+ * changed form, not owner — so this one entry is what keeps the inventory
+ * account equal to Σ qty × cost over the movements. Keyed on the REPACK_IN
+ * movement under its own sourceKind, so it can never collide with a manual
+ * adjustment against the same movement and reconcile scripts can pick it out.
+ */
+export async function postRepackRounding(
+  tx: Tx,
+  movement: {
+    id: string;
+    companyId: string;
+    createdAt: Date;
+  },
+  remainderCents: number,
+  userId?: string | null,
+) {
+  if (remainderCents === 0) return null;
+  if (remainderCents < 0) throw new Error("A repack rounding remainder cannot be negative");
+
+  const acc = await systemAccounts(
+    movement.companyId,
+    ["INVENTORY", "STOCK_ADJUSTMENT"],
+    tx,
+  );
+
+  return postEntry(tx, {
+    companyId: movement.companyId,
+    date: movement.createdAt,
+    refType: "StockMovement",
+    refId: movement.id,
+    sourceKind: "REPACK_ROUNDING",
+    memo: "Repack rounding",
+    postedById: userId ?? null,
+    lines: [
+      { accountId: acc.STOCK_ADJUSTMENT, debitCents: remainderCents },
+      { accountId: acc.INVENTORY, creditCents: remainderCents },
+    ],
+  });
+}
+
+/**
  * Opening stock brought onto the books.
  *
  *   in    Dr Inventory          Cr Owner's equity

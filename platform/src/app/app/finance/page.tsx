@@ -1,4 +1,6 @@
-﻿import {
+﻿import Link from "next/link";
+
+import {
   ButtonLink,
   CellStack,
   DataTable,
@@ -274,6 +276,17 @@ export default async function FinancePage({
       numeric: true,
       sortKey: "amount",
       cell: (p) => <span className="font-medium text-accent"><Money cents={p.amountCents} /></span>,
+    },
+    {
+      key: "receipt",
+      header: "Receipt",
+      align: "right",
+      srOnlyHeader: true,
+      cell: (p) => (
+        <Link href={`/print/receipt/${p.id}`} target="_blank" className="text-xs text-content-muted hover:text-accent print:hidden">
+          Receipt
+        </Link>
+      ),
     },
   ];
 

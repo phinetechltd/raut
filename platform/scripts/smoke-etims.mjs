@@ -146,12 +146,12 @@ async function main() {
     check("A key registered to another PIN fails the test, naming both", test.json?.data?.ok === false && /belongs to PIN A000000000Z, not P051234567X/.test(test.json?.data?.note ?? ""), test.json?.data?.note);
     await control({ taxPin: PIN });
 
-    await api("/settings/credentials", { method: "POST", token, body: { provider: "DIGITAX", values: { DIGITAX_API_KEY: "smoke-api-key", DIGITAX_TIN: "NOT-A-PIN" } } });
+    // A malformed TIN is refused where it is typed, so it can never reach the
+    // test action or the enable switch; the stored, valid TIN stays in force.
+    const badSave = await api("/settings/credentials", { method: "POST", token, body: { provider: "DIGITAX", values: { DIGITAX_API_KEY: "smoke-api-key", DIGITAX_TIN: "NOT-A-PIN" } } });
+    check("A malformed TIN is refused at save (422 INVALID_KRA_PIN)", badSave.status === 422 && badSave.json?.error?.code === "INVALID_KRA_PIN", `HTTP ${badSave.status} ${badSave.json?.error?.code ?? ""}`);
     test = await api("/settings/credentials", { method: "PATCH", token, body: { provider: "DIGITAX", action: "test" } });
-    check("A malformed TIN fails the test before any call is made", test.json?.data?.ok === false && /not a valid KRA PIN/.test(test.json?.data?.note ?? ""), test.json?.data?.note);
-    const badOn = await api("/etims/config", { method: "PUT", token, body: { enabled: true, environment: "SANDBOX" } });
-    check("eTIMS cannot be switched on with a malformed TIN (422)", badOn.status === 422 && badOn.json?.error?.code === "INVALID_KRA_PIN", `HTTP ${badOn.status} ${badOn.json?.error?.code ?? ""}`);
-    await api("/settings/credentials", { method: "POST", token, body: { provider: "DIGITAX", values: { DIGITAX_API_KEY: "smoke-api-key", DIGITAX_TIN: PIN } } });
+    check("The stored TIN is untouched by a refused save", test.json?.data?.ok === true && /Authenticated as P051234567X/.test(test.json?.data?.note ?? ""), test.json?.data?.note);
 
     // ── configuration ─────────────────────────────────────────────────
     console.log("\nConfiguration");

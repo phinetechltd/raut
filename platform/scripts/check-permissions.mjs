@@ -112,7 +112,7 @@ const ROLES = [
       "/app/settings/payments",
     ],
     redirect: ["/admin"],
-    apiAllow: ["/customers", "/invoices", "/expenses", "/users", "/settings/credentials"],
+    apiAllow: ["/customers", "/invoices", "/expenses", "/users", "/settings/credentials", "/transfers", "/goods-receipts", "/delivery-notes"],
     apiDeny: ["/platform/companies", "/platform/overview"],
     syncAllow: ["invoice.create", "payment.create", "order.create", "customer.update", "expense.create"],
   },
@@ -123,6 +123,9 @@ const ROLES = [
     redirect: ["/admin"],
     apiAllow: [
       "/invoices",
+      // Read-only on delivery paperwork: the accountant reconciles what went
+      // out against what was invoiced, but does not sign goods over.
+      "/delivery-notes",
       "/payments",
       "/expenses",
       "/reports/profit-and-loss",
@@ -134,8 +137,9 @@ const ROLES = [
       "/etims/config",
       "/etims/submissions",
     ],
-    // No stock-write rights and no platform reach.
-    apiDeny: ["/platform/companies"],
+    // No stock rights and no platform reach: receipts are readable through
+    // purchase:read, transfers are not.
+    apiDeny: ["/platform/companies", "/transfers"],
     syncAllow: ["invoice.create", "payment.create"],
     syncDeny: ["customer.update", "order.create", "visit.create"],
   },
@@ -144,7 +148,7 @@ const ROLES = [
     email: "stores@tarisolutions.co.ke",
     reach: ["/app", "/app/inventory"],
     redirect: ["/admin"],
-    apiAllow: ["/stock", "/products", "/suppliers"],
+    apiAllow: ["/stock", "/products", "/suppliers", "/transfers", "/goods-receipts", "/delivery-notes"],
     apiDeny: ["/platform/companies", "/reports/balance-sheet", "/reports/stock-valuation"],
     // The escalation the sync endpoint used to allow: a storekeeper raising
     // invoices, recording payments against balances and moving shop pins.
@@ -166,7 +170,7 @@ const ROLES = [
     // A rep raises returns where the goods are handed back, which is the whole
     // point of the flow. Withholding this left it unreachable by the only
     // people who need it.
-    apiAllow: ["/visits", "/routes", "/customers", "/credit-notes"],
+    apiAllow: ["/visits", "/routes", "/customers", "/credit-notes", "/delivery-notes"],
     hidden: ["/app/settings/payments", "/app/finance/reports", "/app/settings/etims"],
     // A rep holds report:read for their own numbers. The statutory statements
     // carry company margin, cash position and tax owed, and are not theirs.
@@ -194,6 +198,7 @@ const ROLES = [
       "activity.create",
       "expense.create",
       "location.batch",
+      "delivery.deliver",
     ],
     syncDeny: ["invoice.create"],
   },
@@ -205,7 +210,7 @@ const ROLES = [
     // Every module page must show the gate, not the feature.
     gated: ["/app/customers", "/app/sales", "/app/inventory", "/app/field", "/app/finance"],
     apiAllow: ["/customers"],
-    apiDeny: ["/invoices", "/visits", "/stock", "/expenses"],
+    apiDeny: ["/invoices", "/visits", "/stock", "/expenses", "/transfers", "/goods-receipts", "/delivery-notes"],
     // The paywall must hold on the sync path too, and say it is the licence.
     syncUnlicensed: ["invoice.create", "payment.create", "order.create"],
   },

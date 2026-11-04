@@ -1,6 +1,7 @@
 ﻿import Link from "next/link";
 
 import {
+  ButtonLink,
   CellStack,
   DataTable,
   FilterBar,
@@ -22,6 +23,7 @@ import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
 import { stockLevels, type StockLevelRow } from "@/server/inventory";
 
 import { ProductDialog, type ProductShape } from "./product-dialog";
+import { RepackDialog } from "./repack-dialog";
 import { StockAdjustDialog } from "./stock-dialog";
 
 export const dynamic = "force-dynamic";
@@ -50,16 +52,20 @@ const MOVEMENT_SORT: Record<string, string> = {
   balance: "balanceAfter",
 };
 
-const MOVEMENT_TYPES = [
-  "PURCHASE",
-  "SALE",
-  "TRANSFER_IN",
-  "TRANSFER_OUT",
-  "ADJUSTMENT",
-  "RETURN",
-  "OPENING",
-  "WRITE_OFF",
-];
+/** Every movement type with the label the filter shows for it. */
+const MOVEMENT_TYPE_LABELS: Record<string, string> = {
+  PURCHASE: "purchase",
+  SALE: "sale",
+  TRANSFER_IN: "transfer in",
+  TRANSFER_OUT: "transfer out",
+  ADJUSTMENT: "adjustment",
+  RETURN: "return",
+  OPENING: "opening",
+  WRITE_OFF: "write-off",
+  REPACK_OUT: "split out",
+  REPACK_IN: "split in",
+};
+const MOVEMENT_TYPES = Object.keys(MOVEMENT_TYPE_LABELS);
 
 /** Module 03 · Inventory — catalogue, multi-location stock, low-stock alerts. */
 export default async function InventoryPage({
@@ -404,6 +410,12 @@ export default async function InventoryPage({
         description="Product catalogue, stock across locations, and reorder alerts."
         actions={
           <>
+            <ButtonLink href="/app/inventory/transfers" variant="secondary" size="sm">
+              Transfers
+            </ButtonLink>
+            {canStock && locations.length > 0 ? (
+              <RepackDialog locations={locations.map((l) => ({ id: l.id, name: l.name }))} />
+            ) : null}
             {canStock && locations.length > 0 && products.length > 0 ? (
               <StockAdjustDialog
                 products={products.map((p) => ({ id: p.id, name: p.name }))}
@@ -544,7 +556,7 @@ export default async function InventoryPage({
             name="mov_type"
             value={filters.mov_type}
             allLabel="All types"
-            options={MOVEMENT_TYPES.map((t) => ({ value: t, label: t.toLowerCase().replace("_", " ") }))}
+            options={MOVEMENT_TYPES.map((t) => ({ value: t, label: MOVEMENT_TYPE_LABELS[t]! }))}
           />
         </FilterBar>
         <DataTable

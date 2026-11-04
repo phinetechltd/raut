@@ -61,6 +61,7 @@ function PaymentForm({
   onClose: () => void;
 }) {
   const { busy, error, submit } = useFormSubmit();
+  const [localError, setLocalError] = useState<string | null>(null);
   const [form, setForm] = useState({
     customerId: presetCustomerId ?? customers[0]?.id ?? "",
     amount: "",
@@ -71,7 +72,17 @@ function PaymentForm({
   });
   const set = (k: keyof typeof form, v: string) => setForm((f) => ({ ...f, [k]: v }));
 
+  // The server enforces this too (422 / 409 on reuse); checking here saves a
+  // round trip and tells the clerk exactly which field is wrong.
+  const mpesaCode = form.reference.trim().toUpperCase();
+  const mpesaCodeBad = form.method === "MPESA" && !/^[A-Z0-9]{10}$/.test(mpesaCode);
+
   async function save() {
+    setLocalError(null);
+    if (mpesaCodeBad) {
+      setLocalError("An M-Pesa payment needs the 10-character confirmation code from the customer's SMS, e.g. QHX7K2M9PL.");
+      return;
+    }
     await submit(async () => {
       return await apiClient("/api/v1/payments", {
         method: "POST",
@@ -79,7 +90,7 @@ function PaymentForm({
           customerId: form.customerId,
           amountCents: Math.round((Number(form.amount) || 0) * 100),
           method: form.method,
-          reference: form.reference || undefined,
+          reference: form.method === "MPESA" ? mpesaCode : form.reference || undefined,
           paidAt: form.paidAt,
           note: form.note || undefined,
           clientUuid: crypto.randomUUID(),
@@ -127,8 +138,21 @@ function PaymentForm({
             <option value="CHEQUE">Cheque</option>
           </Select>
         </Field>
-        <Field label="Reference" htmlFor="pay-ref" hint="M-Pesa code, cheque number…">
-          <Input id="pay-ref" value={form.reference} onChange={(e) => set("reference", e.target.value)} />
+        <Field
+          label={form.method === "MPESA" ? "M-Pesa confirmation code" : "Reference"}
+          htmlFor="pay-ref"
+          required={form.method === "MPESA"}
+          hint={form.method === "MPESA" ? "10 characters from the customer's SMS; each code can be recorded once" : "Cheque number, bank reference…"}
+        >
+          <Input
+            id="pay-ref"
+            value={form.reference}
+            onChange={(e) => set("reference", e.target.value)}
+            required={form.method === "MPESA"}
+            maxLength={form.method === "MPESA" ? 10 : undefined}
+            className={form.method === "MPESA" ? "uppercase" : undefined}
+            autoCapitalize="characters"
+          />
         </Field>
         <Field label="Date paid" htmlFor="pay-date">
           <Input id="pay-date" type="date" value={form.paidAt} onChange={(e) => set("paidAt", e.target.value)} required />
@@ -138,7 +162,7 @@ function PaymentForm({
         <Textarea id="pay-note" rows={2} value={form.note} onChange={(e) => set("note", e.target.value)} />
       </Field>
 
-      {error ? <p className="text-sm text-danger">{error}</p> : null}
+      {localError || error ? <p className="text-sm text-danger">{localError ?? error}</p> : null}
       <div className="flex items-center justify-end gap-2 border-t border-border pt-3">
         <Button type="button" variant="ghost" onClick={onClose} disabled={busy}>Cancel</Button>
         <Button type="submit" variant="primary" disabled={busy || !form.customerId || !(Number(form.amount) > 0)}>

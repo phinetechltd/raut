@@ -3,6 +3,8 @@ import "server-only";
 import { db } from "@/lib/db";
 import {
   REQUIRED_KEYS,
+  baseUrlProblem,
+  testCredentialProblem,
   type Creds,
   type PaymentProviderName,
 } from "@/lib/payments";
@@ -34,7 +36,7 @@ export const CREDENTIAL_KEYS: Record<CredentialProvider, string[]> = {
 /** Optional keys accepted but not required, e.g. environment switches. */
 export const OPTIONAL_KEYS: Partial<Record<CredentialProvider, string[]>> = {
   PAYSTACK: ["PAYSTACK_PUBLIC_KEY", "PAYSTACK_BASE_URL"],
-  MPESA_DARAJA: ["MPESA_ENV", "MPESA_TRANSACTION_TYPE", "MPESA_PARTY_B"],
+  MPESA_DARAJA: ["MPESA_ENV", "MPESA_TRANSACTION_TYPE", "MPESA_PARTY_B", "MPESA_BASE_URL"],
   KCB_BUNI: ["KCB_ENV", "KCB_BASE_URL", "KCB_WEBHOOK_SECRET"],
   DIGITAX: ["DIGITAX_BASE_URL", "DIGITAX_BRANCH_ID"],
 };
@@ -64,6 +66,16 @@ export async function resolveCredentials(
     iv: row.iv,
     authTag: row.authTag,
   });
+}
+
+/** The stored bundle whether or not it is active — for merging on save only. */
+async function storedCredentials(companyId: string, provider: CredentialProvider): Promise<Creds | null> {
+  if (!secretsAvailable()) return null;
+  const row = await db.tenantCredential.findUnique({
+    where: { companyId_provider: { companyId, provider } },
+  });
+  if (!row) return null;
+  return openJson<Creds>(companyId, { cipherText: row.cipherText, iv: row.iv, authTag: row.authTag });
 }
 
 /** All payment credentials for a company, for `availableProviders`. */
@@ -120,7 +132,16 @@ export interface SaveCredentialInput {
  *
  * Blank values are dropped rather than saved, so an admin can leave the
  * optional fields empty without writing empty strings that would later look
- * like a configured-but-broken gateway.
+ * like a configured-but-broken gateway. When a bundle already exists, an
+ * optional key left blank keeps its stored value: "Replace keys" with a new
+ * secret must not silently reset MPESA_ENV to the default or drop a webhook
+ * secret the admin set last month. Required keys are always taken from the
+ * form — replacing them is the point of the action.
+ *
+ * Two refusals happen here rather than at the provider: a base URL that is
+ * not an official gateway host (the bundle is where this server sends a
+ * merchant secret, so an arbitrary host is an exfiltration channel), and a
+ * test key or sandbox switch on a production deployment.
  */
 export async function saveCredential(input: SaveCredentialInput) {
   if (!secretsAvailable()) {
@@ -129,10 +150,9 @@ export async function saveCredential(input: SaveCredentialInput) {
     );
   }
 
-  const allowed = new Set([
-    ...(CREDENTIAL_KEYS[input.provider] ?? []),
-    ...(OPTIONAL_KEYS[input.provider] ?? []),
-  ]);
+  const required = CREDENTIAL_KEYS[input.provider] ?? [];
+  const optional = OPTIONAL_KEYS[input.provider] ?? [];
+  const allowed = new Set([...required, ...optional]);
 
   const values: Record<string, string> = {};
   for (const [k, v] of Object.entries(input.values)) {
@@ -141,10 +161,29 @@ export async function saveCredential(input: SaveCredentialInput) {
     }
   }
 
-  const missing = (CREDENTIAL_KEYS[input.provider] ?? []).filter((k) => !values[k]);
+  // Merge: optional keys the form left blank keep what is stored. Read
+  // server-side, so the browser never sees the current values.
+  const current = await storedCredentials(input.companyId, input.provider);
+  if (current) {
+    for (const k of optional) {
+      if (!values[k] && current[k]) values[k] = current[k]!;
+    }
+  }
+
+  const missing = required.filter((k) => !values[k]);
   if (missing.length > 0) {
     throw new Error(`Missing required values: ${missing.join(", ")}`);
   }
+
+  for (const k of optional) {
+    if (values[k] && k.endsWith("_BASE_URL")) {
+      const problem = baseUrlProblem(k, values[k]);
+      if (problem) throw new Error(problem);
+    }
+  }
+
+  const unfit = testCredentialProblem(input.provider, values);
+  if (unfit) throw new Error(unfit);
 
   const sealed = sealJson(input.companyId, values);
 

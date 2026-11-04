@@ -13,6 +13,7 @@ import {
 } from "@/lib/money";
 import { nextNumber } from "@/lib/numbering";
 
+import { GATEWAY_METHODS, MPESA_CODE_PATTERN } from "@/lib/payments";
 import { postInvoice, postPayment } from "./posting";
 import { sendTemplated } from "@/lib/sms";
 
@@ -512,6 +513,39 @@ export async function recordPayment(input: RecordPaymentInput) {
   }
   if (!PAYMENT_METHODS.has(method)) {
     throw new ApiError(422, "INVALID_METHOD", `Unknown payment method: ${method}`);
+  }
+  // A gateway method (MPESA_STK, PAYSTACK, KCB_BUNI) means "the provider
+  // confirmed this", and only settleIntent can say so — it books under the
+  // `intent:<id>` clientUuid. A handset or a REST caller naming one of these
+  // is asserting money moved without the provider's word for it.
+  if (GATEWAY_METHODS.has(method) && !input.clientUuid?.startsWith("intent:")) {
+    throw new ApiError(
+      422,
+      "INVALID_METHOD",
+      `${method} payments are booked by the gateway when it confirms the collection. Use /payments/initiate to collect, or MPESA to record a code the customer already paid.`,
+    );
+  }
+  // A manual M-Pesa record must carry the confirmation code the customer
+  // quotes — ten upper-case letters and digits — and each code can only be
+  // recorded once per company. Two reps keying the same SMS is the commonest
+  // way a customer is credited twice.
+  if (method === "MPESA") {
+    const code = (input.reference ?? "").trim().toUpperCase();
+    if (!MPESA_CODE_PATTERN.test(code)) {
+      throw new ApiError(
+        422,
+        "INVALID_REFERENCE",
+        "An M-Pesa payment needs the 10-character confirmation code from the customer's SMS (for example QHX7K2M9PL)",
+      );
+    }
+    const reused = await db.payment.findFirst({
+      where: { companyId: input.companyId, method: "MPESA", reference: code },
+      select: { number: true },
+    });
+    if (reused) {
+      throw new ApiError(409, "DUPLICATE_REFERENCE", `M-Pesa code ${code} was already recorded as payment ${reused.number}`);
+    }
+    input = { ...input, reference: code };
   }
 
   return db.$transaction(async (tx) => {

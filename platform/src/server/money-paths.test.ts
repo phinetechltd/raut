@@ -280,17 +280,17 @@ describe("money paths", () => {
 
     it("releases the claim when booking fails so the next poll can retry", async () => {
       const c = await newCustomer();
-      const intent = await processingIntent(c.id, 7_000);
-      // A verdict with an impossible amount makes recordPayment refuse.
-      await assert.rejects(
-        collections.settleIntent(intent.id, {
-          verify: async () => ({ status: "SUCCEEDED", amountCents: -1 }),
-        }),
-      );
+      // An intent whose own amount recordPayment refuses (zero), so the
+      // provider's verdict is accepted but the booking itself fails. (A verdict
+      // amount that differs from the intent is no longer a booking error — it
+      // is refused as an amount mismatch; see collections.test.ts.)
+      const intent = await processingIntent(c.id, 0);
+      await assert.rejects(collections.settleIntent(intent.id, { verify: succeeded }));
       const released = await db.paymentIntent.findUniqueOrThrow({ where: { id: intent.id } });
       assert.equal(released.status, "PROCESSING");
       assert.equal(released.paymentId, null);
 
+      await db.paymentIntent.update({ where: { id: intent.id }, data: { amountCents: 7_000 } });
       const settled = await collections.settleIntent(intent.id, { verify: succeeded });
       assert.equal(settled.status, "SUCCEEDED");
       assert.equal(await db.payment.count({ where: { customerId: c.id } }), 1);

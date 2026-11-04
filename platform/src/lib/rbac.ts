@@ -51,6 +51,7 @@ export type Permission =
   | "activity:write"
   // Sales & POS
   | "product:read"
+  | "quotation:read"
   | "quotation:write"
   | "order:read"
   | "order:write"
@@ -105,7 +106,10 @@ export type Permission =
   | "etims:configure"
   | "etims:submit"
   | "creditnote:read"
-  | "creditnote:write";
+  | "creditnote:write"
+  // Delivery notes
+  | "delivery:read"
+  | "delivery:write";
 
 /**
  * Which module owns each permission. Permissions absent from this map belong to
@@ -116,6 +120,7 @@ const PERMISSION_MODULE: Partial<Record<Permission, ModuleKey>> = {
   "territory:write": "CRM",
   "activity:write": "CRM",
 
+  "quotation:read": "SALES_POS",
   "quotation:write": "SALES_POS",
   "order:read": "SALES_POS",
   "order:write": "SALES_POS",
@@ -171,6 +176,9 @@ const PERMISSION_MODULE: Partial<Record<Permission, ModuleKey>> = {
   // it files with KRA. Only the transmission is gated on ETIMS.
   "creditnote:read": "SALES_POS",
   "creditnote:write": "SALES_POS",
+  // Delivery notes are dispatch paperwork for a sale, so they belong with it.
+  "delivery:read": "SALES_POS",
+  "delivery:write": "SALES_POS",
 };
 
 const CORE_READ: Permission[] = ["company:read", "user:read", "customer:read", "product:read", "report:read"];
@@ -190,6 +198,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "territory:write",
     "activity:write",
     "product:write",
+    "quotation:read",
     "quotation:write",
     "order:read",
     "order:write",
@@ -230,6 +239,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "etims:submit",
     "creditnote:read",
     "creditnote:write",
+    "delivery:read",
+    "delivery:write",
   ],
 
   BRANCH_MANAGER: [
@@ -265,6 +276,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "etims:submit",
     "creditnote:read",
     "creditnote:write",
+    "delivery:read",
+    "delivery:write",
   ],
 
   SALES_MANAGER: [
@@ -272,6 +285,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "customer:write",
     "territory:write",
     "activity:write",
+    "quotation:read",
     "quotation:write",
     "order:read",
     "order:write",
@@ -296,6 +310,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "etims:read",
     "creditnote:read",
     "creditnote:write",
+    "delivery:read",
+    "delivery:write",
   ],
 
   ACCOUNTANT: [
@@ -319,6 +335,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "etims:submit",
     "creditnote:read",
     "creditnote:write",
+    "delivery:read",
   ],
 
   STOREKEEPER: [
@@ -332,6 +349,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "purchase:write",
     "grn:write",
     "order:read",
+    "delivery:read",
+    "delivery:write",
     "etims:read",
   ],
 
@@ -369,6 +388,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     // customer and amount in the company and is none of their business. Their
     // pending list is built from the invoices they already sync.
     "etims:submit",
+    // Confirming a drop at the customer's door is the rep's own field record,
+    // and the note they print or show on the handset is theirs to raise.
+    "delivery:read",
+    "delivery:write",
   ],
 };
 

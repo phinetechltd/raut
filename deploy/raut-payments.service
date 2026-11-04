@@ -1,0 +1,16 @@
+[Unit]
+Description=Raut - reconcile open gateway collections
+After=network-online.target raut.service
+Requires=raut.service
+
+[Service]
+Type=oneshot
+# The token comes from the app's own environment file so there is one place to
+# rotate it. The endpoint refuses every request when PAYMENTS_RUNNER_TOKEN is
+# unset, which is the right default: an open endpoint that fires verify calls
+# at Safaricom and Paystack is a free way to burn the company's rate limit.
+EnvironmentFile=/var/www/raut/platform/.env
+# https, not http://127.0.0.1 with a Host header: nginx answers plain HTTP with
+# a 301 to https, and `curl -f` treats a redirect as success. The timer would
+# have reported healthy forever while never reaching the app at all.
+ExecStart=/usr/bin/curl -fsS --max-time 120 -X POST -H "Authorization: Bearer ${PAYMENTS_RUNNER_TOKEN}" -H "Content-Type: application/json" https://raut.co.ke/api/v1/payments/reconcile

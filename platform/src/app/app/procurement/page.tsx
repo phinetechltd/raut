@@ -1,4 +1,6 @@
-﻿import {
+﻿import Link from "next/link";
+
+import {
   CellStack,
   DataTable,
   FilterBar,
@@ -18,6 +20,7 @@ import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
 import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
 
+import { GoodsReceiptDialog, PostGoodsReceiptButton, type OpenOrder } from "./grn-dialog";
 import { PurchaseOrderDialog } from "./po-dialog";
 import { SupplierDialog, type SupplierShape } from "./supplier-dialog";
 
@@ -83,6 +86,7 @@ export default async function ProcurementPage({
 
   const canSupplierWrite = can(principal, "supplier:write");
   const canPurchaseWrite = can(principal, "purchase:write");
+  const canGrn = can(principal, "grn:write");
 
   const supplierWhere = {
     companyId,
@@ -158,6 +162,38 @@ export default async function ProcurementPage({
     _sum: { balanceCents: true },
   });
   const payables = payablesAgg._sum.balanceCents ?? 0;
+
+  // What the "Receive goods" dialog needs: every open order with its
+  // outstanding lines, every active location, and the supplier list unpaged.
+  const [openOrders, grnLocations, allSuppliers] = canGrn
+    ? await Promise.all([
+        db.purchaseOrder.findMany({
+          where: { companyId, status: { in: ["SENT", "PARTIALLY_RECEIVED"] } },
+          include: {
+            supplier: { select: { name: true } },
+            lines: { include: { product: { select: { name: true } } }, orderBy: { id: "asc" } },
+          },
+          orderBy: { orderDate: "desc" },
+          take: 100,
+        }),
+        db.stockLocation.findMany({ where: { companyId, active: true }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+        db.supplier.findMany({ where: { companyId, status: "ACTIVE" }, orderBy: { name: "asc" }, select: { id: true, name: true } }),
+      ])
+    : [[], [], []];
+  const openOrdersForGrn: OpenOrder[] = openOrders.map((po) => ({
+    id: po.id,
+    number: po.number,
+    supplierId: po.supplierId,
+    supplierName: po.supplier.name,
+    lines: po.lines.map((l) => ({
+      id: l.id,
+      productId: l.productId,
+      productName: l.product.name,
+      quantity: l.quantity,
+      received: l.received,
+      unitCostCents: l.unitCostCents,
+    })),
+  }));
 
   const supSortHrefFor = (key: string) => {
     const next = toggleSort(supTs, key);
@@ -291,6 +327,17 @@ export default async function ProcurementPage({
       sortKey: "status",
       cell: (po) => <StatusBadge status={po.status} />,
     },
+    {
+      key: "print",
+      header: "Print",
+      align: "right",
+      srOnlyHeader: true,
+      cell: (po) => (
+        <Link href={`/print/purchase-order/${po.id}`} target="_blank" className="text-xs text-content-muted hover:text-accent print:hidden">
+          Print
+        </Link>
+      ),
+    },
   ];
 
   type GrnRow = (typeof receipts)[number];
@@ -307,6 +354,28 @@ export default async function ProcurementPage({
     },
     { key: "lines", header: "Lines", align: "right", numeric: true, cell: (g) => g.lines.length },
     { key: "status", header: "Status", align: "right", sortKey: "status", cell: (g) => <StatusBadge status={g.status} /> },
+    {
+      key: "print",
+      header: "Print",
+      align: "right",
+      srOnlyHeader: true,
+      cell: (g) => (
+        <Link href={`/print/grn/${g.id}`} target="_blank" className="text-xs text-content-muted hover:text-accent print:hidden">
+          Print
+        </Link>
+      ),
+    },
+    ...(canGrn
+      ? [
+          {
+            key: "post",
+            header: "Post",
+            srOnlyHeader: true,
+            align: "right" as const,
+            cell: (g: GrnRow) => (g.status === "DRAFT" ? <PostGoodsReceiptButton id={g.id} number={g.number} /> : null),
+          } satisfies Column<GrnRow>,
+        ]
+      : []),
   ];
 
   return (
@@ -316,6 +385,9 @@ export default async function ProcurementPage({
         description="Purchase orders, goods received and supplier invoices."
         actions={
           <>
+            {canGrn && grnLocations.length > 0 && allSuppliers.length > 0 ? (
+              <GoodsReceiptDialog suppliers={allSuppliers} locations={grnLocations} openOrders={openOrdersForGrn} />
+            ) : null}
             {canPurchaseWrite && suppliers.length > 0 ? (
               <PurchaseOrderDialog
                 suppliers={suppliers.map((s) => ({ id: s.id, name: s.name }))}

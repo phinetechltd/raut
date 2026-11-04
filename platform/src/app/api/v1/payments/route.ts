@@ -43,12 +43,17 @@ const schema = z.object({
   // CREDIT_NOTE is deliberately absent: a credit note is a document with its
   // own route (/credit-notes), not a way money arrives. Accepting it here
   // booked phantom cash against the Cash account.
+  // Gateway methods (MPESA_STK, PAYSTACK, KCB_BUNI) are deliberately absent
+  // too: only settleIntent books those, after the provider confirms. Record a
+  // code the customer already paid as MPESA; collect live via /payments/initiate.
   method: z.enum(["CASH", "MPESA", "BANK", "CHEQUE"]).optional(),
   reference: z.string().optional(),
   paidAt: z.string().optional(),
   note: z.string().optional(),
   visitId: z.string().optional(),
-  clientUuid: z.string().optional(),
+  // `intent:<id>` is the uuid shape settleIntent books under; a client may
+  // not claim it.
+  clientUuid: z.string().refine((v) => !v.startsWith("intent:"), "Reserved client reference").optional(),
   /** Omit to allocate oldest-due-first. */
   allocations: z
     .array(z.object({ invoiceId: z.string(), amountCents: z.number().int().positive() }))

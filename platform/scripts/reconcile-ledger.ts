@@ -113,6 +113,11 @@ async function reconcile(companyId: string, name: string) {
   // from the posted goods receipts, which is also where the ledger books them.
   // Counting both doubled every purchase and reported a shortfall that was
   // never there. Transfers between the company's own locations change no value.
+  //
+  // REPACK_OUT / REPACK_IN stay in. The pair is not value-neutral to the cent:
+  // OUT leaves at the source cost and IN arrives at the floored unit cost, and
+  // the difference is exactly what the REPACK_ROUNDING entry credits against
+  // inventory. Excluding them would report that write-off as a DIFF.
   const valued = movements
     .filter((m) => !m.type.startsWith("TRANSFER") && m.type !== "PURCHASE")
     .reduce((n, m) => n + m.quantity * m.unitCostCents, 0);

@@ -4,7 +4,7 @@ import { ApiError, handler, parseBody } from "@/lib/api";
 import { auditAs } from "@/lib/audit";
 import { baseUrlFor, digitaxAdapter, isValidKraPin } from "@/lib/etims";
 import { db } from "@/lib/db";
-import { providerFor, credsFor, type PaymentProviderName } from "@/lib/payments";
+import { providerFor, credsFor, testCredentialProblem, type PaymentProviderName } from "@/lib/payments";
 import { secretsAvailable } from "@/lib/secrets";
 import { companyIdOf } from "@/lib/tenant";
 import {
@@ -218,13 +218,15 @@ export const PATCH = handler({ permission: "settings:write" }, async ({ principa
   const adapter = providerFor(provider as PaymentProviderName);
   if (!adapter) return { ok: false, note: "No adapter for this provider" };
 
-  // verify() on a reference that cannot exist: it exercises authentication
-  // without creating a charge. A credential problem surfaces as an auth error;
-  // a good credential simply reports the transaction as unknown.
-  const verdict = await adapter.verify("raut-credential-test", creds);
-  const note = verdict.failureReason ?? `Reachable (${verdict.status})`;
-  const ok = !/not configured|could not authenticate|invalid|unauthor/i.test(note);
+  // Each adapter proves its own key without moving money: Paystack is asked
+  // to verify a reference that cannot exist (a good key is told "not found",
+  // a bad one gets 401); Daraja mints a token and then queries an impossible
+  // CheckoutRequestID, which exercises the shortcode and passkey as well as
+  // the app credentials. A sandbox or test key on a production deployment is
+  // reported as a failure even if it authenticates.
+  const unfit = testCredentialProblem(provider, creds);
+  const result = unfit ? { ok: false, note: unfit } : await adapter.testCredentials(creds);
 
-  await recordTestResult(companyId, provider, ok, note);
-  return { ok, note };
+  await recordTestResult(companyId, provider, result.ok, result.note);
+  return result;
 });

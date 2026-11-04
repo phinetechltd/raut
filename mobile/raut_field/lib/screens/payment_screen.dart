@@ -1,6 +1,8 @@
 ﻿import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/money.dart';
 import '../core/payments_service.dart';
@@ -24,6 +26,11 @@ import 'receipt_screen.dart';
 /// queue. On success the *server* books the payment, so this screen must not
 /// also enqueue one — it syncs instead, or the customer is credited twice.
 ///
+/// A collection the rep stopped watching is not forgotten: the intent is kept
+/// on the handset and re-checked the next time this screen opens, and a retry
+/// within two minutes reuses the same request rather than pushing a second
+/// prompt at the customer.
+///
 /// Validation is about catching typos: an amount far above the balance is
 /// queried, not blocked, because overpayments and prepayments are both real.
 class PaymentScreen extends StatefulWidget {
@@ -44,6 +51,10 @@ class _PaymentScreenState extends State<PaymentScreen> {
   List<InvoiceSummary> _invoices = const [];
   bool _saving = false;
 
+  /// Collections this handset started for this customer and has not seen end.
+  List<OpenIntent> _open = const [];
+  bool _checkingOpen = false;
+
   /// Methods the rep records after the fact. All work with no signal.
   static const _methods = {
     'CASH': 'Cash',
@@ -51,6 +62,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
     'BANK': 'Bank transfer',
     'CHEQUE': 'Cheque',
   };
+
+  /// The confirmation code as it appears in the customer's M-Pesa SMS. The
+  /// server refuses anything else (and refuses a code recorded before).
+  static final _mpesaCode = RegExp(r'^[A-Z0-9]{10}$');
+
+  static const _stillWaiting =
+      'Still waiting for the customer — the payment will be recorded '
+      'automatically when it completes.';
 
   /// True when the selected method is a gateway rather than a manual record.
   bool get _isGateway => _method.startsWith('GW:');
@@ -64,12 +83,14 @@ class _PaymentScreenState extends State<PaymentScreen> {
     // cash must never depend on it.
     context.read<PaymentsService>().loadProviders();
     _payer.text = widget.customer.phone ?? '';
+    _recheckOpen();
   }
 
   @override
   void dispose() {
     _amount.dispose();
     _reference.dispose();
+    _payer.dispose();
     super.dispose();
   }
 
@@ -78,6 +99,47 @@ class _PaymentScreenState extends State<PaymentScreen> {
         await context.read<FieldRepository>().openInvoices(widget.customer.id);
     if (mounted) setState(() => _invoices = invoices);
   }
+
+  /// Asks the server about collections started earlier for this customer. One
+  /// that finished while the rep was away is announced and dropped; the rest
+  /// are shown so they can be checked or re-sent.
+  Future<void> _recheckOpen() async {
+    final payments = context.read<PaymentsService>();
+    final sync = context.read<SyncService>();
+    setState(() => _checkingOpen = true);
+    final results = await payments.recheckOpen(widget.customer.id);
+    if (!mounted) return;
+    var landed = 0;
+    for (final r in results) {
+      final current = r.current;
+      if (current == null) continue;
+      if (current.status == GatewayStatus.succeeded) {
+        landed++;
+      } else if (current.isTerminal) {
+        _toast(
+          '${Money.format(r.open.amountCents)} via ${_label(r.open.provider)} '
+          'did not complete: ${current.failureReason ?? current.status.name}',
+          error: true,
+        );
+      }
+    }
+    _open = await payments.openIntents(widget.customer.id);
+    if (!mounted) return;
+    setState(() => _checkingOpen = false);
+    if (landed > 0) {
+      _toast(landed == 1
+          ? 'An earlier payment has come through — syncing it now.'
+          : '$landed earlier payments have come through — syncing them now.');
+      await sync.sync(reason: 'gateway-settled');
+    }
+  }
+
+  String _label(String provider) =>
+      context.read<PaymentsService>().providers
+          .where((p) => p.name == provider)
+          .map((p) => p.label)
+          .firstOrNull ??
+      provider;
 
   int get _amountCents {
     final parsed = double.tryParse(_amount.text.replaceAll(',', '').trim());
@@ -90,6 +152,18 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     // Resolved before the confirmation dialog's await.
     final repo = context.read<FieldRepository>();
+
+    if (_method == 'MPESA') {
+      final code = _reference.text.trim().toUpperCase();
+      if (!_mpesaCode.hasMatch(code)) {
+        _toast(
+          "Enter the 10-character M-Pesa confirmation code from the customer's SMS (for example QHX7K2M9PL).",
+          error: true,
+        );
+        return;
+      }
+      _reference.text = code;
+    }
 
     if (cents > widget.customer.balanceCents && widget.customer.balanceCents > 0) {
       final proceed = await showDialog<bool>(
@@ -154,15 +228,25 @@ class _PaymentScreenState extends State<PaymentScreen> {
   /// Nothing is written locally. When the gateway confirms, the server books
   /// the Payment; this only triggers a sync so it comes back down. Writing one
   /// here as well would credit the customer twice.
-  Future<void> _collect(int cents) async {
+  ///
+  /// [resend] forces a fresh request (a second prompt) for a collection the
+  /// customer never answered; otherwise a request made in the last two minutes
+  /// for the same amount is reused, so a nervous second tap cannot push two
+  /// prompts at the customer.
+  Future<void> _collect(int cents, {OpenIntent? resend}) async {
     final payments = context.read<PaymentsService>();
-    final sync = context.read<SyncService>();
-    final provider = payments.usable.firstWhere(
-      (p) => p.name == _gatewayName,
-      orElse: () => payments.usable.first,
-    );
+    final providerName = resend?.provider ?? _gatewayName;
+    final provider = payments.usableNamed(providerName);
+    if (provider == null) {
+      _toast(
+        'That payment method is not available right now. Record the payment '
+        'another way or try again later.',
+        error: true,
+      );
+      return;
+    }
 
-    final payer = _payer.text.trim();
+    final payer = (resend?.payer ?? _payer.text).trim();
     if (payer.isEmpty) {
       _toast(
         provider.needs == 'email'
@@ -175,6 +259,19 @@ class _PaymentScreenState extends State<PaymentScreen> {
 
     setState(() => _saving = true);
 
+    // Same request again within the window → the server replays the same
+    // intent and no second prompt is sent. A deliberate resend after the
+    // window gets a new key, and therefore a new prompt.
+    String? reuseKey;
+    if (resend == null) {
+      final reusable = await payments.reusable(
+        customerId: widget.customer.id,
+        provider: provider.name,
+        amountCents: cents,
+      );
+      reuseKey = reusable?.clientUuid;
+    }
+
     GatewayIntent intent;
     try {
       intent = await payments.initiate(
@@ -184,6 +281,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
         payerPhone: provider.needs == 'phone' ? payer : null,
         payerEmail: provider.needs == 'email' ? payer : null,
         visitId: widget.visitId,
+        clientUuid: reuseKey,
       );
     } catch (error) {
       if (!mounted) return;
@@ -196,11 +294,23 @@ class _PaymentScreenState extends State<PaymentScreen> {
       if (!mounted) return;
       setState(() => _saving = false);
       _toast(intent.failureReason ?? 'The gateway refused the request', error: true);
+      await _refreshOpen();
       return;
     }
 
     if (!mounted) return;
-    final settled = await showDialog<GatewayIntent>(
+    if (reuseKey != null) {
+      _toast('The customer should already have the prompt — waiting on it rather than sending another.');
+    }
+    await _watch(intent, provider, cents);
+  }
+
+  /// Shows the waiting dialog and acts on how it ended.
+  Future<void> _watch(GatewayIntent intent, GatewayProvider provider, int cents) async {
+    final payments = context.read<PaymentsService>();
+    final sync = context.read<SyncService>();
+
+    final outcome = await showDialog<GatewayIntent>(
       context: context,
       barrierDismissible: false,
       builder: (_) => _AwaitingPaymentDialog(
@@ -213,27 +323,67 @@ class _PaymentScreenState extends State<PaymentScreen> {
     if (!mounted) return;
     setState(() => _saving = false);
 
-    if (settled?.status == GatewayStatus.succeeded) {
+    if (outcome?.status == GatewayStatus.succeeded) {
       // The payment exists on the server; pull it down so the balance and the
       // day's totals are right before the rep walks away.
+      await payments.forgetOpen(intent.id, customerId: widget.customer.id);
       await sync.sync(reason: 'gateway-settled');
       if (!mounted) return;
       Navigator.pop(context);
       _toast(
-        '${Money.format(settled!.amountCents)} received'
-        '${settled.receiptRef == null ? '' : ' · ${settled.receiptRef}'}',
+        '${Money.format(outcome!.amountCents)} received'
+        '${outcome.receiptRef == null ? '' : ' · ${outcome.receiptRef}'}',
       );
       return;
     }
 
-    if (settled == null) {
-      // Dismissed while still pending. The collection may yet land, so this is
-      // not framed as a failure.
-      _toast('Still waiting on the customer. It will appear once it completes.');
+    if (outcome == null || outcome.isOpen) {
+      // Closed by the rep, or the two-minute watch ran out. Neither is a
+      // failure: the prompt may still be answered, and the intent stays on
+      // the handset to be checked the next time this screen opens.
+      _toast(_stillWaiting);
+      await _refreshOpen();
       return;
     }
 
-    _toast(settled.failureReason ?? 'The payment did not complete', error: true);
+    await payments.forgetOpen(intent.id, customerId: widget.customer.id);
+    _toast(outcome.failureReason ?? 'The payment did not complete', error: true);
+    await _refreshOpen();
+  }
+
+  Future<void> _refreshOpen() async {
+    final open = await context.read<PaymentsService>().openIntents(widget.customer.id);
+    if (mounted) setState(() => _open = open);
+  }
+
+  /// Re-asks the server about one open collection, right now.
+  Future<void> _checkOne(OpenIntent open) async {
+    final payments = context.read<PaymentsService>();
+    final sync = context.read<SyncService>();
+    final provider = payments.usableNamed(open.provider) ??
+        GatewayProvider(name: open.provider, label: _label(open.provider), needs: 'phone', configured: true);
+    GatewayIntent current;
+    try {
+      current = await payments.status(open.id);
+    } catch (error) {
+      _toast('$error', error: true);
+      return;
+    }
+    if (!mounted) return;
+    if (current.isOpen) {
+      setState(() => _saving = true);
+      await _watch(current, provider, open.amountCents);
+      return;
+    }
+    await payments.forgetOpen(open.id, customerId: widget.customer.id);
+    if (current.status == GatewayStatus.succeeded) {
+      await sync.sync(reason: 'gateway-settled');
+      if (!mounted) return;
+      _toast('${Money.format(current.amountCents)} received${current.receiptRef == null ? '' : ' · ${current.receiptRef}'}');
+    } else {
+      _toast(current.failureReason ?? 'The payment did not complete', error: true);
+    }
+    await _refreshOpen();
   }
 
   void _toast(String message, {bool error = false}) {
@@ -254,7 +404,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
     // Watched, not read: a connection returning mid-visit should light the
     // gateway options up without the rep backing out and coming in again.
     final online = context.watch<SyncService>().status.online;
-    final gateways = context.watch<PaymentsService>().usable;
+    final payments = context.watch<PaymentsService>();
+    final gateways = payments.usable;
     final gatewayNeedsEmail = _isGateway &&
         gateways.any((g) => g.name == _gatewayName && g.needs == 'email');
 
@@ -318,6 +469,19 @@ class _PaymentScreenState extends State<PaymentScreen> {
               ),
             ),
           ),
+
+          if (_open.isNotEmpty || _checkingOpen) ...[
+            const SizedBox(height: 12),
+            _OpenIntentsCard(
+              open: _open,
+              checking: _checkingOpen,
+              label: _label,
+              canResend: payments.canResend,
+              busy: _saving,
+              onCheck: _checkOne,
+              onResend: (o) => _collect(o.amountCents, resend: o),
+            ),
+          ],
 
           const SizedBox(height: 16),
           TextField(
@@ -429,8 +593,8 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     ? "Customer's email"
                     : "Customer's M-Pesa number",
                 helperText: gatewayNeedsEmail
-                    ? 'A payment link is sent here'
-                    : 'The prompt goes to this handset',
+                    ? 'A payment link is created for them'
+                    : 'The prompt goes to this handset · whole shillings only',
                 prefixIcon: Icon(
                   gatewayNeedsEmail ? Icons.alternate_email : Icons.phone_android,
                 ),
@@ -439,12 +603,20 @@ class _PaymentScreenState extends State<PaymentScreen> {
           else
             TextField(
               controller: _reference,
+              textCapitalization: _method == 'MPESA'
+                  ? TextCapitalization.characters
+                  : TextCapitalization.none,
+              maxLength: _method == 'MPESA' ? 10 : null,
               decoration: InputDecoration(
                 labelText: _method == 'MPESA'
-                    ? 'M-Pesa code'
+                    ? 'M-Pesa confirmation code'
                     : _method == 'CHEQUE'
                         ? 'Cheque number'
                         : 'Reference (optional)',
+                helperText: _method == 'MPESA'
+                    ? "10 characters from the customer's SMS, e.g. QHX7K2M9PL"
+                    : null,
+                counterText: '',
                 prefixIcon: const Icon(Icons.tag),
               ),
             ),
@@ -547,13 +719,124 @@ class _PaymentScreenState extends State<PaymentScreen> {
   }
 }
 
+/// Collections started earlier for this customer that have not finished.
+class _OpenIntentsCard extends StatelessWidget {
+  const _OpenIntentsCard({
+    required this.open,
+    required this.checking,
+    required this.label,
+    required this.canResend,
+    required this.busy,
+    required this.onCheck,
+    required this.onResend,
+  });
+
+  final List<OpenIntent> open;
+  final bool checking;
+  final String Function(String provider) label;
+  final bool Function(OpenIntent) canResend;
+  final bool busy;
+  final void Function(OpenIntent) onCheck;
+  final void Function(OpenIntent) onResend;
+
+  @override
+  Widget build(BuildContext context) {
+    return Card(
+      color: RautTheme.warning.withValues(alpha: 0.08),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(Icons.hourglass_top, size: 18, color: RautTheme.warning),
+                const SizedBox(width: 8),
+                const Expanded(
+                  child: Text(
+                    'Waiting on the customer',
+                    style: TextStyle(fontWeight: FontWeight.w700),
+                  ),
+                ),
+                if (checking)
+                  const SizedBox(
+                    height: 14,
+                    width: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+              ],
+            ),
+            for (final o in open) ...[
+              const SizedBox(height: 8),
+              Text(
+                '${Money.format(o.amountCents)} via ${label(o.provider)} · '
+                'requested ${_ago(o.createdAt)}',
+                style: const TextStyle(fontSize: 13),
+              ),
+              if (o.redirectUrl != null) ...[
+                const SizedBox(height: 4),
+                SelectableText(
+                  o.redirectUrl!,
+                  style: TextStyle(fontSize: 11.5, color: Colors.grey.shade700),
+                ),
+              ],
+              Wrap(
+                spacing: 4,
+                children: [
+                  TextButton(
+                    onPressed: busy ? null : () => onCheck(o),
+                    child: const Text('Check now'),
+                  ),
+                  if (o.redirectUrl != null) ...[
+                    TextButton(
+                      onPressed: () => launchUrl(Uri.parse(o.redirectUrl!), mode: LaunchMode.externalApplication),
+                      child: const Text('Open link'),
+                    ),
+                    TextButton(
+                      onPressed: () async {
+                        await Clipboard.setData(ClipboardData(text: o.redirectUrl!));
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Payment link copied'), behavior: SnackBarBehavior.floating),
+                          );
+                        }
+                      },
+                      child: const Text('Copy link'),
+                    ),
+                  ] else
+                    TextButton(
+                      // Only after the first prompt has had its two minutes:
+                      // a second prompt on top of a live one confuses the
+                      // customer and can charge them twice.
+                      onPressed: busy || !canResend(o) ? null : () => onResend(o),
+                      child: Text(canResend(o) ? 'Resend prompt' : 'Resend available in 2 min'),
+                    ),
+                ],
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _ago(DateTime at) {
+    final d = DateTime.now().difference(at);
+    if (d.inMinutes < 1) return 'just now';
+    if (d.inMinutes < 60) return '${d.inMinutes} min ago';
+    if (d.inHours < 24) return '${d.inHours} h ago';
+    return DateFormat('d MMM, HH:mm').format(at);
+  }
+}
 
 /// Waits on the customer while the gateway does its work.
 ///
 /// Deliberately dismissible. An STK prompt can sit unanswered while a customer
 /// hunts for their phone, and trapping a rep behind a modal they cannot escape
 /// is worse than letting them carry on — the collection keeps running server
-/// side either way, and the next sync picks it up.
+/// side either way, and the next sync picks it up. When the two-minute watch
+/// runs out the dialog hands back the last *open* state; the screen reads that
+/// as "still waiting", never as a failure.
 class _AwaitingPaymentDialog extends StatefulWidget {
   const _AwaitingPaymentDialog({
     required this.intent,
@@ -588,13 +871,15 @@ class _AwaitingPaymentDialogState extends State<_AwaitingPaymentDialog> {
         return;
       }
     }
-    // Timed out rather than resolved. Hand back what we last knew.
+    // Timed out rather than resolved. Hand back what we last knew — an open
+    // intent, which the screen reports as still waiting.
     if (mounted) Navigator.of(context).pop(_current);
   }
 
   @override
   Widget build(BuildContext context) {
     final phone = widget.provider.needs == 'phone';
+    final link = _current.redirectUrl ?? widget.intent.redirectUrl;
     return AlertDialog(
       title: Text('Waiting for ${Money.format(widget.amountCents)}'),
       content: Column(
@@ -607,14 +892,45 @@ class _AwaitingPaymentDialogState extends State<_AwaitingPaymentDialog> {
             phone
                 ? 'Ask the customer to check their phone and enter their '
                   'M-Pesa PIN on the prompt.'
-                : 'The customer should complete the card payment on the link '
-                  'that was sent to them.',
+                : 'The customer completes the card payment on the link below. '
+                  'Open it on this phone for them, or share it.',
             style: const TextStyle(height: 1.4),
           ),
+          if (!phone && link != null) ...[
+            const SizedBox(height: 12),
+            SelectableText(
+              link,
+              style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
+            ),
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 8,
+              children: [
+                FilledButton.tonalIcon(
+                  onPressed: () => launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication),
+                  icon: const Icon(Icons.open_in_new, size: 18),
+                  label: const Text('Open payment link'),
+                ),
+                OutlinedButton.icon(
+                  onPressed: () async {
+                    await Clipboard.setData(ClipboardData(text: link));
+                    if (context.mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Payment link copied'), behavior: SnackBarBehavior.floating),
+                      );
+                    }
+                  },
+                  icon: const Icon(Icons.copy, size: 18),
+                  label: const Text('Copy link'),
+                ),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           Text(
             'This screen updates on its own. You can close it and keep '
-            'working — the payment will still come through.',
+            'working — the payment will still come through and is checked '
+            'again the next time you open this customer.',
             style: TextStyle(fontSize: 12, color: Colors.grey.shade600, height: 1.35),
           ),
         ],

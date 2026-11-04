@@ -152,12 +152,18 @@ export function DataTable<T>({
                       )}
                     >
                       {withSort ? (
-                        <Link
-                          href={sortHrefFor!(c.sortKey!)}
-                          className={cx("group -m-1 inline-flex p-1 hover:text-content", active && "text-accent")}
-                        >
-                          {content}
-                        </Link>
+                        <>
+                          {/* On paper the header is a label, not a control: the
+                              link and its sort glyph are dropped and the plain
+                              text is printed in their place. */}
+                          <Link
+                            href={sortHrefFor!(c.sortKey!)}
+                            className={cx("group -m-1 inline-flex p-1 hover:text-content print:hidden", active && "text-accent")}
+                          >
+                            {content}
+                          </Link>
+                          <span className="hidden print:inline">{c.header}</span>
+                        </>
                       ) : (
                         content
                       )}
@@ -271,9 +277,10 @@ function PaginationBar({
   return (
     <div
       className={cx(
-        "flex flex-wrap items-center justify-between gap-3 border-t border-border bg-surface",
+        "flex flex-wrap items-center justify-between gap-3 border-t border-border bg-surface print:hidden",
         dense ? "px-3 py-2" : "px-4 py-2.5",
       )}
+      data-print-hidden
     >
       <p className="text-xs text-content-muted">
         {from}–{to} of {total.toLocaleString("en-KE")}

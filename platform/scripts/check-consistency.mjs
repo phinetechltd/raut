@@ -339,7 +339,7 @@ async function checkCompany(company) {
           ? "ADJUSTMENT"
           : type === "OPENING"
             ? "OPENING"
-            : null;
+            : null; // PURCHASE posts per receipt; TRANSFER_* and REPACK_* post nothing themselves
     for (const m of movements) {
       const kind = kindFor(m.type);
       if (!kind) continue;
@@ -375,6 +375,30 @@ async function checkCompany(company) {
     }
     r.check("Every POSTED goods receipt with value has a PURCHASE entry", missing);
     r.check("PURCHASE entries match their receipt", wrong);
+  }
+
+  {
+    const bad = [];
+    const byRef = groupBy(movements.filter((m) => m.refType === "GRN"), (m) => m.refId);
+    for (const g of receipts) {
+      const list = byRef.get(g.id) ?? [];
+      for (const l of g.lines) {
+        if (l.locationId && !locationIds.has(l.locationId)) bad.push(`${g.number}: line ${l.id} lands at a location from another company`);
+      }
+      if (g.status !== "POSTED") {
+        if (list.length) bad.push(`${g.number} (${g.status}): has stock movements`);
+        continue;
+      }
+      if (list.some((m) => m.type !== "PURCHASE")) bad.push(`${g.number}: a non-PURCHASE movement references it`);
+      // A line lands where it says, else where the receipt says.
+      const expected = groupSum(g.lines, (l) => `${l.productId}|${l.locationId ?? g.locationId}`, (l) => Math.abs(l.quantity));
+      const actual = groupSum(list, (m) => `${m.productId}|${m.locationId}`, (m) => m.quantity);
+      for (const [k, q] of expected) {
+        if ((actual.get(k) ?? 0) !== q) bad.push(`${g.number}: ${k} has ${q} on lines, ${actual.get(k) ?? 0} moved`);
+      }
+      for (const k of actual.keys()) if (!expected.has(k)) bad.push(`${g.number}: movement at ${k} with no line`);
+    }
+    r.check("Posted receipts put each line's quantity at its own location (line.locationId ?? receipt location)", bad);
   }
 
   {
@@ -715,42 +739,97 @@ async function checkCompany(company) {
     );
   }
 
-  // ---- 16. transfers: two-phase symmetry -----------------------------------------
+  // ---- 16. transfers: counters, movements and status agree ----------------------
   {
     const bad = [];
     const byRef = groupBy(movements.filter((m) => m.refType === "TRANSFER"), (m) => m.refId);
+    // Mirrors deriveTransferStatus in src/server/inventory.ts.
+    const derive = (lines, shortClosed) => {
+      if (shortClosed) return "RECEIVED";
+      const quantity = sumBy(lines, (l) => l.quantity);
+      const dispatched = sumBy(lines, (l) => l.dispatched);
+      const received = sumBy(lines, (l) => l.received);
+      if (dispatched === 0) return "DRAFT";
+      if (received >= quantity) return "RECEIVED";
+      if (received > 0) return "PARTIALLY_RECEIVED";
+      if (dispatched >= quantity) return "IN_TRANSIT";
+      return "PARTIALLY_DISPATCHED";
+    };
+    const qty = (m) => m.quantity;
     for (const t of transfers) {
       const list = byRef.get(t.id) ?? [];
-      const outs = list.filter((m) => m.type === "TRANSFER_OUT");
-      const ins = list.filter((m) => m.type === "TRANSFER_IN");
       if (!locationIds.has(t.fromLocationId) || !locationIds.has(t.toLocationId)) {
         bad.push(`${t.number}: a location belongs to another company`);
       }
-      const expectOut = t.status === "IN_TRANSIT" || t.status === "RECEIVED";
-      const expectIn = t.status === "RECEIVED";
-      if (!expectOut && outs.length) bad.push(`${t.number} (${t.status}): has TRANSFER_OUT movements`);
-      if (!expectIn && ins.length) bad.push(`${t.number} (${t.status}): has TRANSFER_IN movements`);
-      if (expectOut) {
-        for (const l of t.lines) {
-          const out = outs.filter((m) => m.productId === l.productId && m.locationId === t.fromLocationId);
-          if (sumBy(out, (m) => m.quantity) !== -Math.abs(l.quantity)) bad.push(`${t.number}: OUT for ${l.productId} is ${sumBy(out, (m) => m.quantity)}, line is ${l.quantity}`);
+      if (t.fromLocationId === t.toLocationId) bad.push(`${t.number}: source and destination are the same location`);
+      const onTransfer = new Set(t.lines.map((l) => l.productId));
+      for (const l of t.lines) {
+        if (!(0 <= l.received && l.received <= l.dispatched && l.dispatched <= l.quantity)) {
+          bad.push(`${t.number}: line ${l.id} breaks 0 <= received ${l.received} <= dispatched ${l.dispatched} <= quantity ${l.quantity}`);
         }
-        if (outs.some((m) => m.locationId !== t.fromLocationId)) bad.push(`${t.number}: TRANSFER_OUT not at the source location`);
+        const at = (type, locationId) =>
+          sumBy(list.filter((m) => m.type === type && m.productId === l.productId && m.locationId === locationId), qty);
+        const out = at("TRANSFER_OUT", t.fromLocationId);
+        const inn = at("TRANSFER_IN", t.toLocationId);
+        if (out !== -l.dispatched) bad.push(`${t.number}: OUT at source for ${l.productId} is ${out}, dispatched is ${l.dispatched}`);
+        if (inn !== l.received) bad.push(`${t.number}: IN at destination for ${l.productId} is ${inn}, received is ${l.received}`);
+        // Short close: what never arrived comes back to the source on paper and is written off there.
+        const lost = t.shortClosedAt ? l.dispatched - l.received : 0;
+        const back = at("TRANSFER_IN", t.fromLocationId);
+        const writtenOff = at("WRITE_OFF", t.fromLocationId);
+        if (back !== lost) bad.push(`${t.number}: IN back at source for ${l.productId} is ${back}, short-closed loss is ${lost}`);
+        if (writtenOff !== -lost) bad.push(`${t.number}: WRITE_OFF at source for ${l.productId} is ${writtenOff}, short-closed loss is ${lost}`);
       }
-      if (expectIn) {
-        for (const l of t.lines) {
-          const inn = ins.filter((m) => m.productId === l.productId && m.locationId === t.toLocationId);
-          if (sumBy(inn, (m) => m.quantity) !== Math.abs(l.quantity)) bad.push(`${t.number}: IN for ${l.productId} is ${sumBy(inn, (m) => m.quantity)}, line is ${l.quantity}`);
-        }
-        if (ins.some((m) => m.locationId !== t.toLocationId)) bad.push(`${t.number}: TRANSFER_IN not at the destination`);
+      for (const m of list) {
+        if (!onTransfer.has(m.productId)) bad.push(`${t.number}: movement ${m.id} is for a product not on the transfer`);
+        if (m.type === "TRANSFER_OUT" && m.locationId !== t.fromLocationId) bad.push(`${t.number}: TRANSFER_OUT ${m.id} not at the source`);
+        if (m.type === "TRANSFER_IN" && m.locationId !== t.toLocationId && m.locationId !== t.fromLocationId) bad.push(`${t.number}: TRANSFER_IN ${m.id} at neither end`);
+        if (m.type === "WRITE_OFF" && (m.locationId !== t.fromLocationId || !t.shortClosedAt)) bad.push(`${t.number}: WRITE_OFF ${m.id} outside a short close at the source`);
+        if (!["TRANSFER_OUT", "TRANSFER_IN", "WRITE_OFF"].includes(m.type)) bad.push(`${t.number}: unexpected ${m.type} movement ${m.id}`);
       }
+      const expected = t.status === "CANCELLED" ? "CANCELLED" : derive(t.lines, Boolean(t.shortClosedAt));
+      if (t.status === "CANCELLED" && t.lines.some((l) => l.dispatched || l.received)) bad.push(`${t.number}: CANCELLED but something moved`);
+      if (t.status !== expected) bad.push(`${t.number}: status ${t.status}, counters imply ${expected}`);
+      if (!["DRAFT", "CANCELLED"].includes(t.status) && !t.dispatchedAt) bad.push(`${t.number}: ${t.status} without dispatchedAt`);
+      if (t.status === "RECEIVED" && !t.receivedAt) bad.push(`${t.number}: RECEIVED without receivedAt`);
+      if (t.shortClosedAt && t.status !== "RECEIVED") bad.push(`${t.number}: closed short but ${t.status}`);
     }
-    r.check("Transfer movements are symmetric with the transfer's status (stockTransferCheck)", bad);
+    r.check("Transfer counters, movements and status agree (received <= dispatched <= quantity; OUT = -dispatched; IN = received)", bad);
+  }
+
+  // ---- 16b. repacks: value carried across, rounding written off -----------------
+  {
+    const bad = [];
+    const stray = movements.filter((m) => (m.type === "REPACK_OUT" || m.type === "REPACK_IN") && m.refType !== "REPACK");
+    for (const m of stray) bad.push(`${m.type} ${m.id} without a REPACK reference`);
+    const byRef = groupBy(movements.filter((m) => m.refType === "REPACK"), (m) => m.refId);
+    for (const [refId, list] of byRef) {
+      const outs = list.filter((m) => m.type === "REPACK_OUT");
+      const ins = list.filter((m) => m.type === "REPACK_IN");
+      if (outs.length !== 1 || ins.length !== 1 || list.length !== 2) {
+        bad.push(`${refId}: ${outs.length} OUT / ${ins.length} IN legs (${list.length} movements)`);
+        continue;
+      }
+      const [out] = outs;
+      const [inn] = ins;
+      if (out.locationId !== inn.locationId) bad.push(`${refId}: legs at different locations`);
+      if (out.productId === inn.productId) bad.push(`${refId}: both legs are the same product`);
+      if (!(out.quantity < 0 && inn.quantity > 0)) bad.push(`${refId}: OUT ${out.quantity} / IN ${inn.quantity} have the wrong signs`);
+      const net = out.quantity * out.unitCostCents + inn.quantity * inn.unitCostCents;
+      const rounding = entryFor("StockMovement", inn.id, "REPACK_ROUNDING");
+      const written = rounding ? lineAmount(rounding, INVENTORY, "credit") : 0;
+      if (net + written !== 0) bad.push(`${refId}: legs net ${net}, REPACK_ROUNDING writes off ${written}`);
+      if (written >= inn.quantity && written > 0) bad.push(`${refId}: rounding ${written} is not smaller than the ${inn.quantity} units produced`);
+    }
+    r.check("Repack legs carry value across; sum of qty x cost per REPACK is 0 or equals its rounding entry", bad);
   }
 
   // ---- 17. inventory account = valued movements + posted receipts ------------------
   {
-    const valuedTypes = new Set(["SALE", "RETURN", "ADJUSTMENT", "WRITE_OFF", "OPENING"]);
+    // REPACK legs are included: OUT leaves at the source cost and IN arrives at
+    // the floored unit cost, so the pair nets to exactly the rounding cents the
+    // REPACK_ROUNDING entry books against inventory.
+    const valuedTypes = new Set(["SALE", "RETURN", "ADJUSTMENT", "WRITE_OFF", "OPENING", "REPACK_OUT", "REPACK_IN"]);
     const movementValue = sumBy(
       movements.filter((m) => valuedTypes.has(m.type)),
       (m) => m.quantity * m.unitCostCents,
@@ -847,9 +926,11 @@ async function checkCompany(company) {
     for (const i of intents) {
       const linked = i.paymentId ? paymentById.get(i.paymentId) : null;
       const byUuid = paymentsByIntentUuid.get(`intent:${i.id}`);
-      if (i.status === "SUCCEEDED") {
-        if (!i.paymentId) bad.push(`${i.id}: SUCCEEDED without paymentId`);
-        else if (!linked) bad.push(`${i.id}: SUCCEEDED, payment ${i.paymentId} missing`);
+      // REVERSED is a SUCCEEDED intent the provider later took back; the
+      // payment stays on the books until a person decides what to do.
+      if (i.status === "SUCCEEDED" || i.status === "REVERSED") {
+        if (!i.paymentId) bad.push(`${i.id}: ${i.status} without paymentId`);
+        else if (!linked) bad.push(`${i.id}: ${i.status}, payment ${i.paymentId} missing`);
         else {
           if (linked.customerId !== i.customerId) bad.push(`${i.id}: payment ${linked.number} is another customer's`);
           if (byUuid && byUuid.id !== linked.id) bad.push(`${i.id}: two payments for one intent (${linked.number}, ${byUuid.number})`);

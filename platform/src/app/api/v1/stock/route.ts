@@ -1,10 +1,10 @@
 import { z } from "zod";
 
-import { handler, notFound, ok, parseBody } from "@/lib/api";
+import { handler, ok, parseBody } from "@/lib/api";
 import { auditAs } from "@/lib/audit";
 import { db } from "@/lib/db";
 import { companyIdOf, scope } from "@/lib/tenant";
-import { applyMovement, stockLevels } from "@/server/inventory";
+import { adjustAcrossLocations, stockLevels } from "@/server/inventory";
 
 export const dynamic = "force-dynamic";
 
@@ -32,60 +32,81 @@ export const GET = handler(
   },
 );
 
-const adjustSchema = z.object({
-  productId: z.string(),
+const lineSchema = z.object({
   locationId: z.string(),
-  /** Signed. Negative writes stock off. */
+  /** Signed. Negative writes stock off at this location. */
   quantity: z.number().int().refine((n) => n !== 0, "Adjustment cannot be zero"),
-  note: z.string().optional(),
 });
 
-/** Manual stock adjustment — always ledgered, never a silent balance edit. */
+/**
+ * Either the single-location body the mobile app sends, or `lines` — one
+ * product counted at several locations in one go.
+ */
+const adjustSchema = z.union([
+  z.object({
+    productId: z.string(),
+    locationId: z.string(),
+    quantity: z.number().int().refine((n) => n !== 0, "Adjustment cannot be zero"),
+    note: z.string().optional(),
+  }),
+  z.object({
+    productId: z.string(),
+    lines: z.array(lineSchema).min(1),
+    note: z.string().optional(),
+  }),
+]);
+
+/**
+ * Manual stock adjustment — always ledgered, never a silent balance edit.
+ *
+ * When the lines net to zero nothing was gained or lost, only found elsewhere,
+ * so the count is recorded as a completed transfer between the locations
+ * rather than as a write-off and a write-up that would both hit the P&L.
+ */
 export const POST = handler(
   { permission: "stock:write" },
   async ({ principal, request }) => {
     const companyId = companyIdOf(principal);
     const input = await parseBody(request, adjustSchema);
+    const lines = "lines" in input ? input.lines : [{ locationId: input.locationId, quantity: input.quantity }];
+    const note = input.note?.trim() || undefined;
 
-    // Both ids come from the client. Resolved against this company first, so
-    // a foreign id is "not found" rather than a stock item under our tenant —
-    // and the product's cost is what values the adjustment.
-    const [product, location] = await Promise.all([
-      db.product.findFirst({
-        where: { id: input.productId, companyId },
-        select: { id: true, costPriceCents: true },
-      }),
-      db.stockLocation.findFirst({
-        where: { id: input.locationId, companyId },
-        select: { id: true },
-      }),
-    ]);
-    if (!product) throw notFound("Product not found");
-    if (!location) throw notFound("Stock location not found");
-
-    const movement = await db.$transaction(
+    // Tenant checks and the per-location movements happen inside the one
+    // transaction; a foreign product or location id is "not found" rather than
+    // a stock item under our tenant.
+    const result = await db.$transaction(
       (tx) =>
-        applyMovement(tx, {
+        adjustAcrossLocations(tx, {
           companyId,
-          productId: product.id,
-          locationId: location.id,
-          type: "ADJUSTMENT",
-          quantity: input.quantity,
-          // Valued at the product's cost, so the inventory account moves with
-          // the shelf. An adjustment with no cost changes the quantity report
-          // and leaves the balance sheet behind.
-          unitCostCents: product.costPriceCents,
-          note: input.note,
-          createdById: principal.userId,
+          productId: input.productId,
+          lines,
+          note,
+          userId: principal.userId,
         }),
       { timeout: 15_000 },
     );
 
-    await auditAs(principal, "CREATE", "StockMovement", movement.id, {
-      productId: input.productId,
-      quantity: input.quantity,
-    }, request);
+    if (result.kind === "RELOCATION") {
+      for (const t of result.transfers) {
+        await auditAs(principal, "CREATE", "StockTransfer", t.id, {
+          number: t.number,
+          relocation: true,
+          productId: input.productId,
+        }, request);
+      }
+      return ok(result, undefined, { status: 201 });
+    }
 
-    return ok(movement, undefined, { status: 201 });
+    for (const m of result.movements) {
+      await auditAs(principal, "CREATE", "StockMovement", m.id, {
+        productId: input.productId,
+        locationId: m.locationId,
+        quantity: m.quantity,
+      }, request);
+    }
+
+    // The single-line call keeps its original shape: one movement.
+    if (!("lines" in input)) return ok(result.movements[0], undefined, { status: 201 });
+    return ok(result, undefined, { status: 201 });
   },
 );

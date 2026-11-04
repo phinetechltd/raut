@@ -98,6 +98,21 @@ describe("nextNumber", () => {
     assert.equal(counters[0].nextValue, 7);
   });
 
+  it("numbers delivery notes DN-0001 onwards, on their own counter", async () => {
+    // Added with the delivery-note work: a note must not share the invoice or
+    // credit-note sequence, or the driver's paper and the tax document could
+    // carry the same number.
+    const first = await numbering.nextNumber(companyId, "DELIVERY_NOTE");
+    const second = await numbering.nextNumber(companyId, "DELIVERY_NOTE");
+    assert.equal(first, "DN-0001");
+    assert.equal(second, "DN-0002");
+    const counter = await db.documentCounter.findUniqueOrThrow({
+      where: { companyId_docType: { companyId, docType: "DELIVERY_NOTE" } },
+    });
+    assert.equal(counter.prefix, "DN");
+    assert.equal(counter.nextValue, 3);
+  });
+
   it("formats with the counter's own prefix and padding", () => {
     assert.equal(numbering.formatDocumentNumber("ZM-PO", 7), "ZM-PO-0007");
     assert.equal(numbering.formatDocumentNumber("INV", 12345), "INV-12345");

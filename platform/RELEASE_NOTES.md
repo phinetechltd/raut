@@ -53,6 +53,105 @@ Finance → eTIMS page with the reason, instead of waiting silently for ever. A
 product can be marked exempt rather than zero-rated, and the handset's "Send
 all" count only counts what KRA actually accepted.
 
+**Split cartons into pieces without losing track of their value.** Inventory
+has a new "Split / repack" action: pick what you are opening, where, and what it
+becomes, and the value of the cartons is carried into the pieces so the stock
+valuation and the books still agree. If a carton's cost does not divide evenly
+into its pieces, the few cents left over are written off and shown in the
+preview before you confirm. Both halves of the split share one reference in the
+stock movements, which now also tell "split out" and "split in" apart from
+other movements and spell "write-off" properly.
+
+**Transfers can be sent and received in parts.** Inventory → Transfers lists
+every movement of goods between your stores and vans. Dispatch half a line
+today and the rest tomorrow; receive what actually came off the truck; the
+transfer shows as partially dispatched or partially received until it is done.
+A draft can be cancelled; a transfer that will never complete can be closed
+short, which writes off what was dispatched but never arrived at the store it
+left from, so the loss shows in the P&L instead of as stock in limbo. Two people
+dispatching the same line at the same moment cannot both succeed.
+
+**Receive goods from the procurement page.** "Receive goods" fills in what is
+still outstanding on an open purchase order (or lets you record a delivery
+without one), and each line can land at a different store than the receipt's
+own. Posting puts the stock on the shelf, moves the product's cost to what you
+actually paid and books the supplier liability. Receiving more than was ordered
+is refused unless you tick that you mean it, a purchase order with the same
+product on two lines is filled in order, and a receipt held as a draft can be
+posted later from its row.
+
+**Count one product across several stores in one go.** The stock adjustment
+dialog takes a row per location. When the rows net to zero — three missing
+here, three found there — it is recorded as a relocation rather than a loss
+and a gain, so nothing passes through the P&L that did not happen.
+
+**Delivery notes.** Sales now has delivery notes — the paper that goes out with
+the goods and comes back signed. Raise one from an invoice with a single
+click (it opens ready to print), or from Sales → Delivery notes against an
+invoice or a confirmed order, choosing how much of each line goes out this
+trip. The rest can follow on a second note, and the system will not let more
+leave than was sold. Mark a note delivered with the name of the person who
+signed for it; if some cartons come straight back with the driver, record the
+return on the note and they are free to go out again. A delivery note never
+touches your stock figures — those moved when the invoice was issued — and it
+says on its face that it is not a tax invoice. Numbered DN-0001 onwards.
+
+**Everything prints properly now.** Invoices, credit notes, payment receipts,
+delivery notes, proforma invoices for orders, purchase orders, goods received
+notes, customer statements and route sheets all have a Print button that
+opens a clean A4 document — your company name, PIN and logo at the top, no
+menus or sidebars, and the same layout on every document. Save it as a PDF
+from the print dialog. An invoice KRA has accepted prints as a TAX INVOICE
+with its control code and QR; one that is still waiting prints as an INVOICE
+that says "NOT A TAX INVOICE — Awaiting KRA", exactly as the field app's
+receipt does. A reprint can be stamped DUPLICATE, a paid invoice has an 80 mm
+till-roll receipt, and a delivery note shows prices only if you ask it to.
+
+**Statements and route sheets.** A customer's page has "Print statement": the
+opening balance, every invoice, payment and credit note in the period with a
+running balance, and a list of what is still owing on each open invoice. Each
+route on the Routing page has "Route sheet": the day's stops with blank
+columns for what was delivered and collected and a signature, plus the van's
+plate and odometer lines, for the rep to hand in with the cash.
+
+**Printing from the console itself is tidier.** Printing any console page now
+leaves out the sidebar, header and table paging controls, and prints light
+even when you use the dark theme.
+
+**Card and M-Pesa collections cannot be lost, double-booked or faked.** When a
+rep asks a customer to pay on their phone, the money is only recorded once
+Safaricom or Paystack has confirmed it — never because a message arrived
+claiming so, and never twice when the confirmation arrives twice. A request
+whose answer got lost in a bad signal is kept open and confirmed later, rather
+than being marked failed while the customer's prompt is still live. A payment
+for a different amount than was asked is held back and flagged. Every open
+request is re-checked every five minutes, and anything unanswered after a day
+is closed off.
+
+**You can see every collection.** Finance → Collections lists each M-Pesa,
+card and Buni request, who it was for, what the provider said, the M-Pesa
+receipt number, and a Re-check button. A card payment that the bank later
+reversed is shown there in its own colour; the books are left for you to
+correct, with the evidence in front of you.
+
+**Clearer messages at the till.** A cancelled prompt now says "Cancelled by the
+customer", a silent phone says so, and an amount with cents is refused up front
+for M-Pesa rather than quietly rounded down. When the rep's two-minute wait
+runs out the app says the payment will be recorded automatically when it
+completes — and checks it again the next time that customer's payment screen is
+opened. Tapping Request again within two minutes reuses the same prompt instead
+of sending the customer a second one; a Resend button appears once that time
+has passed. Card payments show the link to open or share.
+
+**Payment settings are stricter.** A company's own gateway keys are used on
+their own, never mixed with the platform's. Replacing a key keeps the optional
+settings you had already filled in. A test key cannot be saved on the live
+system, gateway addresses can only point at the real providers, and the Test
+button now proves the key actually works rather than just that it was typed in.
+A manual M-Pesa entry must carry the ten-character code from the customer's
+SMS, and the same code cannot be recorded twice. Customers receive their
+payment SMS for card and STK collections too.
+
 # Raut — September 2026 update
 
 **Returns now credit exactly what the customer paid.** When goods come back from

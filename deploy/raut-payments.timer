@@ -1,0 +1,16 @@
+[Unit]
+Description=Reconcile open gateway collections every five minutes
+
+[Timer]
+# Five minutes: an STK prompt whose callback was lost is re-verified within
+# two sweeps, and a Paystack checkout the payer finished after closing the app
+# is booked before the customer calls. Anything younger than two minutes is
+# left to the handset's own polling, so the sweep adds no provider calls for
+# collections that are being watched already.
+OnBootSec=3min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30
+Persistent=true
+
+[Install]
+WantedBy=timers.target

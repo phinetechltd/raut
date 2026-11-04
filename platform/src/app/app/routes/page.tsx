@@ -561,7 +561,14 @@ export default async function RoutingPage({
                 ]
                   .filter(Boolean)
                   .join(" — ")}
-                actions={<StatusBadge status={route.status} />}
+                actions={
+                  <>
+                    <ButtonLink href={`/print/route-sheet/${route.id}`} target="_blank" variant="ghost" size="sm">
+                      Route sheet
+                    </ButtonLink>
+                    <StatusBadge status={route.status} />
+                  </>
+                }
               />
 
               <div className="grid gap-6 lg:grid-cols-5">

@@ -2,6 +2,7 @@
 import { notFound } from "next/navigation";
 
 import {
+  ButtonLink,
   DataTable,
   FilterBar,
   FilterSelect,
@@ -272,6 +273,11 @@ export default async function CustomerDetailPage({
           </p>
         </div>
         <div className="flex items-start gap-2">
+          {can(principal, "invoice:read") ? (
+            <ButtonLink href={`/print/statement/${customer.id}`} target="_blank" variant="secondary" size="sm">
+              Print statement
+            </ButtonLink>
+          ) : null}
           {canWrite ? (
             <CustomerDialog mode="edit" customer={customer} territories={territories} reps={reps} buttonLabel="Edit details" buttonVariant="secondary" />
           ) : null}

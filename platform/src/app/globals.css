@@ -368,3 +368,124 @@
     overscroll-behavior-x: contain;
   }
 }
+
+/*
+ * ── Printing ──────────────────────────────────────────────────────────
+ * Two audiences. The /print pages are documents and carry `.print-doc`; the
+ * console pages print "as best they can" via Tailwind's `print:` variants on
+ * the Shell chrome and the DataTable pagination. Either way: paper is white,
+ * so the light tokens win whatever theme the screen was in.
+ */
+.print-doc,
+.print-root {
+  color-scheme: light;
+  --bg: #ffffff;
+  --surface: #ffffff;
+  --surface-sunken: #f6f8fb;
+  --surface-hover: #ffffff;
+  --border: #d9dfe8;
+  --border-strong: #94a0b8;
+  --text: #0f1729;
+  --text-secondary: #3a465e;
+  --text-muted: #4e5c78;
+  --accent: #076c80;
+  --accent-hover: #075868;
+  --accent-subtle: #ecfafd;
+  background: #ffffff;
+  color: var(--text);
+}
+
+.print-table th,
+.print-table td {
+  vertical-align: top;
+}
+
+@page {
+  size: A4;
+  margin: 14mm 12mm 16mm;
+}
+
+@media print {
+  html,
+  body,
+  :root,
+  .dark {
+    background: #ffffff !important;
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-sunken: #f6f8fb;
+    --surface-hover: #ffffff;
+    --border: #d9dfe8;
+    --border-strong: #94a0b8;
+    --text: #0f1729;
+    --text-secondary: #3a465e;
+    --text-muted: #4e5c78;
+    --accent: #076c80;
+    --accent-hover: #075868;
+    --accent-subtle: #ecfafd;
+    --focus: #076c80;
+    --chart-grid: #edf1f7;
+    --success-fg: #047857;
+    --success-bg: #ecfdf5;
+    --success-border: #a7f3d0;
+    --warning-fg: #b45309;
+    --warning-bg: #fffbeb;
+    --warning-border: #fde68a;
+    --danger-fg: #b91c1c;
+    --danger-bg: #fef2f2;
+    --danger-border: #fecaca;
+    --info-fg: #076c80;
+    --info-bg: #ecfafd;
+    --info-border: #a5e5f1;
+    --shadow-sm: none;
+    --shadow-md: none;
+    --shadow-lg: none;
+    --shadow-xl: none;
+  }
+
+  body {
+    color: var(--text) !important;
+    font-size: 12px;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  /* Controls that mean nothing on paper. */
+  [data-print-hidden],
+  .print\:hidden {
+    display: none !important;
+  }
+
+  /* Keep a row, a totals block or a signature box on one page. */
+  tr,
+  .print-avoid-break {
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tfoot {
+    display: table-footer-group;
+  }
+
+  a,
+  a:visited {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  /* The console's own scroll boxes must not clip the paper. */
+  .scroll-x {
+    overflow: visible !important;
+  }
+
+  .print-paper {
+    width: 100%;
+  }
+}

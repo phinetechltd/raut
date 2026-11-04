@@ -213,6 +213,26 @@ export async function parseBody<T>(
   return schema.parse(raw);
 }
 
+/**
+ * Like parseBody, but an empty body is `undefined` rather than an error. For
+ * action endpoints whose options are all optional — "dispatch everything" is a
+ * bare POST, "dispatch these lines" carries JSON.
+ */
+export async function parseOptionalBody<T>(
+  request: Request,
+  schema: ZodSchema<T>,
+): Promise<T | undefined> {
+  const text = await request.text();
+  if (!text.trim()) return undefined;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    throw badRequest("Request body must be valid JSON");
+  }
+  return schema.parse(raw);
+}
+
 export function parseQuery<T>(
   searchParams: URLSearchParams,
   schema: ZodSchema<T>,
