@@ -1,4 +1,5 @@
 import {
+  ButtonLink,
   CellStack,
   DataTable,
   FilterBar,
@@ -81,6 +82,7 @@ export default async function VehiclesPage({
           take: 5,
         },
         _count: { select: { routes: true } },
+        tracker: { select: { externalId: true, active: true, lastSeenAt: true } },
       },
       orderBy: ts.sort ? { [SORT_COLUMNS[ts.sort]]: ts.dir } : { plate: "asc" },
       take: ts.limit,
@@ -177,6 +179,20 @@ export default async function VehiclesPage({
       },
     },
     {
+      key: "tracker",
+      header: "Tracker",
+      hideBelow: "lg",
+      cell: (v) =>
+        v.tracker?.active ? (
+          <CellStack
+            primary={<span className="font-mono text-xs">{v.tracker.externalId}</span>}
+            secondary={v.tracker.lastSeenAt ? "Reporting" : "Waiting for first report"}
+          />
+        ) : (
+          <span className="text-content-muted text-xs">Driver&apos;s phone only</span>
+        ),
+    },
+    {
       key: "status",
       header: "Status",
       align: "right",
@@ -218,7 +234,21 @@ export default async function VehiclesPage({
         title="Vehicles"
         description="The fleet routes are planned on. Each vehicle's GPS trail and odometer are kept per plate."
         breadcrumb={{ href: "/app/routes", label: "Routing & Geofencing" }}
-        actions={canWrite ? <VehicleDialog mode="create" branches={branches} reps={reps} /> : null}
+        actions={
+          <>
+            {can(principal, "vehicle:track") ? (
+              <ButtonLink href="/app/tracking" variant="secondary" size="sm">
+                Track vehicles
+              </ButtonLink>
+            ) : null}
+            {can(principal, "tracker:manage") ? (
+              <ButtonLink href="/app/settings/trackers" variant="secondary" size="sm">
+                Trackers
+              </ButtonLink>
+            ) : null}
+            {canWrite ? <VehicleDialog mode="create" branches={branches} reps={reps} /> : null}
+          </>
+        }
       />
 
       <StatGrid>

@@ -76,6 +76,10 @@ model Company {
   salesTargets      SalesTarget[]
   routes            Route[]
   vehicles          Vehicle[]
+  supplierPayments  SupplierPayment[]
+  trackerIntegrations TrackerIntegration[]
+  trackerDevices    TrackerDevice[]
+  vehiclePositions  VehiclePosition[]
   geofenceEvents    GeofenceEvent[]
   locationPings     LocationPing[]
   smsTemplates      SmsTemplate[]
@@ -938,6 +942,7 @@ model Supplier {
   updatedAt DateTime @updatedAt
 
   company        Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  payments SupplierPayment[]
   purchaseOrders PurchaseOrder[]
   goodsReceipts  GoodsReceipt[]
   invoices       SupplierInvoice[]
@@ -1050,17 +1055,52 @@ model SupplierInvoice {
   issueDate  DateTime  @default(now())
   dueDate    DateTime?
   totalCents Int       @default(0)
+  /// Input VAT on this bill. The purchases schedule of a VAT return reads it.
+  taxCents   Int       @default(0)
   paidCents  Int       @default(0)
   note       String?
+  /// Set for services and overheads; empty means the bill clears received stock.
+  expenseAccountId String?
+  createdById String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
   supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  payments SupplierPayment[]
 
   @@unique([companyId, number])
   @@index([companyId, status])
+}
+
+/// Money paid to a supplier against a bill. Posted Dr Accounts payable, Cr the
+/// bank or cash account it left.
+model SupplierPayment {
+  id                String @id @default(cuid())
+  companyId         String
+  supplierId        String
+  supplierInvoiceId String
+  number            String
+
+  amountCents Int
+  /// BANK | CASH: the ledger account the money left.
+  account     String   @default("BANK")
+  method      String   @default("BANK_TRANSFER")
+  reference   String?
+  paidAt      DateTime @default(now())
+
+  clientUuid  String?  @unique
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  company  Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  supplier Supplier        @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  bill     SupplierInvoice @relation(fields: [supplierInvoiceId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, number])
+  @@index([companyId, paidAt])
+  @@index([supplierInvoiceId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -1249,6 +1289,8 @@ model Vehicle {
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
   routes  Route[]
   pings   LocationPing[]
+  tracker TrackerDevice?
+  positions VehiclePosition[]
   deliveryNotes DeliveryNote[]
 
   @@unique([companyId, plate])
@@ -1383,6 +1425,91 @@ model LocationPing {
   @@index([companyId, userId, recordedAt])
   @@index([companyId, vehicleId, recordedAt])
   @@index([companyId, routeId])
+}
+
+/// A company's connection to a GPS tracker platform or device fleet. The API
+/// key is shown once when issued; only its SHA-256 hash is stored, so a copy of
+/// the database cannot be used to post positions.
+model TrackerIntegration {
+  id        String  @id @default(cuid())
+  companyId String
+  name      String
+  /// GENERIC | TRACCAR. Documentation hint; ingest recognises the payload shape.
+  provider  String  @default("GENERIC")
+  keyHash   String  @unique
+  /// First characters of the key, so an admin can tell which key a device uses.
+  keyPrefix String
+  active    Boolean @default(true)
+  lastUsedAt DateTime?
+  createdById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  devices TrackerDevice[]
+
+  @@index([companyId, active])
+}
+
+/// One physical tracker, known by the id its platform reports (usually the
+/// IMEI). A device first heard from with no vehicle waits here unassigned, which
+/// is how an admin onboards hardware without typing IMEIs. One tracker per van.
+model TrackerDevice {
+  id            String  @id @default(cuid())
+  companyId     String
+  integrationId String?
+  vehicleId     String? @unique
+  externalId    String
+  label         String?
+  active        Boolean @default(true)
+  /// When data last arrived, and the fix it carried. Lets the settings screen
+  /// show an unassigned device's position so it can be matched to a van.
+  lastSeenAt    DateTime?
+  lastFixAt     DateTime?
+  lastLatitude  Float?
+  lastLongitude Float?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  integration TrackerIntegration? @relation(fields: [integrationId], references: [id], onDelete: SetNull)
+  vehicle     Vehicle?            @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  positions   VehiclePosition[]
+
+  @@unique([companyId, externalId])
+  @@index([companyId, active])
+}
+
+/// A hardware tracker's fix. Rep handsets write LocationPing instead: a phone
+/// belongs to a person and a tracker to a van, and neither can stand in for the
+/// other's key. The vehicle is stamped per row so history survives a tracker
+/// moving to another van.
+model VehiclePosition {
+  id        String @id @default(cuid())
+  companyId String
+  vehicleId String
+  deviceId  String
+
+  latitude   Float
+  longitude  Float
+  accuracyM  Int?
+  speedMps   Float?
+  heading    Float?
+  ignition   Boolean?
+  odometerKm Float?
+  batteryPct Int?
+  recordedAt DateTime
+  createdAt  DateTime @default(now())
+
+  company Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  vehicle Vehicle       @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  device  TrackerDevice @relation(fields: [deviceId], references: [id], onDelete: Cascade)
+
+  /// A platform that resends a batch cannot double a fix.
+  @@unique([deviceId, recordedAt])
+  @@index([companyId, vehicleId, recordedAt])
 }
 
 // ═══════════════════════════════════════════════════════════════════════

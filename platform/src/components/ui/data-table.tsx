@@ -78,6 +78,7 @@ export function DataTable<T>({
   loadingRows = 5,
   caption,
   footer,
+  totals,
   dense = false,
   onRowHref,
   sort,
@@ -92,6 +93,8 @@ export function DataTable<T>({
   loadingRows?: number;
   caption?: string;
   footer?: ReactNode;
+  /** A `<tr>` of column totals, kept inside the table so it lines up with the columns. */
+  totals?: ReactNode;
   dense?: boolean;
   /** When set, the whole row becomes a link target. */
   onRowHref?: (row: T) => string | undefined;
@@ -220,6 +223,7 @@ export function DataTable<T>({
                     );
                   })}
             </tbody>
+            {totals ? <tfoot>{totals}</tfoot> : null}
           </table>
         </div>
 

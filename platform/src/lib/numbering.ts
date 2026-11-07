@@ -31,6 +31,7 @@ export type DocType =
   | "EXPENSE"
   | "TRANSFER"
   | "SUPPLIER_INVOICE"
+  | "SUPPLIER_PAYMENT"
   | "JOURNAL"
   | "CREDIT_NOTE"
   | "DELIVERY_NOTE"
@@ -50,6 +51,7 @@ const DEFAULT_PREFIX: Record<DocType, string> = {
   CREDIT_NOTE: "CRN",
   DELIVERY_NOTE: "DN",
   SUPPLIER_INVOICE: "SIN",
+  SUPPLIER_PAYMENT: "SPY",
   CUSTOMER: "CUS",
   SUPPLIER: "SUP",
 };

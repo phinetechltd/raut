@@ -1,41 +1,32 @@
 /**
- * Raut design tokens — the single source of truth for the UI's visual language.
+ * Raut design tokens: the single source of truth for the UI's visual language.
  *
- * Every colour here is either sampled from the logo artwork or derived from a
- * sampled value, because the brief is that the UI blends with the mark rather
- * than merely sitting near it. The sampled anchors are:
- *
- *   cyan   #0AB6D6   the left of the R's arm, the brightest brand hue
- *   teal   #05AC9D   where that arm resolves into green
- *   green  #43CC18   the location pin
- *   navy   #052744   the RAUT wordmark and the road
+ * The palette comes from the East African landscape. Laterite, the red earth of
+ * the Rift Valley and the Tsavo roads, carries everything interactive. Savanna
+ * sand warms the neutrals. Acacia green, ochre and Indian Ocean indigo appear in
+ * the bead pattern. The logo keeps its own teal and green, and teal stays in use
+ * for informational states so the mark still belongs on the page.
  *
  * Contrast is not a matter of taste, so it is asserted rather than assumed:
  * `npm run test:contrast` fails the build if any pairing below drops under
- * WCAG AA. Two decisions came directly out of that:
- *
- *   - Interactive surfaces use brand-600 (#076C80, 6.06), not the raw logo
- *     cyan. White on #0AB6D6 is 2.42 and on the next step down still only
- *     4.54 — too thin a margin to build a whole console on.
- *   - Muted text is slate-600 on light. slate-500 measures 4.33 and is
- *     reserved for large text only.
+ * WCAG AA.
  *
  * The chart palette is validated separately for colour-vision deficiency; see
  * CHART_CATEGORICAL below.
  */
 
-/** Tailwind-style ramp built around the cyan→teal of the R's arm. */
+/** Tailwind-style ramp built around laterite. */
 export const brand = {
-  50: "#ECFAFD",
-  100: "#D0F1F8",
-  200: "#A5E5F1",
-  300: "#6FD5E8",
-  400: "#33C4DD",
-  500: "#0AB6D6", // sampled from the logo's arm
-  600: "#076C80", // interactive: white on this passes AA at 6.06
-  700: "#075868",
-  800: "#0A4A57",
-  900: "#0B3D47",
+  50: "#FDF3EC",
+  100: "#FAE3D3",
+  200: "#F4C7A8",
+  300: "#EBA478",
+  400: "#E07F4B",
+  500: "#D2622C",
+  600: "#A8441C", // interactive: white on this passes AA at 5.98
+  700: "#8C3716",
+  800: "#6F2C13",
+  900: "#57240F",
 } as const;
 
 /**
@@ -50,22 +41,19 @@ export const accent = {
   600: "#2A8110", // white on this passes AA at 4.95
 } as const;
 
-/**
- * Neutrals carry the logo's blue cast rather than being pure grey — a warm or
- * neutral grey beside this navy reads as a mismatch.
- */
+/** Warm neutrals: savanna sand through to dark earth. */
 export const slate = {
-  50: "#F6F8FB",
-  100: "#ECEFF5",
-  200: "#DCE2EC",
-  300: "#C2CBDA",
-  400: "#94A0B8",
-  500: "#6B7A96", // 4.33 on white — large text only
-  600: "#4E5C78", // 6.72 on white — the muted body colour
-  700: "#3A465E",
-  800: "#232D42",
-  900: "#0B2136",
-  950: "#052744", // the RAUT wordmark's navy
+  50: "#FAF6EF",
+  100: "#F3ECDF",
+  200: "#E8DDCB",
+  300: "#D4C5AE",
+  400: "#A8977F",
+  500: "#6F5F4C", // muted text, AA on the page and on cards
+  600: "#5E5142",
+  700: "#463B2F",
+  800: "#2E261E",
+  900: "#1F1913",
+  950: "#15110C",
 } as const;
 
 /** Status colours. Reserved — never reused as a chart series. */
@@ -80,9 +68,9 @@ export const status = {
   dangerFg: "#B91C1C",
   dangerBg: "#FEF2F2",
   dangerBorder: "#FECACA",
-  infoFg: "#076C80",
-  infoBg: "#ECFAFD",
-  infoBorder: "#A5E5F1",
+  infoFg: "#0B6A78",
+  infoBg: "#E8F6F7",
+  infoBorder: "#A9DCE2",
 } as const;
 
 /**
@@ -108,37 +96,37 @@ export const CHART_SEQUENTIAL = [
 export const semantic = {
   light: {
     bg: slate[50],
-    surface: "#FFFFFF",
+    surface: "#FFFDF9",
     surfaceSunken: slate[100],
     surfaceHover: slate[50],
-    border: "#E3E8F0",
+    border: "#E8DFCF",
     borderStrong: slate[300],
-    text: "#0F1729",
+    text: "#211A14",
     textSecondary: slate[600],
     textMuted: slate[500],
     accent: brand[600],
     accentHover: brand[700],
     accentSubtle: brand[50],
     focus: brand[500],
-    chartSurface: "#FFFFFF",
-    chartGrid: "#EDF1F7",
+    chartSurface: "#FFFDF9",
+    chartGrid: "#EFE7D9",
   },
   dark: {
-    bg: "#050B1C",
-    surface: "#0B1430",
-    surfaceSunken: "#070F26",
-    surfaceHover: "#111C3A",
-    border: "#1C2747",
-    borderStrong: "#2A3860",
-    text: "#E8EDF7",
+    bg: "#120E0A",
+    surface: "#1C1610",
+    surfaceSunken: "#16110C",
+    surfaceHover: "#251D15",
+    border: "#32281E",
+    borderStrong: "#463A2C",
+    text: "#F3ECDF",
     textSecondary: slate[300],
     textMuted: slate[400],
     accent: brand[400],
     accentHover: brand[300],
-    accentSubtle: "#0F1E3D",
+    accentSubtle: "#2B1C12",
     focus: brand[400],
-    chartSurface: "#0B1430",
-    chartGrid: "#162242",
+    chartSurface: "#1C1610",
+    chartGrid: "#2A2118",
   },
 } as const;
 
@@ -208,8 +196,13 @@ export const CONTRAST_ASSERTIONS: Array<{
   { name: "body text on bg (dark)", fg: semantic.dark.text, bg: semantic.dark.bg, min: 4.5 },
 
   // The sidebar is navy in both colour schemes; these cover its text pairings.
-  { name: "sidebar body (light)", fg: "#E8EDF7", bg: "#052744", min: 4.5 },
-  { name: "sidebar secondary (light)", fg: "#C2CBDA", bg: "#052744", min: 4.5 },
-  { name: "sidebar accent (light)", fg: "#6FD5E8", bg: "#052744", min: 4.5 },
-  { name: "sidebar active text", fg: "#FFFFFF", bg: "#076C80", min: 4.5 },
+  { name: "sidebar body (light)", fg: "#F3ECDF", bg: "#15100B", min: 4.5 },
+  { name: "sidebar secondary (light)", fg: "#D4C5AE", bg: "#15100B", min: 4.5 },
+  { name: "sidebar accent (light)", fg: "#EBA478", bg: "#15100B", min: 4.5 },
+  { name: "sidebar subtle", fg: "#B3A38C", bg: "#15100B", min: 4.5 },
+  { name: "muted text on page (light)", fg: slate[500], bg: semantic.light.bg, min: 4.5 },
+  { name: "muted text on surface (light)", fg: slate[500], bg: semantic.light.surface, min: 4.5 },
+  { name: "white on dark earth", fg: "#FFFFFF", bg: "#15110C", min: 4.5 },
+  { name: "laterite label on dark earth", fg: "#EBA478", bg: "#15110C", min: 4.5 },
+  { name: "sidebar active text", fg: "#FFFFFF", bg: "#A8441C", min: 4.5 },
 ];

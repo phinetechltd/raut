@@ -53,9 +53,9 @@ export function resolveThemeColours(): ThemeColours {
     "var(--success-fg)": get("--success-fg") || "#047857",
     "var(--warning-fg)": get("--warning-fg") || "#B45309",
     "var(--danger-fg)": get("--danger-fg") || "#B91C1C",
-    surface: get("--surface") || "#FFFFFF",
-    text: get("--text") || "#0F1729",
-    border: get("--border-strong") || "#C2CBDA",
+    surface: get("--surface") || "#FFFDF9",
+    text: get("--text") || "#211A14",
+    border: get("--border-strong") || "#D4C5AE",
   };
 }
 

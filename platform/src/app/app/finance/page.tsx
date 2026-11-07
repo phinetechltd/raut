@@ -304,6 +304,16 @@ export default async function FinancePage({
                 Financial reports
               </ButtonLink>
             )}
+            {can(principal, "report:financial") && (
+              <ButtonLink href="/app/finance/journal" variant="secondary">
+                Journal entries
+              </ButtonLink>
+            )}
+            {can(principal, "finance:read") && (
+              <ButtonLink href="/app/finance/bills" variant="secondary">
+                Supplier bills
+              </ButtonLink>
+            )}
           </>
         }
       />

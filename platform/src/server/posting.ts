@@ -243,6 +243,8 @@ export async function postSupplierInvoice(
     subtotalCents: number;
     taxCents: number;
     totalCents: number;
+    /** A bill for a service or overhead debits this instead of received stock. */
+    debitAccountId?: string | null;
   },
   userId?: string | null,
 ) {
@@ -266,7 +268,7 @@ export async function postSupplierInvoice(
     memo: `Supplier invoice ${inv.number}`,
     postedById: userId ?? null,
     lines: [
-      { accountId: grni, debitCents: netCents },
+      { accountId: inv.debitAccountId ?? grni, debitCents: netCents },
       { accountId: vatIn, debitCents: inv.taxCents },
       { accountId: ap, creditCents: inv.totalCents },
     ],

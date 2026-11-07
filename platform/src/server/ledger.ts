@@ -4,6 +4,7 @@ import type { Prisma } from "@prisma/client";
 
 import { db } from "@/lib/db";
 import { nextNumber } from "@/lib/numbering";
+import { nairobiYearMonth } from "@/lib/report-engine";
 
 /**
  * Double-entry bookkeeping.
@@ -202,7 +203,12 @@ export interface PostInput {
   lines: PostLine[];
 }
 
-export class LedgerError extends Error {}
+export class LedgerError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "LedgerError";
+  }
+}
 
 /**
  * Writes one balanced entry.
@@ -277,13 +283,16 @@ export async function postEntry(tx: Tx, input: PostInput) {
 }
 
 async function assertPeriodOpen(tx: Tx, companyId: string, date: Date) {
+  // The Nairobi calendar, as every report groups by: an entry at 00:30 on the 1st
+  // belongs to the new month, whatever the server's own clock says.
+  const { year, month } = nairobiYearMonth(date);
   const period = await tx.accountingPeriod.findFirst({
-    where: { companyId, year: date.getFullYear(), month: date.getMonth() + 1 },
+    where: { companyId, year, month },
     select: { closedAt: true },
   });
   if (period?.closedAt) {
     throw new LedgerError(
-      `The ${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")} period is closed. Post the correction to an open period instead.`,
+      `The ${year}-${String(month).padStart(2, "0")} period is closed. Post the correction to an open period instead.`,
     );
   }
 }
@@ -303,12 +312,15 @@ export async function reverseEntry(entryId: string, reason: string, userId?: str
     if (!original) throw new LedgerError("Entry not found");
     if (original.reversedById) throw new LedgerError("This entry is already reversed");
 
+    const reversalDate = new Date();
+    await assertPeriodOpen(tx, original.companyId, reversalDate);
+
     const number = await nextNumber(original.companyId, "JOURNAL", tx);
     const reversal = await tx.journalEntry.create({
       data: {
         companyId: original.companyId,
         number,
-        date: new Date(),
+        date: reversalDate,
         memo: `Reversal of ${original.number}: ${reason}`,
         refType: original.refType,
         refId: original.refId,
@@ -333,7 +345,7 @@ export async function reverseEntry(entryId: string, reason: string, userId?: str
     });
 
     return reversal;
-  });
+  }, { timeout: 20_000, maxWait: 20_000 });
 }
 
 export interface TrialBalanceRow {

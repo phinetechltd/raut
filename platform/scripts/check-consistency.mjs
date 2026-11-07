@@ -160,6 +160,8 @@ async function checkCompany(company) {
     stockItems,
     receipts,
     supplierInvoices,
+    supplierPayments,
+    suppliers,
     expenses,
     customers,
     orders,
@@ -183,6 +185,8 @@ async function checkCompany(company) {
     db.stockItem.findMany({ where: { companyId } }),
     db.goodsReceipt.findMany({ where: { companyId }, include: { lines: true } }),
     db.supplierInvoice.findMany({ where: { companyId } }),
+    db.supplierPayment.findMany({ where: { companyId } }),
+    db.supplier.findMany({ where: { companyId }, select: { id: true, code: true, name: true, balanceCents: true } }),
     db.expense.findMany({ where: { companyId }, include: { category: { select: { companyId: true } } } }),
     db.customer.findMany({ where: { companyId } }),
     db.salesOrder.findMany({ where: { companyId } }),
@@ -425,6 +429,7 @@ async function checkCompany(company) {
     const expenseIds = new Set(expenses.map((x) => x.id));
     const noteIds = new Set(creditNotes.map((n) => n.id));
     const supplierInvoiceIds = new Set(supplierInvoices.map((s) => s.id));
+    const supplierPaymentIds = new Set(supplierPayments.map((p) => p.id));
     const exists = (refType, refId) => {
       switch (refType) {
         case "Invoice":
@@ -441,6 +446,11 @@ async function checkCompany(company) {
           return expenseIds.has(refId);
         case "SupplierInvoice":
           return supplierInvoiceIds.has(refId);
+        case "SupplierPayment":
+          return supplierPaymentIds.has(refId);
+        // A journal typed by an accountant has no document behind it, by design.
+        case "ManualJournal":
+          return true;
         default:
           return null;
       }
@@ -508,6 +518,26 @@ async function checkCompany(company) {
       }
     }
     r.check("No entry was posted into a period after that period was closed", bad);
+  }
+
+  // ---- 7b. supplier bills and payments ---------------------------------------
+  {
+    const paidByBill = groupSum(supplierPayments, (p) => p.supplierInvoiceId, (p) => p.amountCents);
+    const bad = [];
+    for (const bill of supplierInvoices) {
+      const paid = paidByBill.get(bill.id) ?? 0;
+      if (bill.paidCents !== paid) bad.push(`${bill.number}: says ${bill.paidCents} paid, payments total ${paid}`);
+    }
+    r.check("Every supplier bill's paid amount equals its payments", bad);
+
+    const open = supplierInvoices.filter((b) => b.status !== "VOID");
+    const owed = groupSum(open, (b) => b.supplierId, (b) => b.totalCents - b.paidCents);
+    const wrong = [];
+    for (const s of suppliers) {
+      const expected = owed.get(s.id) ?? 0;
+      if (s.balanceCents !== expected) wrong.push(`${s.code} ${s.name}: stored ${s.balanceCents}, bills say ${expected}`);
+    }
+    r.check("Every supplier's balance equals its unpaid bills", wrong);
   }
 
   // ---- 8. customer balance invariant ----------------------------------------

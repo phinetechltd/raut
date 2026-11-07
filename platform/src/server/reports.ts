@@ -1,6 +1,7 @@
 import "server-only";
 
 import { db } from "@/lib/db";
+import { endOfNairobiDay, nairobiDate, nairobiMonth, nairobiMonthBounds, startOfNairobiDay } from "@/lib/report-engine";
 import { type AccountType, type TrialBalanceRow, trialBalance } from "./ledger";
 
 /**
@@ -20,16 +21,13 @@ export interface Period {
 
 /** A month, in the calendar sense, from a YYYY-MM string. */
 export function monthPeriod(ym: string): Period {
-  const [y, m] = ym.split("-").map(Number);
-  return {
-    from: new Date(Date.UTC(y, m - 1, 1, 0, 0, 0, 0)),
-    to: new Date(Date.UTC(y, m, 0, 23, 59, 59, 999)),
-  };
+  // Nairobi, so a sale at 00:30 on the 1st is in the month a VAT return says.
+  return nairobiMonthBounds(ym) ?? nairobiMonthBounds(nairobiMonth())!;
 }
 
 /** The financial year to date, on a calendar year. */
 export function yearToDate(now = new Date()): Period {
-  return { from: new Date(Date.UTC(now.getUTCFullYear(), 0, 1)), to: now };
+  return { from: nairobiMonthBounds(`${nairobiMonth(now).slice(0, 4)}-01`)!.from, to: now };
 }
 
 /** The equivalent stretch immediately before a period, for comparatives. */
@@ -288,10 +286,28 @@ export interface VatSummary {
  */
 export async function vatSummary(companyId: string, period: Period): Promise<VatSummary> {
   const rows = await trialBalance(companyId, period);
-  const at = (code: string) => rows.find((r) => r.code === code)?.balanceCents ?? 0;
 
-  const outputCents = at("2100");
-  const inputCents = at("2110");
+  // Documents only. A journal paying VAT over to KRA moves this same account, and
+  // counting it would make the tax charged look smaller than it was.
+  const fromDocuments = async (code: string, natural: "CREDIT" | "DEBIT") => {
+    const sums = await db.journalLine.aggregate({
+      where: {
+        account: { companyId, code },
+        entry: {
+          companyId,
+          date: { gte: period.from, lte: period.to },
+          sourceKind: { notIn: ["MANUAL", "REVERSAL:MANUAL"] },
+        },
+      },
+      _sum: { debitCents: true, creditCents: true },
+    });
+    const debit = sums._sum.debitCents ?? 0;
+    const credit = sums._sum.creditCents ?? 0;
+    return natural === "CREDIT" ? credit - debit : debit - credit;
+  };
+
+  const outputCents = await fromDocuments("2100", "CREDIT");
+  const inputCents = await fromDocuments("2110", "DEBIT");
   const payableCents = outputCents - inputCents;
 
   return {
@@ -374,7 +390,7 @@ export async function stockValuation(companyId: string): Promise<StockValuation>
  * Reads a period off a query string.
  *
  * Accepts `?month=2026-08`, an explicit `?from=&to=`, or nothing at all, which
- * means the year to date. Dates are parsed as UTC days and the end is pushed to
+ * means the year to date. Dates are Nairobi days and the end is pushed to
  * the last millisecond, because `to=2026-08-31` parsed as midnight silently
  * excludes everything that happened on the 31st.
  */
@@ -386,8 +402,8 @@ export function periodFromParams(sp: URLSearchParams): Period {
   const to = sp.get("to");
   if (from || to) {
     return {
-      from: from ? new Date(`${from}T00:00:00.000Z`) : new Date(Date.UTC(1970, 0, 1)),
-      to: to ? new Date(`${to}T23:59:59.999Z`) : new Date(),
+      from: (from ? startOfNairobiDay(from) : null) ?? new Date(Date.UTC(1970, 0, 1)),
+      to: (to ? endOfNairobiDay(to) : null) ?? new Date(),
     };
   }
   return yearToDate();
@@ -395,6 +411,5 @@ export function periodFromParams(sp: URLSearchParams): Period {
 
 /** `2026-08-01 to 2026-08-31`, for a report header or a filename. */
 export function describePeriod(p: Period): string {
-  const d = (x: Date) => x.toISOString().slice(0, 10);
-  return `${d(p.from)} to ${d(p.to)}`;
+  return `${nairobiDate(p.from)} to ${nairobiDate(p.to)}`;
 }

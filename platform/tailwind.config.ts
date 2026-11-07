@@ -101,6 +101,7 @@ export default {
       },
 
       fontFamily: {
+        display: ["var(--font-display)", "Georgia", "serif"],
         sans: [
           "ui-sans-serif", "system-ui", "Segoe UI", "Roboto",
           "Helvetica Neue", "Arial", "sans-serif",

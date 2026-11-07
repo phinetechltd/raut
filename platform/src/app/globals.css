@@ -15,51 +15,57 @@
 
 @layer base {
   :root {
-    /* brand ramp — anchored on the logo arm's #0ab6d6 */
-    --brand-50: #ecfafd;
-    --brand-100: #d0f1f8;
-    --brand-200: #a5e5f1;
-    --brand-300: #6fd5e8;
-    --brand-400: #33c4dd;
-    --brand-500: #0ab6d6;
-    --brand-600: #076c80;
-    --brand-700: #075868;
-    --brand-800: #0a4a57;
-    --brand-900: #0b3d47;
+    /* brand ramp: laterite, the red earth of the Rift Valley and the Tsavo roads */
+    --brand-50: #fdf3ec;
+    --brand-100: #fae3d3;
+    --brand-200: #f4c7a8;
+    --brand-300: #eba478;
+    --brand-400: #e07f4b;
+    --brand-500: #d2622c;
+    --brand-600: #a8441c;
+    --brand-700: #8c3716;
+    --brand-800: #6f2c13;
+    --brand-900: #57240f;
+
+    /* East African accents, for pattern and emphasis, never for status or body text */
+    --afr-ochre: #e0a030;
+    --afr-acacia: #1f7a4d;
+    --afr-indigo: #27306b;
+    --afr-teal: #0ab6d6;
 
     /* the location pin's green — brand gesture, never a status */
     --accent-green-400: #43cc18;
     --accent-green-500: #35a314;
     --accent-green-600: #2a8110;
 
-    /* blue-cast neutrals, so nothing beside the navy reads as off-hue */
-    --slate-50: #f6f8fb;
-    --slate-100: #eceff5;
-    --slate-200: #dce2ec;
-    --slate-300: #c2cbda;
-    --slate-400: #94a0b8;
-    --slate-500: #6b7a96;
-    --slate-600: #4e5c78;
-    --slate-700: #3a465e;
-    --slate-800: #232d42;
-    --slate-900: #0b2136;
-    --slate-950: #052744;
+    /* warm neutrals: savanna sand, so nothing reads cold beside the laterite */
+    --slate-50: #faf6ef;
+    --slate-100: #f3ecdf;
+    --slate-200: #e8ddcb;
+    --slate-300: #d4c5ae;
+    --slate-400: #a8977f;
+    --slate-500: #6f5f4c;
+    --slate-600: #5e5142;
+    --slate-700: #463b2f;
+    --slate-800: #2e261e;
+    --slate-900: #1f1913;
+    --slate-950: #15110c;
 
     /* semantic surfaces — light */
     --bg: var(--slate-50);
-    --surface: #ffffff;
+    --surface: #fffdf9;
     --surface-sunken: var(--slate-100);
     --surface-hover: var(--slate-50);
-    --border: #e3e8f0;
+    --border: #e8dfcf;
     --border-strong: var(--slate-300);
-    --text: #0f1729;
+    --text: #211a14;
     --text-secondary: var(--slate-600);
     --text-muted: var(--slate-500);
     --accent: var(--brand-600);
     --accent-hover: var(--brand-700);
     --accent-subtle: var(--brand-50);
     --focus: var(--brand-500);
-    --chart-grid: #edf1f7;
+    --chart-grid: #efe7d9;
 
     --success-fg: #047857;
     --success-bg: #ecfdf5;
@@ -70,9 +76,9 @@
     --danger-fg: #b91c1c;
     --danger-bg: #fef2f2;
     --danger-border: #fecaca;
-    --info-fg: var(--brand-600);
-    --info-bg: var(--brand-50);
-    --info-border: var(--brand-200);
+    --info-fg: #0b6a78;
+    --info-bg: #e8f6f7;
+    --info-border: #a9dce2;
 
     /* categorical chart series — fixed order, never cycled */
     --chart-1: #0078e8;
@@ -82,12 +88,12 @@
     --chart-5: #0891b2;
     --chart-6: #be185d;
 
-    /* sidebar — the console's dark spine, kept navy in both colour schemes */
-    --sidebar-bg-1: #0a2940;
-    --sidebar-bg-2: #052744;
-    --sidebar-text: #e8edf7;
-    --sidebar-muted: #c2cbda;
-    --sidebar-subtle: #7e8fb0;
+    /* sidebar: dark earth in both colour schemes */
+    --sidebar-bg-1: #241a12;
+    --sidebar-bg-2: #15100b;
+    --sidebar-text: #f3ecdf;
+    --sidebar-muted: #d4c5ae;
+    --sidebar-subtle: #b3a38c;
     --sidebar-hover: rgb(255 255 255 / 0.07);
     --sidebar-active: var(--brand-600);
     --sidebar-active-text: #ffffff;
@@ -98,30 +104,30 @@
     --radius-lg: 14px;
     --radius-xl: 18px;
 
-    --shadow-sm: 0 1px 2px 0 rgb(0 8 40 / 0.05);
-    --shadow-md: 0 2px 4px -1px rgb(0 8 40 / 0.06), 0 1px 2px -1px rgb(0 8 40 / 0.04);
-    --shadow-lg: 0 8px 16px -4px rgb(0 8 40 / 0.1), 0 2px 6px -2px rgb(0 8 40 / 0.06);
-    --shadow-xl: 0 20px 32px -8px rgb(0 8 40 / 0.16), 0 6px 12px -4px rgb(0 8 40 / 0.08);
+    --shadow-sm: 0 1px 2px 0 rgb(40 22 8 / 0.05);
+    --shadow-md: 0 2px 4px -1px rgb(40 22 8 / 0.06), 0 1px 2px -1px rgb(40 22 8 / 0.04);
+    --shadow-lg: 0 8px 16px -4px rgb(40 22 8 / 0.1), 0 2px 6px -2px rgb(40 22 8 / 0.06);
+    --shadow-xl: 0 20px 32px -8px rgb(40 22 8 / 0.16), 0 6px 12px -4px rgb(40 22 8 / 0.08);
 
     --header-h: 56px;
     --sidebar-w: 248px;
   }
 
   .dark {
-    --bg: #050b1c;
-    --surface: #0b1430;
-    --surface-sunken: #070f26;
-    --surface-hover: #111c3a;
-    --border: #1c2747;
-    --border-strong: #2a3860;
-    --text: #e8edf7;
+    --bg: #120e0a;
+    --surface: #1c1610;
+    --surface-sunken: #16110c;
+    --surface-hover: #251d15;
+    --border: #32281e;
+    --border-strong: #463a2c;
+    --text: #f3ecdf;
     --text-secondary: var(--slate-300);
     --text-muted: var(--slate-400);
     --accent: var(--brand-400);
     --accent-hover: var(--brand-300);
-    --accent-subtle: #0f1e3d;
+    --accent-subtle: #2b1c12;
     --focus: var(--brand-400);
-    --chart-grid: #162242;
+    --chart-grid: #2a2118;
 
     --success-fg: #34d399;
     --success-bg: #06251c;
@@ -132,13 +138,13 @@
     --danger-fg: #f87171;
     --danger-bg: #2b0f11;
     --danger-border: #5f1f22;
-    --info-fg: var(--brand-300);
-    --info-bg: #0f1e3d;
-    --info-border: #1e3a6b;
+    --info-fg: #5fc4d2;
+    --info-bg: #0f2326;
+    --info-border: #1f4a50;
 
-    /* dark scheme: the sidebar stays navy, a step darker than the page */
-    --sidebar-bg-1: #0b1e33;
-    --sidebar-bg-2: #071528;
+    /* dark scheme: the sidebar stays dark earth, a step below the page */
+    --sidebar-bg-1: #1a130d;
+    --sidebar-bg-2: #0e0a07;
     --sidebar-muted: var(--slate-300);
 
     /* dark steps chosen against the dark surface, CVD-validated */
@@ -370,6 +376,53 @@
 }
 
 /*
+ * ── East African pattern language ─────────────────────────────────────
+ * Original geometric patterns drawn for Raut, in the spirit of Maasai beadwork
+ * bands and the woven chevrons of a Kamba kiondo basket. They are decoration
+ * only: never behind body text at a strength that affects legibility, and hidden
+ * on paper. They carry no meaning of their own, so they should stay abstract
+ * rather than copy any community's specific motif.
+ */
+.afr-band {
+  height: 8px;
+  background-color: var(--afr-acacia);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='48' height='8'%3E%3Cpath d='M0 8 6 0l6 8z' fill='%23D2622C'/%3E%3Cpath d='M12 8 18 0l6 8z' fill='%23E0A030'/%3E%3Cpath d='M24 8 30 0l6 8z' fill='%2327306B'/%3E%3Cpath d='M36 8 42 0l6 8z' fill='%23FAF6EF'/%3E%3C/svg%3E");
+  background-repeat: repeat-x;
+}
+
+.afr-rule {
+  display: block;
+  width: 72px;
+  height: 6px;
+  margin-top: 8px;
+  border-radius: 2px;
+  background-color: var(--afr-acacia);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='36' height='6'%3E%3Cpath d='M0 6 4.500 0 9 6z' fill='%23D2622C'/%3E%3Cpath d='M9 6 13.500 0 18 6z' fill='%23E0A030'/%3E%3Cpath d='M18 6 22.500 0 27 6z' fill='%2327306B'/%3E%3Cpath d='M27 6 31.500 0 36 6z' fill='%23FAF6EF'/%3E%3C/svg%3E");
+}
+
+.afr-weave-dark {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='44' height='44'%3E%3Cpath d='M0 22 22 0l22 22M0 44 22 22l22 22' fill='none' stroke='%23ffffff' stroke-opacity='.045' stroke-width='3'/%3E%3Cpath d='M22 15l7 7-7 7-7-7z' fill='%23E0A030' fill-opacity='.05'/%3E%3C/svg%3E");
+}
+
+.afr-card {
+  box-shadow: inset 0 3px 0 var(--afr-ochre), var(--shadow-sm);
+}
+
+.afr-note {
+  border-left: 4px solid var(--afr-ochre);
+}
+
+@media print {
+  .afr-band,
+  .afr-rule {
+    display: none;
+  }
+  .afr-weave-dark {
+    background-image: none;
+  }
+}
+
+/*
  * ── Printing ──────────────────────────────────────────────────────────
  * Two audiences. The /print pages are documents and carry `.print-doc`; the
  * console pages print "as best they can" via Tailwind's `print:` variants on
@@ -381,16 +434,16 @@
   color-scheme: light;
   --bg: #ffffff;
   --surface: #ffffff;
-  --surface-sunken: #f6f8fb;
+  --surface-sunken: #f7f3ec;
   --surface-hover: #ffffff;
-  --border: #d9dfe8;
-  --border-strong: #94a0b8;
-  --text: #0f1729;
-  --text-secondary: #3a465e;
-  --text-muted: #4e5c78;
-  --accent: #076c80;
-  --accent-hover: #075868;
-  --accent-subtle: #ecfafd;
+  --border: #dfd6c6;
+  --border-strong: #a8977f;
+  --text: #1a1410;
+  --text-secondary: #463b2f;
+  --text-muted: #5e5142;
+  --accent: #a8441c;
+  --accent-hover: #8c3716;
+  --accent-subtle: #fdf3ec;
   background: #ffffff;
   color: var(--text);
 }

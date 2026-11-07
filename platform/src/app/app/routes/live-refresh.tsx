@@ -13,7 +13,14 @@ import { useEffect, useState } from "react";
  * Paused while the tab is hidden — a dozen managers with the console open in
  * a background tab should not poll a server all afternoon.
  */
-export function LiveRefresh({ intervalMs = 45_000 }: { intervalMs?: number }) {
+export function LiveRefresh({
+  intervalMs = 45_000,
+  source = "reps",
+}: {
+  intervalMs?: number;
+  /** Rep positions for the routing page, vehicle positions for the fleet map. */
+  source?: "reps" | "fleet";
+}) {
   const router = useRouter();
   const [lastSeen, setLastSeen] = useState<string | null>(null);
 
@@ -24,14 +31,26 @@ export function LiveRefresh({ intervalMs = 45_000 }: { intervalMs?: number }) {
     async function tick() {
       if (document.visibilityState === "hidden") return;
       try {
-        const res = await fetch("/api/v1/location/latest", { cache: "no-store" });
+        const res = await fetch(source === "fleet" ? "/api/v1/vehicles/live" : "/api/v1/location/latest", {
+          cache: "no-store",
+        });
         if (!res.ok) return;
         const json = (await res.json()) as {
           ok: boolean;
-          data?: { asOf: string; positions: Array<{ userId: string; recordedAt: string }> };
+          data?: {
+            asOf: string;
+            positions?: Array<{ userId: string; recordedAt: string }>;
+            vehicles?: Array<{ id: string; status: string; fix: { recordedAt: string } | null }>;
+          };
         };
         if (!json.ok || !json.data || cancelled) return;
-        const next = json.data.positions.map((p) => `${p.userId}@${p.recordedAt}`).sort().join("|");
+        const next = (
+          json.data.vehicles
+            ? json.data.vehicles.map((v) => `${v.id}@${v.fix?.recordedAt ?? ""}@${v.status}`)
+            : (json.data.positions ?? []).map((p) => `${p.userId}@${p.recordedAt}`)
+        )
+          .sort()
+          .join("|");
         setLastSeen(new Date(json.data.asOf).toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" }));
         if (signature !== null && next !== signature) router.refresh();
         signature = next;
@@ -51,7 +70,7 @@ export function LiveRefresh({ intervalMs = 45_000 }: { intervalMs?: number }) {
       window.clearInterval(timer);
       document.removeEventListener("visibilitychange", onVisible);
     };
-  }, [router, intervalMs]);
+  }, [router, intervalMs, source]);
 
   return (
     <span role="status" className="text-content-muted inline-flex items-center gap-1.5 text-xs">

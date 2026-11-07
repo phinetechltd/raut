@@ -17,8 +17,13 @@ import { Card, EmptyState, cx, type Tone } from "./primitives";
 
 // ── numbers ────────────────────────────────────────────────────────────
 
-export function Money({ cents, compact }: { cents: number; compact?: boolean }) {
-  return <span className="tabular">{compact ? formatKESCompact(cents) : formatKES(cents)}</span>;
+export function Money({ cents, compact, exact }: { cents: number; compact?: boolean; exact?: boolean }) {
+  // `exact` shows the cents. Ledgers and bills need it: 11.60 must not read as 12.
+  return (
+    <span className="tabular">
+      {compact ? formatKESCompact(cents) : formatKES(cents, exact ? { decimals: true } : undefined)}
+    </span>
+  );
 }
 
 const TREND_TONE = {

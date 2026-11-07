@@ -171,7 +171,7 @@ const ROLES = [
     // point of the flow. Withholding this left it unreachable by the only
     // people who need it.
     apiAllow: ["/visits", "/routes", "/customers", "/credit-notes", "/delivery-notes"],
-    hidden: ["/app/settings/payments", "/app/finance/reports", "/app/settings/etims"],
+    hidden: ["/app/settings/payments", "/app/finance/reports", "/app/settings/etims", "/app/settings/trackers", "/app/finance/journal", "/app/finance/accounts", "/app/report-centre/trial-balance", "/app/report-centre/vat-return"],
     // A rep holds report:read for their own numbers. The statutory statements
     // carry company margin, cash position and tax owed, and are not theirs.
     apiDeny: [

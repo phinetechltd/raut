@@ -79,9 +79,10 @@ export function PageHeader({
 
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
+          <h1 className="font-display text-2xl font-semibold tracking-tight">{title}</h1>
+          <span className="afr-rule" aria-hidden="true" />
           {description ? (
-            <p className="mt-1 max-w-2xl text-base text-content-secondary">
+            <p className="mt-2 max-w-2xl text-base text-content-secondary">
               {description}
             </p>
           ) : null}
@@ -107,7 +108,7 @@ export function SectionHeading({
   return (
     <div className="mb-3 flex flex-wrap items-end justify-between gap-3">
       <div className="min-w-0">
-        <Tag className={cx("font-semibold tracking-tight", level === 2 ? "text-lg" : "text-md")}>
+        <Tag className={cx("font-display font-semibold tracking-tight", level === 2 ? "text-lg" : "text-md")}>
           {title}
         </Tag>
         {description ? (
@@ -210,6 +211,7 @@ export function Badge({
  */
 const STATUS_TONE: Record<string, Tone> = {
   ACTIVE: "success", PAID: "success", COMPLETED: "success", RECEIVED: "success",
+  AGREES: "success", ACCEPTED: "success", SUCCEEDED: "success", DIFFERS: "danger", VOID: "danger",
   APPROVED: "success", DONE: "success", VISIT_VERIFIED: "success", POSTED: "success",
   SENT: "info", ISSUED: "info", CONFIRMED: "info", IN_PROGRESS: "info",
   IN_TRANSIT: "info", ARRIVED: "info", DELIVERED: "success", RETURNED: "warning",

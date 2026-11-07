@@ -62,9 +62,11 @@ export function Shell({
             flat; tokens split so the dark scheme can lift it a step. */}
         <div className="absolute inset-0 bg-sidebar-bg2" />
         <div className="absolute inset-0 bg-gradient-to-b from-sidebar-bg1 to-sidebar-bg2" />
+        <div className="afr-weave-dark absolute inset-0" />
         <div className="absolute inset-0 border-r border-sidebar-border" />
 
         <div className="relative flex h-full flex-col">
+          <div className="afr-band" aria-hidden="true" />
           {/* Product identity above the tenant's. Raut is what they are using;
               the company name is whose data they are in. Both matter, and
               collapsing them loses the multi-tenant story. */}
@@ -74,7 +76,7 @@ export function Shell({
                 <RautMark size={28} className="block h-7 w-7" />
               </span>
               <div className="min-w-0 leading-none">
-                <p className="text-md font-semibold tracking-tight text-sidebar-content">Raut</p>
+                <p className="font-display text-md font-semibold tracking-tight text-sidebar-content">Raut</p>
                 <p className="mt-0.5 text-[9px] uppercase tracking-[0.11em] text-sidebar-subtle">
                   One Platform. Every Mile.
                 </p>
@@ -168,6 +170,7 @@ export function Shell({
           >
             <NavLinks nav={nav} enabledModules={enabledModules} variant="strip" />
           </nav>
+          <div className="afr-band" aria-hidden="true" />
         </header>
 
         <main className="min-w-0 flex-1 animate-fade-in p-4 sm:p-6 lg:p-8 print:p-0">

@@ -128,6 +128,12 @@ export function Landing() {
             <a href="#modules" className="text-content-secondary hidden hover:underline sm:inline">
               Modules
             </a>
+            <Link href="/gps-trackers" className="text-content-secondary hidden hover:underline sm:inline">
+              GPS trackers
+            </Link>
+            <Link href="/blog" className="text-content-secondary hover:underline">
+              Blog
+            </Link>
             <Link
               href="/login"
               className="bg-accent hover:bg-accent-hover rounded-lg px-4 py-2 font-medium text-white"
@@ -136,14 +142,15 @@ export function Landing() {
             </Link>
           </div>
         </nav>
+        <div className="afr-band" aria-hidden="true" />
       </header>
 
       {/* ── hero ────────────────────────────────────────────────────── */}
-      <section className="bg-ink-950 text-white">
+      <section className="afr-weave-dark bg-ink-950 text-white">
         <div className="mx-auto grid max-w-6xl items-center gap-12 px-6 py-16 lg:grid-cols-2 lg:py-24">
           <div>
             <RautLockup size={260} onDark />
-            <h1 className="mt-8 text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
+            <h1 className="font-display mt-8 text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
               One platform. Every mile.
             </h1>
             <p className="mt-4 max-w-xl text-[17px] leading-relaxed text-white/75">
@@ -165,7 +172,7 @@ export function Landing() {
                 See the app
               </a>
             </div>
-            <p className="mt-6 text-xs text-white/45">
+            <p className="mt-6 text-xs text-white/70">
               Tari Africa Platforms Limited · Nairobi
             </p>
           </div>
@@ -213,7 +220,7 @@ export function Landing() {
           <p className="text-accent text-xs font-semibold uppercase tracking-[0.15em]">
             The field app
           </p>
-          <h2 className="mt-2 max-w-2xl text-2xl font-semibold tracking-tight sm:text-3xl">
+          <h2 className="font-display mt-2 max-w-2xl text-2xl font-semibold tracking-tight sm:text-3xl">
             What a rep actually sees, screen by screen
           </h2>
           <p className="text-content-secondary mt-3 max-w-2xl text-[15px] leading-relaxed">
@@ -264,7 +271,7 @@ export function Landing() {
           <p className="text-accent text-xs font-semibold uppercase tracking-[0.15em]">
             Licensed per company
           </p>
-          <h2 className="mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+          <h2 className="font-display mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
             A core platform, plus the ten modules you need
           </h2>
           <p className="text-content-secondary mt-3 max-w-2xl text-[15px] leading-relaxed">
@@ -288,8 +295,35 @@ export function Landing() {
         </div>
       </section>
 
+      {/* ── tracking ──────────────────────────────────────────────── */}
+      <section className="afr-weave-dark bg-ink-950 text-white">
+        <div className="afr-band" aria-hidden="true" />
+        <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-14 lg:flex-row lg:items-center lg:justify-between">
+          <div className="max-w-2xl">
+            <p className="text-brand-300 text-xs font-semibold uppercase tracking-[0.15em]">
+              Kila gari, kila safari · Every vehicle, every trip
+            </p>
+            <h2 className="font-display mt-2 text-2xl font-semibold tracking-tight sm:text-3xl">
+              GPS trackers and tracker SIM cards, built into the system
+            </h2>
+            <p className="mt-3 text-[15px] leading-relaxed text-white/80">
+              We supply tracking devices and SIM cards, and every vehicle appears
+              on a live map alongside your sales, stock and routes.
+            </p>
+          </div>
+          <div className="flex shrink-0 flex-wrap gap-3 text-sm font-medium">
+            <Link href="/gps-trackers" className="bg-accent hover:bg-accent-hover rounded-lg px-5 py-3 text-white">
+              See GPS trackers
+            </Link>
+            <Link href="/blog" className="rounded-lg border border-white/30 px-5 py-3 text-white hover:bg-white/10">
+              Read the logistics blog
+            </Link>
+          </div>
+        </div>
+      </section>
+
       {/* ── footer ──────────────────────────────────────────────────── */}
-      <footer className="bg-ink-950 text-white">
+      <footer className="border-t border-white/10 bg-ink-950 text-white">
         <div className="mx-auto flex max-w-6xl flex-col gap-6 px-6 py-10 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="font-semibold">Raut</p>
@@ -300,6 +334,12 @@ export function Landing() {
           <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
             <Link href="/login" className="text-white/75 hover:text-white">
               Sign in
+            </Link>
+            <Link href="/blog" className="text-white/75 hover:text-white">
+              Blog
+            </Link>
+            <Link href="/gps-trackers" className="text-white/75 hover:text-white">
+              GPS trackers
             </Link>
             <Link href="/policy" className="text-white/75 hover:text-white">
               Privacy &amp; Cookies

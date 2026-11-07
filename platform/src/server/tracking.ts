@@ -3,6 +3,7 @@ import "server-only";
 import { db } from "@/lib/db";
 import type { Principal } from "@/lib/rbac";
 import { scope } from "@/lib/tenant";
+import { trackerDistanceFor } from "@/server/trackers";
 import {
   chronological,
   dropInaccurate,
@@ -156,7 +157,7 @@ export async function storePings(
 export async function recordActualDistance(routeId: string): Promise<number | null> {
   const route = await db.route.findUnique({
     where: { id: routeId },
-    select: { id: true, companyId: true, repId: true, routeDate: true },
+    select: { id: true, companyId: true, repId: true, routeDate: true, vehicleId: true },
   });
   if (!route) return null;
 
@@ -175,7 +176,13 @@ export async function recordActualDistance(routeId: string): Promise<number | nu
   });
 
   const trail = chronological(dropInaccurate(pings)).map((p) => ({ lat: p.latitude, lng: p.longitude }));
-  const actualDistanceM = trail.length >= 2 ? trailDistanceM(trail) : 0;
+  let actualDistanceM = trail.length >= 2 ? trailDistanceM(trail) : 0;
+
+  // The phone stayed off or in a drawer, but the van's own tracker saw the day.
+  if (trail.length < 2 && route.vehicleId) {
+    const fromTracker = await trackerDistanceFor(route.companyId, route.vehicleId, start, end);
+    if (fromTracker !== null) actualDistanceM = fromTracker;
+  }
 
   await db.route.update({ where: { id: routeId }, data: { actualDistanceM } });
   return actualDistanceM;

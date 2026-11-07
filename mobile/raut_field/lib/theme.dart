@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 
 /// Raut theme for the field app.
 ///
-/// The palette is the same one the console uses — sampled from the logo and
+/// The palette is the same one the console uses: East African laterite and sand,
 /// contrast-checked there (platform/src/lib/design-tokens.ts). Keeping the two
 /// in step matters because a rep and their manager look at the same numbers on
 /// different screens; if the products look unrelated, they feel unrelated.
@@ -16,28 +16,28 @@ class RautTheme {
   const RautTheme._();
 
   // ── brand ramp, matching the console ────────────────────────────────
-  static const brand50 = Color(0xFFECFAFD);
-  static const brand100 = Color(0xFFD0F1F8);
-  static const brand300 = Color(0xFF6FD5E8);
-  static const brand400 = Color(0xFF33C4DD);
-  static const brand500 = Color(0xFF0AB6D6); // sampled from the logo arm
-  static const brand600 = Color(0xFF076C80); // interactive: white passes AA
-  static const brand700 = Color(0xFF075868);
+  static const brand50 = Color(0xFFFDF3EC);
+  static const brand100 = Color(0xFFFAE3D3);
+  static const brand300 = Color(0xFFEBA478);
+  static const brand400 = Color(0xFFE07F4B);
+  static const brand500 = Color(0xFFD2622C); // laterite
+  static const brand600 = Color(0xFFA8441C); // interactive: white passes AA
+  static const brand700 = Color(0xFF8C3716);
 
   /// Call sites that just want "the brand colour" get the interactive step,
   /// because that is the one white text passes contrast against.
   static const brand = brand600;
 
-  // ── blue-cast neutrals ──────────────────────────────────────────────
-  static const slate50 = Color(0xFFF6F8FB);
-  static const slate100 = Color(0xFFECEFF5);
-  static const slate200 = Color(0xFFDCE2EC);
-  static const slate300 = Color(0xFFC2CBDA);
-  static const slate400 = Color(0xFF94A0B8);
-  static const slate500 = Color(0xFF6B7A96);
-  static const slate600 = Color(0xFF4E5C78);
-  static const slate900 = Color(0xFF0B2136);
-  static const ink = Color(0xFF052744); // the RAUT wordmark's navy
+  // ── warm savanna neutrals ──────────────────────────────────────────────
+  static const slate50 = Color(0xFFFAF6EF);
+  static const slate100 = Color(0xFFF3ECDF);
+  static const slate200 = Color(0xFFE8DDCB);
+  static const slate300 = Color(0xFFD4C5AE);
+  static const slate400 = Color(0xFFA8977F);
+  static const slate500 = Color(0xFF6F5F4C);
+  static const slate600 = Color(0xFF5E5142);
+  static const slate900 = Color(0xFF1F1913);
+  static const ink = Color(0xFF15110C); // dark earth
 
   // ── status ──────────────────────────────────────────────────────────
   /// The location pin's green. A brand gesture, never a status —
@@ -52,10 +52,10 @@ class RautTheme {
   static const danger = Color(0xFFB91C1C);
   static const dangerBg = Color(0xFFFEF2F2);
 
-  static const surface = Color(0xFFFFFFFF);
+  static const surface = Color(0xFFFFFDF9);
   static const background = slate50;
-  static const border = Color(0xFFE3E8F0);
-  static const text = Color(0xFF0F1729);
+  static const border = Color(0xFFE8DFCF);
+  static const text = Color(0xFF211A14);
 
   /// Comfortable target for a thumb on a moving matatu — above the 48dp
   /// Material minimum, because the failure mode here is a mis-tapped order.

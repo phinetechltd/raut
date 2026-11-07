@@ -52,6 +52,9 @@ export default function TileMapInner({
         zoomControl: true,
         scrollWheelZoom: true,
         worldCopyJump: false,
+        // The fade runs on animation frames, which stop in a background tab. Tiles
+        // would load and stay invisible, leaving pins on an empty map.
+        fadeAnimation: false,
       }).setView([emptyCenter.lat, emptyCenter.lng], zoom - 2);
 
       L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {

@@ -422,6 +422,17 @@ export default async function SettingsPage({
             </ButtonLink>
           </Card>
         )}
+        {principal.enabledModules.has("ROUTING") && can(principal, "tracker:manage") && (
+          <Card>
+            <SectionHeading
+              title="Vehicle trackers"
+              description="Connect GPS tracker hardware through the API: issue keys, then match each device to its vehicle."
+            />
+            <ButtonLink href="/app/settings/trackers" variant="secondary" size="sm">
+              Manage trackers
+            </ButtonLink>
+          </Card>
+        )}
         {principal.enabledModules.has("ETIMS") && can(principal, "etims:configure") && (
           <Card>
             <SectionHeading

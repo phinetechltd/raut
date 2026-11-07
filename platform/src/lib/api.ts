@@ -6,6 +6,7 @@ import { ZodError, type ZodSchema } from "zod";
 
 import { getPrincipal } from "./auth";
 import { db } from "./db";
+import { isDatabaseBusy } from "./db-url";
 import { MODULE_CATALOG, isModuleKey, type ModuleKey } from "./modules";
 import {
   can,
@@ -186,12 +187,24 @@ function normaliseError(error: unknown): NextResponse {
 
   const message = error instanceof Error ? error.message : String(error);
 
+  // By name, so this shared file does not reach up into the server layer.
+  // A closed month or an unbalanced entry is the user's to fix, not a 500.
+  if (error instanceof Error && error.name === "LedgerError") {
+    return fail(409, "LEDGER_REJECTED", message);
+  }
+
   // Prisma unique-constraint violations are a client problem, not a 500.
   if (message.includes("Unique constraint failed")) {
     return fail(409, "CONFLICT", "A record with these details already exists");
   }
   if (message.includes("Foreign key constraint")) {
     return fail(400, "BAD_REFERENCE", "A referenced record does not exist");
+  }
+  // Too many writes at once. Logged, because a run of these means the server
+  // needs looking at, but the person only needs to try again.
+  if (isDatabaseBusy(error)) {
+    console.error("[api] database busy", message);
+    return fail(503, "BUSY", "The system is busy. Please try again in a moment.");
   }
 
   console.error("[api] unhandled", error);

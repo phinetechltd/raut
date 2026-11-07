@@ -105,6 +105,31 @@ export function toggleSort(current: TableState, key: string): { sort: string; di
 
 // ── date ranges ────────────────────────────────────────────────────────
 
+/** In-memory sort for tables whose rows are already loaded. Blanks sort last. */
+export function sortRows<T>(
+  rows: T[],
+  ts: TableState,
+  accessors: Record<string, (row: T) => string | number | null | undefined>,
+): T[] {
+  const get = ts.sort ? accessors[ts.sort] : undefined;
+  if (!get) return rows;
+  const dir = ts.dir === "asc" ? 1 : -1;
+  return [...rows].sort((a, b) => {
+    const x = get(a);
+    const y = get(b);
+    if (x == null && y == null) return 0;
+    if (x == null) return 1;
+    if (y == null) return -1;
+    if (typeof x === "number" && typeof y === "number") return (x - y) * dir;
+    return String(x).localeCompare(String(y)) * dir;
+  });
+}
+
+/** The current page of rows that are already loaded. */
+export function pageOf<T>(rows: T[], ts: TableState): T[] {
+  return rows.slice((ts.page - 1) * ts.limit, ts.page * ts.limit);
+}
+
 export interface DateRange {
   key: string;
   label: string;

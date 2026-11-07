@@ -6,6 +6,12 @@ import { RautLockup } from "@/components/raut-mark";
 
 import { login, type LoginState } from "./actions";
 
+/**
+ * Sign-in hints for local development only. Publishing real account names and a
+ * password on a live login page hands the system to anyone who opens it.
+ */
+const SHOW_DEMO_ACCOUNTS = process.env.NODE_ENV !== "production";
+
 const DEMO_ACCOUNTS = [
   { label: "Super Admin", email: "admin@tariafrica.com", note: "Platform" },
   // These notes name the tenant, not the product — Tari Solutions is a
@@ -27,7 +33,8 @@ export default function LoginPage() {
           to nothing. The panel then took the page background while `text-white`
           still applied — white on white, an invisible headline for every
           visitor whose browser is in light mode. */}
-      <section className="hidden flex-col justify-between bg-ink-950 p-12 text-white lg:flex">
+      <section className="afr-weave-dark relative hidden flex-col justify-between bg-ink-950 p-12 text-white lg:flex">
+        <div className="afr-band absolute inset-x-0 top-0" aria-hidden="true" />
         <div>
           <p className="text-xs uppercase tracking-[0.2em] text-brand-300">
             Tari Africa Platforms Limited
@@ -40,7 +47,7 @@ export default function LoginPage() {
           </div>
 
 
-          <h1 className="mt-6 max-w-md text-2xl font-semibold leading-tight">
+          <h1 className="font-display mt-6 max-w-md text-2xl font-semibold leading-tight">
             Multi-Tenant ERP &amp; Field Sales Management Platform
           </h1>
           <p className="mt-3 max-w-md text-sm text-white/70">
@@ -130,6 +137,7 @@ export default function LoginPage() {
             </button>
           </form>
 
+          {SHOW_DEMO_ACCOUNTS ? (
           <div className="rounded-lg border border-border bg-surface shadow-sm mt-8 p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-content-muted mb-3">Demo accounts · password Raut@2026</p>
             <ul className="space-y-2 text-xs">
@@ -141,6 +149,7 @@ export default function LoginPage() {
               ))}
             </ul>
           </div>
+          ) : null}
         </div>
       </section>
     </main>

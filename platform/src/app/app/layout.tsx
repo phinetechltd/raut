@@ -18,8 +18,10 @@ const NAV: NavItem[] = [
   { href: "/app/finance", label: "Finance", module: "FINANCE", group: "Sell" },
   { href: "/app/field", label: "Field Sales", module: "FIELD_SALES", group: "Field" },
   { href: "/app/routes", label: "Routing & Geofencing", module: "ROUTING", group: "Field" },
+  { href: "/app/tracking", label: "Vehicle Tracking", module: "ROUTING", group: "Field" },
   { href: "/app/sms", label: "SMS", module: "SMS", group: "Engage" },
-  { href: "/app/reports", label: "Reports", module: "ANALYTICS", group: "Insight" },
+  { href: "/app/report-centre", label: "Report Centre", group: "Insight" },
+  { href: "/app/reports", label: "Analytics", module: "ANALYTICS", group: "Insight" },
   { href: "/app/settings", label: "Settings", group: "Insight" },
 ];
 

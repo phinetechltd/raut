@@ -87,6 +87,8 @@ export type Permission =
   | "route:write"
   | "vehicle:read"
   | "vehicle:write"
+  | "vehicle:track"
+  | "tracker:manage"
   // Geofencing
   | "geofence:read"
   | "geofence:write"
@@ -101,6 +103,14 @@ export type Permission =
   // by field reps, and the P&L, balance sheet, cash position and VAT liability
   // are not theirs to see.
   | "report:financial"
+  // Operational reports. Each report also needs its module and its own data
+  // permission, so a storekeeper gets stock reports and not the sales book.
+  | "report:operational"
+  // Accounting tools.
+  | "journal:write"
+  | "payable:write"
+  | "period:close"
+  | "period:reopen"
   // eTIMS
   | "etims:read"
   | "etims:configure"
@@ -155,6 +165,8 @@ const PERMISSION_MODULE: Partial<Record<Permission, ModuleKey>> = {
   "route:write": "ROUTING",
   "vehicle:read": "ROUTING",
   "vehicle:write": "ROUTING",
+  "vehicle:track": "ROUTING",
+  "tracker:manage": "ROUTING",
 
   "geofence:read": "GEOFENCING",
   "geofence:write": "GEOFENCING",
@@ -168,6 +180,10 @@ const PERMISSION_MODULE: Partial<Record<Permission, ModuleKey>> = {
   // gate on the same module. A page that renders and then 402s on its own data
   // reads as a broken product rather than a licence boundary.
   "report:financial": "FINANCE",
+  "journal:write": "FINANCE",
+  "payable:write": "FINANCE",
+  "period:close": "FINANCE",
+  "period:reopen": "FINANCE",
 
   "etims:read": "ETIMS",
   "etims:configure": "ETIMS",
@@ -187,6 +203,11 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   SUPER_ADMIN: ["platform:manage"], // expanded below to everything
 
   COMPANY_ADMIN: [
+    "report:operational",
+    "journal:write",
+    "payable:write",
+    "period:close",
+    "period:reopen",
     ...CORE_READ,
     "company:write",
     "user:write",
@@ -227,6 +248,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "route:write",
     "vehicle:read",
     "vehicle:write",
+    "vehicle:track",
+    "tracker:manage",
     "geofence:read",
     "geofence:write",
     "sms:read",
@@ -244,6 +267,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ],
 
   BRANCH_MANAGER: [
+    "report:operational",
     ...CORE_READ,
     "customer:write",
     "activity:write",
@@ -267,6 +291,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "route:read",
     "route:write",
     "vehicle:read",
+    "vehicle:track",
     "geofence:read",
     "sms:read",
     "sms:send",
@@ -281,6 +306,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ],
 
   SALES_MANAGER: [
+    "report:operational",
     ...CORE_READ,
     "customer:write",
     "territory:write",
@@ -301,6 +327,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "route:write",
     "vehicle:read",
     "vehicle:write",
+    "vehicle:track",
     "geofence:read",
     "geofence:write",
     "sms:read",
@@ -315,6 +342,10 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ],
 
   ACCOUNTANT: [
+    "report:operational",
+    "journal:write",
+    "payable:write",
+    "period:close",
     ...CORE_READ,
     "invoice:read",
     "invoice:write",
@@ -339,6 +370,7 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   ],
 
   STOREKEEPER: [
+    "report:operational",
     ...CORE_READ,
     "stock:read",
     "stock:write",
@@ -372,6 +404,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "route:read",
     // The plate and odometer of the van they are driving today, nothing more.
     "vehicle:read",
+    // Their own van's position only; the fleet query narrows self-scoped roles.
+    "vehicle:track",
     "expense:read",
     "expense:write",
     "field:self",

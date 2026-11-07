@@ -18,7 +18,7 @@ import { parseBoundary } from "@/lib/geo";
 import { toClientConfig } from "@/lib/maps";
 import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
-import { tableHref, tableState, toggleSort, type TableState } from "@/lib/table";
+import { tableHref, tableState, toggleSort, pageOf, sortRows } from "@/lib/table";
 import {
   chronological,
   distanceVariance,
@@ -41,30 +41,6 @@ const TRAIL_POINTS = 1200;
 const fmtTime = (d: Date | null | undefined) =>
   d ? d.toLocaleTimeString("en-KE", { hour: "2-digit", minute: "2-digit" }) : "—";
 const km = (m: number | null | undefined) => (m == null ? "—" : `${(m / 1000).toFixed(1)} km`);
-
-/** In-memory sort for tables whose rows are already loaded (stops, live). */
-function sortRows<T>(
-  rows: T[],
-  ts: TableState,
-  accessors: Record<string, (row: T) => string | number | null | undefined>,
-): T[] {
-  const get = ts.sort ? accessors[ts.sort] : undefined;
-  if (!get) return rows;
-  const dir = ts.dir === "asc" ? 1 : -1;
-  return [...rows].sort((a, b) => {
-    const x = get(a);
-    const y = get(b);
-    if (x == null && y == null) return 0;
-    if (x == null) return 1;
-    if (y == null) return -1;
-    if (typeof x === "number" && typeof y === "number") return (x - y) * dir;
-    return String(x).localeCompare(String(y)) * dir;
-  });
-}
-
-function pageOf<T>(rows: T[], ts: TableState): T[] {
-  return rows.slice((ts.page - 1) * ts.limit, ts.page * ts.limit);
-}
 
 /**
  * Modules 07 & 08 · Smart Routing, Geofencing and vehicle tracking.
@@ -370,6 +346,11 @@ export default async function RoutingPage({
         description="Distance-based route sequencing, live vehicle tracking, daily itineraries and territory verification."
         actions={
           <>
+            {can(principal, "vehicle:track") ? (
+              <ButtonLink href="/app/tracking" variant="secondary" size="sm">
+                Track vehicles
+              </ButtonLink>
+            ) : null}
             {can(principal, "vehicle:read") ? (
               <ButtonLink href="/app/settings/vehicles" variant="secondary" size="sm">
                 Vehicles
