@@ -32,6 +32,9 @@ const ROLES = [
     pages: [
       ["/app", "Receivables"],
       ["/app/customers", "Customer locations"],
+      ["/app/crm", "Opportunities moving"],
+      ["/app/crm/leads", "top of the funnel"],
+      ["/app/tasks", "to-dos across the team"],
       ["/app/sales", "Sales channel"],
       ["/app/inventory", "Recent stock movements"],
       ["/app/inventory/transfers", "Stock transfers"],
@@ -106,6 +109,9 @@ const ROLES = [
     pages: [
       ["/app", "Sales trend"],
       ["/app/customers", "All customers"],
+      ["/app/crm", "Opportunities moving"],
+      ["/app/crm/leads", "top of the funnel"],
+      ["/app/tasks", "to-dos across the team"],
       ["/app/field", "Today's visits"],
       ["/app/routes", "Territories"],
       ["/app/tracking", "Fleet positions"],
@@ -134,6 +140,8 @@ const ROLES = [
     pages: [
       ["/app", "Sales trend"],
       ["/app/customers", GATE_MARKER, { gated: true }],
+      ["/app/crm", GATE_MARKER, { gated: true }],
+      ["/app/tasks", GATE_MARKER, { gated: true }],
       ["/app/sales", GATE_MARKER, { gated: true }],
       ["/app/sales/delivery-notes", GATE_MARKER, { gated: true }],
       ["/app/field", GATE_MARKER, { gated: true }],

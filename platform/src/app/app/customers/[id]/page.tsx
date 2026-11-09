@@ -2,8 +2,10 @@
 import { notFound } from "next/navigation";
 
 import {
+  Badge,
   ButtonLink,
   DataTable,
+  EmptyState,
   FilterBar,
   FilterSelect,
   ModuleLocked,
@@ -18,12 +20,14 @@ import { db } from "@/lib/db";
 import { toClientConfig } from "@/lib/maps";
 import { outstandingCents } from "@/lib/money";
 import { creditedByInvoice } from "@/server/sales";
+import { ensureStages, listDeals, listTasks } from "@/server/crm";
 import { can } from "@/lib/rbac";
 import { requireTenant } from "@/lib/session";
 import { preserved, tableHref, tableState, toggleSort } from "@/lib/table";
 import { mapConfigFor } from "@/server/maps";
 
 import { CustomerDeleteButton, CustomerDialog } from "../customer-dialog";
+import { DealStageSelect, NewDealDialog, NewTaskDialog, TaskStatusButton, type Option, type StageOption } from "../../crm/crm-client";
 
 export const dynamic = "force-dynamic";
 
@@ -165,6 +169,18 @@ export default async function CustomerDetailPage({
     const next = toggleSort(visTs, key);
     return tableHref(path, sp, { vis_sort: next.sort, vis_dir: next.dir }, "vis");
   };
+
+  // CRM panel: this customer's deals and open tasks, plus the options the
+  // quick-add dialogs need.
+  const [custDeals, custTasks, stageRows, companyUsers] = await Promise.all([
+    listDeals(principal, { customerId: id }),
+    listTasks(principal, { customerId: id, status: "OPEN" }),
+    ensureStages(companyId),
+    db.user.findMany({ where: { companyId, status: { not: "SUSPENDED" } }, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+  ]);
+  const stageOpts: StageOption[] = stageRows.map((s) => ({ id: s.id, name: s.name, kind: s.kind }));
+  const userOpts: Option[] = companyUsers;
+  const thisCustomerOpt: Option[] = [{ id: customer.id, name: customer.name }];
 
   type InvRow = (typeof invoices)[number];
   const invoiceColumns: Array<Column<InvRow>> = [
@@ -488,6 +504,65 @@ export default async function CustomerDetailPage({
               }}
               empty={{ title: "No visits" }}
             />
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <div>
+          <SectionHeading
+            title="Deals"
+            description={`${custDeals.length} on this account`}
+            actions={<NewDealDialog customers={thisCustomerOpt} reps={userOpts} stages={stageOpts} />}
+          />
+          <div className="divide-y rounded-lg border border-border bg-surface shadow-sm">
+            {custDeals.length === 0 ? (
+              <EmptyState title="No deals" description="Open one with New deal, or convert a lead." />
+            ) : (
+              custDeals.map((d) => (
+                <div key={d.id} className="flex items-center justify-between gap-3 p-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{d.title}</p>
+                    <p className="text-xs text-content-muted">
+                      <Money cents={d.valueCents} compact />
+                      {d.status !== "OPEN" ? <> · <Badge tone={d.status === "WON" ? "success" : "neutral"}>{d.status}</Badge></> : null}
+                    </p>
+                  </div>
+                  <div className="shrink-0">
+                    <DealStageSelect dealId={d.id} stageId={d.stageId} stages={stageOpts} />
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div>
+          <SectionHeading
+            title="Open tasks"
+            description={`${custTasks.length} open`}
+            actions={<NewTaskDialog users={userOpts} customerId={customer.id} label="+ Task" />}
+          />
+          <div className="divide-y rounded-lg border border-border bg-surface shadow-sm">
+            {custTasks.length === 0 ? (
+              <EmptyState title="No open tasks" description="Add a follow-up for this customer." />
+            ) : (
+              custTasks.map((t) => (
+                <div key={t.id} className="flex items-center justify-between gap-3 p-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium">{t.title}</p>
+                    {t.dueAt ? (
+                      <p className={`text-xs ${t.dueAt.getTime() < Date.now() ? "font-medium text-danger" : "text-content-muted"}`}>
+                        due {t.dueAt.toLocaleDateString("en-KE", { day: "numeric", month: "short" })}
+                      </p>
+                    ) : null}
+                  </div>
+                  <div className="shrink-0">
+                    <TaskStatusButton taskId={t.id} status={t.status} />
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>

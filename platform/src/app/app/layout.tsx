@@ -12,6 +12,9 @@ export const dynamic = "force-dynamic";
 const NAV: NavItem[] = [
   { href: "/app", label: "Dashboard" },
   { href: "/app/customers", label: "Customers", module: "CRM", group: "Sell" },
+  { href: "/app/crm", label: "CRM & Pipeline", module: "CRM", group: "Sell" },
+  { href: "/app/crm/leads", label: "Leads", module: "CRM", group: "Sell" },
+  { href: "/app/tasks", label: "Tasks", module: "CRM", group: "Sell" },
   { href: "/app/sales", label: "Sales & POS", module: "SALES_POS", group: "Sell" },
   { href: "/app/inventory", label: "Inventory", module: "INVENTORY", group: "Sell" },
   { href: "/app/procurement", label: "Procurement", module: "PROCUREMENT", group: "Sell" },

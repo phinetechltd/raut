@@ -49,6 +49,12 @@ export type Permission =
   | "customer:delete"
   | "territory:write"
   | "activity:write"
+  | "lead:read"
+  | "lead:write"
+  | "deal:read"
+  | "deal:write"
+  | "task:read"
+  | "task:write"
   // Sales & POS
   | "product:read"
   | "quotation:read"
@@ -129,6 +135,12 @@ const PERMISSION_MODULE: Partial<Record<Permission, ModuleKey>> = {
   "customer:delete": "CRM",
   "territory:write": "CRM",
   "activity:write": "CRM",
+  "lead:read": "CRM",
+  "lead:write": "CRM",
+  "deal:read": "CRM",
+  "deal:write": "CRM",
+  "task:read": "CRM",
+  "task:write": "CRM",
 
   "quotation:read": "SALES_POS",
   "quotation:write": "SALES_POS",
@@ -218,6 +230,12 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "customer:delete",
     "territory:write",
     "activity:write",
+    "lead:read",
+    "lead:write",
+    "deal:read",
+    "deal:write",
+    "task:read",
+    "task:write",
     "product:write",
     "quotation:read",
     "quotation:write",
@@ -271,6 +289,12 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     ...CORE_READ,
     "customer:write",
     "activity:write",
+    "lead:read",
+    "lead:write",
+    "deal:read",
+    "deal:write",
+    "task:read",
+    "task:write",
     "order:read",
     "order:write",
     "invoice:read",
@@ -311,6 +335,12 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "customer:write",
     "territory:write",
     "activity:write",
+    "lead:read",
+    "lead:write",
+    "deal:read",
+    "deal:write",
+    "task:read",
+    "task:write",
     "quotation:read",
     "quotation:write",
     "order:read",
@@ -347,6 +377,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "payable:write",
     "period:close",
     ...CORE_READ,
+    "task:read",
+    "task:write",
     "invoice:read",
     "invoice:write",
     "invoice:approve",
@@ -393,6 +425,12 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "customer:write",
     "product:read",
     "activity:write",
+    "lead:read",
+    "lead:write",
+    "deal:read",
+    "deal:write",
+    "task:read",
+    "task:write",
     "order:read",
     "order:write",
     "invoice:read",

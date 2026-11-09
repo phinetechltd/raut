@@ -49,54 +49,58 @@ model Company {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
 
-  modules           CompanyModule[]
-  branches          Branch[]
-  users             User[]
-  territories       Territory[]
-  customers         Customer[]
-  customerContacts  CustomerContact[]
-  activities        CustomerActivity[]
-  categories        ProductCategory[]
-  products          Product[]
-  stockLocations    StockLocation[]
-  stockItems        StockItem[]
-  stockMovements    StockMovement[]
-  transfers         StockTransfer[]
-  quotations        Quotation[]
-  salesOrders       SalesOrder[]
-  invoices          Invoice[]
-  payments          Payment[]
-  suppliers         Supplier[]
-  purchaseOrders    PurchaseOrder[]
-  goodsReceipts     GoodsReceipt[]
-  supplierInvoices  SupplierInvoice[]
-  expenseCategories ExpenseCategory[]
-  expenses          Expense[]
-  visits            Visit[]
-  salesTargets      SalesTarget[]
-  routes            Route[]
-  vehicles          Vehicle[]
-  supplierPayments  SupplierPayment[]
+  modules             CompanyModule[]
+  branches            Branch[]
+  users               User[]
+  territories         Territory[]
+  customers           Customer[]
+  customerContacts    CustomerContact[]
+  activities          CustomerActivity[]
+  categories          ProductCategory[]
+  products            Product[]
+  stockLocations      StockLocation[]
+  stockItems          StockItem[]
+  stockMovements      StockMovement[]
+  transfers           StockTransfer[]
+  quotations          Quotation[]
+  salesOrders         SalesOrder[]
+  invoices            Invoice[]
+  payments            Payment[]
+  suppliers           Supplier[]
+  purchaseOrders      PurchaseOrder[]
+  goodsReceipts       GoodsReceipt[]
+  supplierInvoices    SupplierInvoice[]
+  expenseCategories   ExpenseCategory[]
+  expenses            Expense[]
+  visits              Visit[]
+  salesTargets        SalesTarget[]
+  routes              Route[]
+  vehicles            Vehicle[]
+  supplierPayments    SupplierPayment[]
   trackerIntegrations TrackerIntegration[]
-  trackerDevices    TrackerDevice[]
-  vehiclePositions  VehiclePosition[]
-  geofenceEvents    GeofenceEvent[]
-  locationPings     LocationPing[]
-  smsTemplates      SmsTemplate[]
-  smsMessages       SmsMessage[]
-  auditLogs         AuditLog[]
-  counters          DocumentCounter[]
-  settings          Setting[]
-  paymentIntents    PaymentIntent[]
-  credentials       TenantCredential[]
-  accounts          Account[]
-  journalEntries    JournalEntry[]
-  periods           AccountingPeriod[]
-  etimsConfig       EtimsConfig?
-  etimsSubmissions  EtimsSubmission[]
-  creditNotes       CreditNote[]
-  productVariants   ProductVariant[]
-  deliveryNotes     DeliveryNote[]
+  trackerDevices      TrackerDevice[]
+  vehiclePositions    VehiclePosition[]
+  geofenceEvents      GeofenceEvent[]
+  locationPings       LocationPing[]
+  leads               Lead[]
+  deals               Deal[]
+  pipelineStages      PipelineStage[]
+  tasks               Task[]
+  smsTemplates        SmsTemplate[]
+  smsMessages         SmsMessage[]
+  auditLogs           AuditLog[]
+  counters            DocumentCounter[]
+  settings            Setting[]
+  paymentIntents      PaymentIntent[]
+  credentials         TenantCredential[]
+  accounts            Account[]
+  journalEntries      JournalEntry[]
+  periods             AccountingPeriod[]
+  etimsConfig         EtimsConfig?
+  etimsSubmissions    EtimsSubmission[]
+  creditNotes         CreditNote[]
+  productVariants     ProductVariant[]
+  deliveryNotes       DeliveryNote[]
 
   @@index([status])
 }
@@ -389,6 +393,8 @@ model Customer {
   paymentIntents PaymentIntent[]
   creditNotes    CreditNote[]
   deliveryNotes  DeliveryNote[]
+  deals          Deal[]
+  tasks          Task[]
 
   @@unique([companyId, code])
   @@index([companyId, status])
@@ -440,6 +446,119 @@ model CustomerActivity {
 
   @@index([companyId, customerId, createdAt])
   @@index([companyId, status, dueAt])
+}
+
+/// A prospect not yet a customer. Converts into a Customer (and optionally a Deal).
+model Lead {
+  id                  String  @id @default(cuid())
+  companyId           String
+  /// Person or business name
+  name                String
+  contactName         String?
+  phone               String?
+  email               String?
+  /// REFERRAL | WEB | FIELD | CALL | EVENT | OTHER
+  source              String?
+  /// NEW | WORKING | CONVERTED | DISCARDED
+  status              String  @default("NEW")
+  /// The user who owns the follow-up (scalar, like Customer.createdById)
+  ownerId             String?
+  notes               String?
+  /// Set when the lead becomes a customer
+  convertedCustomerId String?
+  createdById         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deals   Deal[]
+
+  @@index([companyId, status])
+  @@index([companyId, ownerId])
+  @@index([companyId, updatedAt])
+}
+
+/// A column in the sales pipeline. Seeded with defaults per company on first use.
+model PipelineStage {
+  id        String @id @default(cuid())
+  companyId String
+  name      String
+  sortOrder Int    @default(0)
+  /// OPEN | WON | LOST — WON/LOST close the deal and feed win-rate reporting
+  kind      String @default("OPEN")
+
+  createdAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  deals   Deal[]
+
+  @@unique([companyId, name])
+  @@index([companyId, sortOrder])
+}
+
+/// An opportunity moving through the pipeline, against a customer or a lead.
+model Deal {
+  id              String    @id @default(cuid())
+  companyId       String
+  customerId      String?
+  leadId          String?
+  stageId         String
+  title           String
+  valueCents      Int       @default(0)
+  currency        String    @default("KES")
+  /// 0..100; defaults from the stage if not set
+  probability     Int?
+  expectedCloseAt DateTime?
+  ownerId         String?
+  /// OPEN | WON | LOST
+  status          String    @default("OPEN")
+  lostReason      String?
+  wonAt           DateTime?
+  lostAt          DateTime?
+  createdById     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company       @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Customer?     @relation(fields: [customerId], references: [id], onDelete: SetNull)
+  lead     Lead?         @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  stage    PipelineStage @relation(fields: [stageId], references: [id], onDelete: Restrict)
+
+  @@index([companyId, status])
+  @@index([companyId, stageId])
+  @@index([companyId, ownerId])
+  @@index([companyId, customerId])
+}
+
+/// A to-do or follow-up, assignable to a user and linkable to a customer, deal or lead.
+model Task {
+  id           String    @id @default(cuid())
+  companyId    String
+  title        String
+  description  String?
+  dueAt        DateTime?
+  /// OPEN | DONE | CANCELLED
+  status       String    @default("OPEN")
+  /// LOW | NORMAL | HIGH
+  priority     String    @default("NORMAL")
+  assignedToId String?
+  customerId   String?
+  dealId       String?
+  leadId       String?
+  createdById  String?
+  completedAt  DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, status, dueAt])
+  @@index([companyId, assignedToId, status])
+  @@index([companyId, customerId])
 }
 
 // ═══════════════════════════════════════════════════════════════════════
@@ -518,17 +637,17 @@ model Product {
   company  Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
   category ProductCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
 
-  stockItems      StockItem[]
-  stockMovements  StockMovement[]
-  quotationLines  QuotationLine[]
-  orderLines      SalesOrderLine[]
-  invoiceLines    InvoiceLine[]
-  poLines         PurchaseOrderLine[]
-  grnLines        GoodsReceiptLine[]
-  creditNoteLines CreditNoteLine[]
+  stockItems        StockItem[]
+  stockMovements    StockMovement[]
+  quotationLines    QuotationLine[]
+  orderLines        SalesOrderLine[]
+  invoiceLines      InvoiceLine[]
+  poLines           PurchaseOrderLine[]
+  grnLines          GoodsReceiptLine[]
+  creditNoteLines   CreditNoteLine[]
   deliveryNoteLines DeliveryNoteLine[]
-  variants        ProductVariant[]
-  transferLines   StockTransferLine[]
+  variants          ProductVariant[]
+  transferLines     StockTransferLine[]
 
   @@unique([companyId, sku])
   @@index([companyId, active])
@@ -628,14 +747,14 @@ model StockTransfer {
   status         String  @default("DRAFT")
   note           String?
 
-  dispatchedAt DateTime?
-  receivedAt   DateTime?
+  dispatchedAt  DateTime?
+  receivedAt    DateTime?
   /// Set when the transfer was closed short: goods dispatched but never
   /// received were returned to the source on paper and written off there.
   shortClosedAt DateTime?
-  createdById  String?
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdById   String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
 
   company      Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
   fromLocation StockLocation       @relation("TransferFrom", fields: [fromLocationId], references: [id])
@@ -744,13 +863,13 @@ model SalesOrder {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  company   Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  branch    Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customer  Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  quotation Quotation?       @relation(fields: [quotationId], references: [id], onDelete: SetNull)
-  visit     Visit?           @relation(fields: [visitId], references: [id], onDelete: SetNull)
-  lines     SalesOrderLine[]
-  invoices  Invoice[]
+  company       Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch        Branch?          @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer      Customer         @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  quotation     Quotation?       @relation(fields: [quotationId], references: [id], onDelete: SetNull)
+  visit         Visit?           @relation(fields: [visitId], references: [id], onDelete: SetNull)
+  lines         SalesOrderLine[]
+  invoices      Invoice[]
   deliveryNotes DeliveryNote[]
 
   @@unique([companyId, number])
@@ -831,14 +950,14 @@ model Invoice {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  company     Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  branch      Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  customer    Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  order       SalesOrder?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  location    StockLocation?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  lines       InvoiceLine[]
-  allocations PaymentAllocation[]
-  creditNotes CreditNote[]
+  company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch        Branch?             @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  customer      Customer            @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  order         SalesOrder?         @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  location      StockLocation?      @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  lines         InvoiceLine[]
+  allocations   PaymentAllocation[]
+  creditNotes   CreditNote[]
   deliveryNotes DeliveryNote[]
 
   @@unique([companyId, number])
@@ -942,7 +1061,7 @@ model Supplier {
   updatedAt DateTime @updatedAt
 
   company        Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  payments SupplierPayment[]
+  payments       SupplierPayment[]
   purchaseOrders PurchaseOrder[]
   goodsReceipts  GoodsReceipt[]
   invoices       SupplierInvoice[]
@@ -1027,7 +1146,7 @@ model GoodsReceipt {
 }
 
 model GoodsReceiptLine {
-  id            String @id @default(cuid())
+  id            String  @id @default(cuid())
   grnId         String
   productId     String
   quantity      Int
@@ -1051,23 +1170,23 @@ model SupplierInvoice {
   supplierRef String?
 
   /// UNPAID | PARTIALLY_PAID | PAID | CANCELLED
-  status     String    @default("UNPAID")
-  issueDate  DateTime  @default(now())
-  dueDate    DateTime?
-  totalCents Int       @default(0)
+  status           String    @default("UNPAID")
+  issueDate        DateTime  @default(now())
+  dueDate          DateTime?
+  totalCents       Int       @default(0)
   /// Input VAT on this bill. The purchases schedule of a VAT return reads it.
-  taxCents   Int       @default(0)
-  paidCents  Int       @default(0)
-  note       String?
+  taxCents         Int       @default(0)
+  paidCents        Int       @default(0)
+  note             String?
   /// Set for services and overheads; empty means the bill clears received stock.
   expenseAccountId String?
-  createdById String?
+  createdById      String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company  Company  @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  supplier Supplier @relation(fields: [supplierId], references: [id], onDelete: Cascade)
+  company  Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  supplier Supplier          @relation(fields: [supplierId], references: [id], onDelete: Cascade)
   payments SupplierPayment[]
 
   @@unique([companyId, number])
@@ -1269,15 +1388,15 @@ model SalesTarget {
 /// which van is where, and so odometer readings reconcile against the planned
 /// and GPS-measured distance of each day.
 model Vehicle {
-  id        String  @id @default(cuid())
-  companyId String
-  branchId  String?
+  id           String  @id @default(cuid())
+  companyId    String
+  branchId     String?
   /// Registration plate, e.g. KDA 123A. Unique within the company.
-  plate     String
-  make      String?
-  model     String?
+  plate        String
+  make         String?
+  model        String?
   /// VAN | PICKUP | MOTORBIKE | TRUCK | CAR
-  type      String  @default("VAN")
+  type         String  @default("VAN")
   /// The rep who usually drives it; routes default to it when planned.
   defaultRepId String?
   odometerKm   Int?
@@ -1286,11 +1405,11 @@ model Vehicle {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  routes  Route[]
-  pings   LocationPing[]
-  tracker TrackerDevice?
-  positions VehiclePosition[]
+  company       Company           @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  routes        Route[]
+  pings         LocationPing[]
+  tracker       TrackerDevice?
+  positions     VehiclePosition[]
   deliveryNotes DeliveryNote[]
 
   @@unique([companyId, plate])
@@ -1334,9 +1453,9 @@ model Route {
   territory Territory? @relation(fields: [territoryId], references: [id], onDelete: SetNull)
   vehicle   Vehicle?   @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
 
-  stops  RouteStop[]
-  visits Visit[]
-  pings  LocationPing[]
+  stops         RouteStop[]
+  visits        Visit[]
+  pings         LocationPing[]
   deliveryNotes DeliveryNote[]
 
   @@index([companyId, repId, routeDate])
@@ -1396,7 +1515,7 @@ model GeofenceEvent {
 /// Background location breadcrumbs from the mobile app. High volume — pruned
 /// by retention policy rather than kept forever.
 model LocationPing {
-  id        String @id @default(cuid())
+  id        String  @id @default(cuid())
   companyId String
   userId    String
   /// Stamped server-side from the rep's active route for the day, so a trail
@@ -1431,22 +1550,22 @@ model LocationPing {
 /// key is shown once when issued; only its SHA-256 hash is stored, so a copy of
 /// the database cannot be used to post positions.
 model TrackerIntegration {
-  id        String  @id @default(cuid())
-  companyId String
-  name      String
+  id          String    @id @default(cuid())
+  companyId   String
+  name        String
   /// GENERIC | TRACCAR. Documentation hint; ingest recognises the payload shape.
-  provider  String  @default("GENERIC")
-  keyHash   String  @unique
+  provider    String    @default("GENERIC")
+  keyHash     String    @unique
   /// First characters of the key, so an admin can tell which key a device uses.
-  keyPrefix String
-  active    Boolean @default(true)
-  lastUsedAt DateTime?
+  keyPrefix   String
+  active      Boolean   @default(true)
+  lastUsedAt  DateTime?
   createdById String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  company Company         @relation(fields: [companyId], references: [id], onDelete: Cascade)
   devices TrackerDevice[]
 
   @@index([companyId, active])
@@ -1456,13 +1575,13 @@ model TrackerIntegration {
 /// IMEI). A device first heard from with no vehicle waits here unassigned, which
 /// is how an admin onboards hardware without typing IMEIs. One tracker per van.
 model TrackerDevice {
-  id            String  @id @default(cuid())
+  id            String    @id @default(cuid())
   companyId     String
   integrationId String?
-  vehicleId     String? @unique
+  vehicleId     String?   @unique
   externalId    String
   label         String?
-  active        Boolean @default(true)
+  active        Boolean   @default(true)
   /// When data last arrived, and the fix it carried. Lets the settings screen
   /// show an unassigned device's position so it can be matched to a van.
   lastSeenAt    DateTime?
@@ -2053,15 +2172,15 @@ model DeliveryNote {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  company     Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  branch      Branch?        @relation(fields: [branchId], references: [id], onDelete: SetNull)
-  invoice     Invoice?       @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
-  order       SalesOrder?    @relation(fields: [orderId], references: [id], onDelete: SetNull)
-  customer    Customer       @relation(fields: [customerId], references: [id], onDelete: Cascade)
-  location    StockLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
-  deliveredBy User?          @relation("DeliveryNoteDeliveredBy", fields: [deliveredById], references: [id], onDelete: SetNull)
-  vehicle     Vehicle?       @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
-  route       Route?         @relation(fields: [routeId], references: [id], onDelete: SetNull)
+  company     Company            @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  branch      Branch?            @relation(fields: [branchId], references: [id], onDelete: SetNull)
+  invoice     Invoice?           @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+  order       SalesOrder?        @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  customer    Customer           @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  location    StockLocation?     @relation(fields: [locationId], references: [id], onDelete: SetNull)
+  deliveredBy User?              @relation("DeliveryNoteDeliveredBy", fields: [deliveredById], references: [id], onDelete: SetNull)
+  vehicle     Vehicle?           @relation(fields: [vehicleId], references: [id], onDelete: SetNull)
+  route       Route?             @relation(fields: [routeId], references: [id], onDelete: SetNull)
   lines       DeliveryNoteLine[]
 
   @@unique([companyId, number])
