@@ -221,6 +221,14 @@
     font: inherit;
     background: var(--surface-sunken);
   }
+  /* Leaflet's panes and controls (z-index up to 1000) and Google's map layers
+     would otherwise compete with the page itself and paint over dialogs, the
+     mobile menu and dropdowns. Isolating the map keeps all of that inside it. */
+  .raut-tilemap {
+    position: relative;
+    isolation: isolate;
+    z-index: 0;
+  }
   .raut-tilemap .leaflet-control-zoom a {
     color: var(--text);
     background: var(--surface);

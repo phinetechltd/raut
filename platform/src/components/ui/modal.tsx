@@ -51,7 +51,7 @@ export function Modal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end justify-center overflow-y-auto bg-black/45 p-4 backdrop-blur-[2px] sm:items-center"
+      className="fixed inset-0 z-[100] flex items-end justify-center overflow-y-auto bg-black/45 p-4 backdrop-blur-[2px] sm:items-center"
       role="presentation"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) onClose();
