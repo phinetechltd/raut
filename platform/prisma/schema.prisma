@@ -1370,6 +1370,10 @@ model SalesTarget {
   targetVisits          Int @default(0)
   targetNewCustomers    Int @default(0)
 
+  /// Commission earned as basis points of sales achieved in the period
+  /// (e.g. 250 = 2.5%). Zero means no commission is tracked for this target.
+  commissionRateBp      Int @default(0)
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
