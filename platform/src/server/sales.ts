@@ -114,7 +114,7 @@ export interface DraftLine {
 }
 
 /** Resolves lines against the catalogue, defaulting price and tax from the product. */
-async function resolveLines(client: Client, companyId: string, lines: DraftLine[]) {
+export async function resolveLines(client: Client, companyId: string, lines: DraftLine[]) {
   if (lines.length === 0) throw new Error("At least one line is required");
 
   const products = await client.product.findMany({
@@ -191,6 +191,8 @@ export interface CreateOrderInput {
   deliveryDate?: Date | null;
   clientUuid?: string | null;
   createdById?: string | null;
+  /** The quotation this order was raised from, when converted. */
+  quotationId?: string | null;
   /** Confirm immediately — the mobile app always does; the console may draft. */
   confirm?: boolean;
 }
@@ -228,6 +230,7 @@ export async function createSalesOrder(input: CreateOrderInput) {
           deliveryDate: input.deliveryDate ?? null,
           clientUuid: input.clientUuid ?? null,
           createdById: input.createdById ?? null,
+          quotationId: input.quotationId ?? null,
           subtotalCents: totals.subtotalCents,
           discountCents: totals.discountCents,
           taxCents: totals.taxCents,

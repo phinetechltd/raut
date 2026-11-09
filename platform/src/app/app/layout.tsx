@@ -16,6 +16,7 @@ const NAV: NavItem[] = [
   { href: "/app/crm/leads", label: "Leads", module: "CRM", group: "Sell" },
   { href: "/app/tasks", label: "Tasks", module: "CRM", group: "Sell" },
   { href: "/app/sales", label: "Sales & POS", module: "SALES_POS", group: "Sell" },
+  { href: "/app/sales/quotations", label: "Quotations", module: "SALES_POS", group: "Sell" },
   { href: "/app/inventory", label: "Inventory", module: "INVENTORY", group: "Sell" },
   { href: "/app/procurement", label: "Procurement", module: "PROCUREMENT", group: "Sell" },
   { href: "/app/finance", label: "Finance", module: "FINANCE", group: "Sell" },
