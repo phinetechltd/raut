@@ -641,4 +641,52 @@ void main() {
       expect(await db.count('orders'), 0);
     });
   });
+
+  group('Tasks', () {
+    test('lists open tasks mirrored from the office, soonest due first', () async {
+      await db.upsertAll('tasks', [
+        {'id': 't-1', 'title': 'Call back Westlands', 'status': 'OPEN', 'priority': 'NORMAL', 'dueAt': '2026-01-10T00:00:00.000Z'},
+        {'id': 't-2', 'title': 'Collect cheque', 'status': 'OPEN', 'priority': 'HIGH', 'dueAt': '2026-01-05T00:00:00.000Z'},
+        {'id': 't-3', 'title': 'Already handled', 'status': 'DONE', 'priority': 'NORMAL'},
+      ]);
+
+      final open = await repo.tasks();
+      expect(open.map((t) => t.id).toList(), ['t-2', 't-1'], reason: 'sorted by due date');
+      expect(await repo.openTaskCount(), 2);
+      expect((await repo.tasks(openOnly: false)).length, 3);
+    });
+
+    test('completing a task queues an update and marks it done locally', () async {
+      await db.upsertAll('tasks', [
+        {'id': 't-9', 'title': 'Deliver samples', 'status': 'OPEN', 'priority': 'NORMAL'},
+      ]);
+
+      await repo.setTaskStatus('t-9', 'DONE');
+
+      final pending = await outbox.pending();
+      expect(pending.single.type, OpType.taskUpdate);
+      expect(pending.single.payload['id'], 't-9');
+      expect(pending.single.payload['status'], 'DONE');
+
+      final task = (await repo.tasks(openOnly: false)).single;
+      expect(task.isDone, isTrue);
+    });
+
+    test('a task raised in the field is queued and shows immediately', () async {
+      await repo.createTask(title: 'Chase order', priority: 'HIGH');
+
+      final pending = await outbox.pending();
+      expect(pending.single.type, OpType.taskCreate);
+      expect(pending.single.payload['title'], 'Chase order');
+
+      final open = await repo.tasks();
+      expect(open.single.title, 'Chase order');
+      expect(open.single.id, startsWith('local:'));
+
+      // Completing a not-yet-synced task does not queue an update — its create
+      // still carries the latest state and the server has no row to patch.
+      await repo.setTaskStatus(open.single.id, 'DONE');
+      expect(await outbox.pendingCount(), 1);
+    });
+  });
 }

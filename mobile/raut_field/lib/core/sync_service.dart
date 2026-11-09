@@ -320,7 +320,7 @@ class SyncService extends ChangeNotifier {
   /// after the visit was created — is rejected for ever, so the outbox never
   /// drains and "All your work has been sent" never becomes true.
   Future<void> _adoptServerId(String uuid, String serverId, String? entityType) async {
-    const tables = {'Customer': 'customers', 'Visit': 'visits'};
+    const tables = {'Customer': 'customers', 'Visit': 'visits', 'Task': 'tasks'};
     final table = tables[entityType];
     final localId = 'local:$uuid';
 
@@ -461,6 +461,14 @@ class SyncService extends ChangeNotifier {
       'scheduledAt', 'checkInAt', 'checkInLat', 'checkInLng', 'checkOutAt',
       'geofenceVerified', 'distanceFromCustomerM', 'durationMin', 'outcome',
       'notes', 'updatedAt',
+    ]);
+
+    // CRM tasks the rep owns. Push runs before pull, so a task the rep ticked
+    // off offline has already been accepted by the time its row comes back here
+    // with the new status; replacing the local row (clearing `dirty`) is right.
+    await mirror('tasks', 'tasks', const [
+      'id', 'title', 'description', 'dueAt', 'status', 'priority',
+      'assignedToId', 'customerId', 'dealId', 'updatedAt',
     ]);
 
     await mirror('invoices', 'invoices', const [

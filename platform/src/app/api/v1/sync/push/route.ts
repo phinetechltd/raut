@@ -62,6 +62,8 @@ const operationSchema = z.object({
     "location.batch",
     "route.odometer",
     "delivery.deliver",
+    "task.create",
+    "task.update",
   ]),
   /** Client timestamp of when the rep performed the action. */
   at: z.string().optional(),
@@ -112,6 +114,8 @@ const OPERATION_PERMISSION: Record<z.infer<typeof operationSchema>["type"], Perm
   // field record, like a breadcrumb, not a route edit.
   "route.odometer": "field:self",
   "delivery.deliver": "delivery:write",
+  "task.create": "task:write",
+  "task.update": "task:write",
 };
 
 export const POST = handler({}, async ({ principal, request }) => {
@@ -572,6 +576,41 @@ async function applyOperation(
         principal.userId,
       );
       return { entityId: note.id, entityType: "DeliveryNote" };
+    }
+
+    case "task.create": {
+      const title = z.string().trim().min(1, "A task needs a title").parse(p.title);
+      const customerId = str("customerId") ? await customerInTenant(companyId, p.customerId) : null;
+      const task = await db.task.create({
+        data: {
+          companyId,
+          title,
+          description: str("description") ?? null,
+          dueAt: str("dueAt") ? new Date(String(p.dueAt)) : null,
+          priority: str("priority") ?? "NORMAL",
+          assignedToId: principal.userId,
+          customerId,
+          createdById: principal.userId,
+        },
+      });
+      return { entityId: task.id, entityType: "Task" };
+    }
+
+    case "task.update": {
+      // A rep may only change the state of a task assigned to them; a foreign
+      // id is not found, not forbidden.
+      const taskId = z.string().min(1).parse(p.id);
+      const own = await db.task.findFirst({
+        where: { id: taskId, companyId, assignedToId: principal.userId },
+        select: { id: true },
+      });
+      if (!own) throw new Error(`Task ${taskId} not found`);
+      const status = z.enum(["OPEN", "DONE", "CANCELLED"]).parse(p.status);
+      const task = await db.task.update({
+        where: { id: taskId },
+        data: { status, completedAt: status === "DONE" ? new Date() : null },
+      });
+      return { entityId: task.id, entityType: "Task" };
     }
 
     default:

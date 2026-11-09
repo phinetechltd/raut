@@ -11,6 +11,7 @@ import '../core/sync_service.dart';
 import '../data/field_repository.dart';
 import '../theme.dart';
 import 'etims_queue_screen.dart';
+import 'tasks_screen.dart';
 
 /// Sync queue, expense claims, account and diagnostics.
 class MoreScreen extends StatelessWidget {
@@ -123,6 +124,28 @@ class MoreScreen extends StatelessWidget {
 
           const Divider(),
           _SectionLabel('Field'),
+
+          if (session.hasModule('CRM'))
+            FutureBuilder<int>(
+              future: context.read<FieldRepository>().openTaskCount(),
+              builder: (context, snap) {
+                final count = snap.data ?? 0;
+                return ListTile(
+                  leading: Icon(
+                    count > 0 ? Icons.checklist_outlined : Icons.check_circle_outline,
+                    color: count > 0 ? RautTheme.brand : RautTheme.success,
+                  ),
+                  title: const Text('My tasks'),
+                  subtitle: Text(
+                    count == 0 ? 'Nothing open' : '$count open task${count == 1 ? '' : 's'}',
+                  ),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const TasksScreen()),
+                  ),
+                );
+              },
+            ),
 
           // Only where the company actually files. A rep at a company that
           // does not use eTIMS should never see a queue that will always be

@@ -41,7 +41,7 @@ class LocalDb {
     final path = _overridePath ?? p.join(await getDatabasesPath(), 'raut_field.db');
     return openDatabase(
       path,
-      version: 4,
+      version: 5,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -172,6 +172,28 @@ class LocalDb {
         'CREATE INDEX IF NOT EXISTS idx_cn_invoice ON credit_notes(invoiceId)',
       );
     }
+
+    if (from < 5) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS tasks (
+          id TEXT PRIMARY KEY,
+          title TEXT NOT NULL,
+          description TEXT,
+          dueAt TEXT,
+          status TEXT,
+          priority TEXT,
+          assignedToId TEXT,
+          customerId TEXT,
+          dealId TEXT,
+          updatedAt TEXT,
+          /* true while a status change is queued but not yet acknowledged */
+          dirty INTEGER DEFAULT 0,
+          /* set when the rep created this task offline and it has not synced */
+          pendingUuid TEXT
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, dueAt)');
+    }
   }
 
   Future<void> _createSchema(Database db, int version) async {
@@ -266,6 +288,24 @@ class LocalDb {
         dirty INTEGER DEFAULT 0
       )
     ''');
+
+    await db.execute('''
+      CREATE TABLE tasks (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT,
+        dueAt TEXT,
+        status TEXT,
+        priority TEXT,
+        assignedToId TEXT,
+        customerId TEXT,
+        dealId TEXT,
+        updatedAt TEXT,
+        dirty INTEGER DEFAULT 0,
+        pendingUuid TEXT
+      )
+    ''');
+    await db.execute('CREATE INDEX idx_tasks_status ON tasks(status, dueAt)');
 
     await db.execute('''
       CREATE TABLE routes (

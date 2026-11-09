@@ -148,6 +148,71 @@ class FieldRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── tasks (CRM) ────────────────────────────────────────────────────────
+
+  Future<List<Task>> tasks({bool openOnly = true}) async {
+    final rows = await _db.query(
+      'tasks',
+      where: openOnly ? "status = 'OPEN'" : null,
+      // Dated tasks first, soonest due at the top; undated fall to the end.
+      orderBy: 'CASE WHEN dueAt IS NULL THEN 1 ELSE 0 END ASC, dueAt ASC',
+    );
+    return rows.map(Task.fromRow).toList();
+  }
+
+  Future<int> openTaskCount() async {
+    final db = await _db.database;
+    final r = await db.rawQuery("SELECT COUNT(*) AS c FROM tasks WHERE status = 'OPEN'");
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// Creates a task offline, assigned to the rep.
+  Future<void> createTask({
+    required String title,
+    String? description,
+    DateTime? dueAt,
+    String priority = 'NORMAL',
+    String? customerId,
+  }) async {
+    final due = dueAt == null ? null : _utc(dueAt);
+    final uuid = await _outbox.enqueue(OpType.taskCreate, {
+      'title': title,
+      'description': description,
+      'dueAt': due,
+      'priority': priority,
+      'customerId': customerId,
+    });
+    await _db.insert('tasks', {
+      'id': 'local:$uuid',
+      'title': title,
+      'description': description,
+      'dueAt': due,
+      'status': 'OPEN',
+      'priority': priority,
+      'customerId': customerId,
+      'updatedAt': _utc(DateTime.now()),
+      'dirty': 1,
+      'pendingUuid': uuid,
+    });
+    notifyListeners();
+  }
+
+  /// Marks a task done, or reopens it. Queued for sync unless it is a task the
+  /// rep created offline that has not synced yet — that create still carries
+  /// the latest state and the server has no row to update.
+  Future<void> setTaskStatus(String taskId, String status) async {
+    if (!taskId.startsWith('local:')) {
+      await _outbox.enqueue(OpType.taskUpdate, {'id': taskId, 'status': status});
+    }
+    await _db.update(
+      'tasks',
+      {'status': status, 'dirty': 1, 'updatedAt': _utc(DateTime.now())},
+      where: 'id = ?',
+      whereArgs: [taskId],
+    );
+    notifyListeners();
+  }
+
   // ── products ─────────────────────────────────────────────────────────
 
   Future<List<Product>> products({String? search, bool vanOnly = false}) async {

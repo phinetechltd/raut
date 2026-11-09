@@ -58,6 +58,7 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
     creditNotes,
     payments,
     expenseCategories,
+    tasks,
   ] = await Promise.all([
     db.customer.findMany({
       where: {
@@ -173,6 +174,21 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
       where: { companyId, active: true },
       select: { id: true, name: true, code: true },
     }),
+
+    // CRM tasks the rep is responsible for. A rep only ever carries their own;
+    // the office roles do not use the handset, so self-scope is the useful case.
+    db.task.findMany({
+      where: {
+        companyId,
+        ...(selfOnly ? { assignedToId: principal.userId } : {}),
+        ...(newer ? { updatedAt: newer } : {}),
+      },
+      select: {
+        id: true, title: true, description: true, dueAt: true, status: true,
+        priority: true, assignedToId: true, customerId: true, dealId: true,
+        updatedAt: true,
+      },
+    }),
   ]);
 
   // Referential closure.
@@ -190,6 +206,7 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
   for (const o of orders) referenced.add(o.customerId);
   for (const i of invoices) referenced.add(i.customerId);
   for (const p of payments) referenced.add(p.customerId);
+  for (const t of tasks) if (t.customerId) referenced.add(t.customerId);
   for (const c of customers) referenced.delete(c.id);
 
   if (referenced.size > 0) {
@@ -223,6 +240,7 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
     invoices: invoices.length,
     creditNotes: creditNotes.length,
     payments: payments.length,
+    tasks: tasks.length,
   };
 
   return {
@@ -244,6 +262,7 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
       creditNotes,
       payments,
       expenseCategories,
+      tasks,
     },
   };
 });

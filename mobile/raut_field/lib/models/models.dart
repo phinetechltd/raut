@@ -191,6 +191,47 @@ class Visit {
       );
 }
 
+/// A CRM task assigned to the rep. Mirrored from the office and completed in
+/// the field; a completion is queued like any other offline write.
+class Task {
+  Task({
+    required this.id,
+    required this.title,
+    required this.status,
+    this.description,
+    this.dueAt,
+    this.priority = 'NORMAL',
+    this.customerId,
+    this.dirty = false,
+  });
+
+  final String id;
+  final String title;
+  final String status;
+  final String? description;
+  final DateTime? dueAt;
+  final String priority;
+  final String? customerId;
+
+  /// A status change is queued but the server has not confirmed it.
+  final bool dirty;
+
+  bool get isDone => status == 'DONE';
+  bool get isOpen => status == 'OPEN';
+  bool get isOverdue => isOpen && dueAt != null && dueAt!.isBefore(DateTime.now());
+
+  factory Task.fromRow(Map<String, Object?> r) => Task(
+        id: _str(r['id']),
+        title: _str(r['title']),
+        status: _str(r['status'], 'OPEN'),
+        description: r['description'] as String?,
+        dueAt: _date(r['dueAt']),
+        priority: _str(r['priority'], 'NORMAL'),
+        customerId: r['customerId'] as String?,
+        dirty: _bool(r['dirty']),
+      );
+}
+
 class RouteStop {
   RouteStop({
     required this.id,

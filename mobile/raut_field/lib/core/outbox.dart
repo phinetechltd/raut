@@ -20,6 +20,8 @@ class OpType {
   static const customerUpdate = 'customer.update';
   static const activityCreate = 'activity.create';
   static const expenseCreate = 'expense.create';
+  static const taskCreate = 'task.create';
+  static const taskUpdate = 'task.update';
 }
 
 class OutboxEntry {
@@ -81,6 +83,8 @@ class OutboxEntry {
         OpType.customerUpdate => 'Customer update',
         OpType.activityCreate => 'Note',
         OpType.expenseCreate => 'Expense claim',
+        OpType.taskCreate => 'New task',
+        OpType.taskUpdate => 'Task update',
         _ => type,
       };
 }
