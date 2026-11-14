@@ -86,6 +86,9 @@ model Company {
   deals               Deal[]
   pipelineStages      PipelineStage[]
   tasks               Task[]
+  emailMessages       EmailMessage[]
+  emailCampaigns      EmailCampaign[]
+  emailUnsubscribes   EmailUnsubscribe[]
   smsTemplates        SmsTemplate[]
   smsMessages         SmsMessage[]
   auditLogs           AuditLog[]
@@ -1681,6 +1684,78 @@ model SmsMessage {
 
   @@index([companyId, status])
   @@index([companyId, createdAt])
+}
+
+/// Every email the platform sends, one-off or part of a campaign. Persisted
+/// first, dispatched second, like SmsMessage — a transport outage leaves a
+/// queue to retry, not lost mail.
+model EmailMessage {
+  id         String  @id @default(cuid())
+  companyId  String
+  customerId String?
+  campaignId String?
+
+  toEmail  String
+  subject  String
+  bodyHtml String
+
+  /// QUEUED | SENT | FAILED | SKIPPED (unsubscribed / no address)
+  status      String  @default("QUEUED")
+  provider    String  @default("console")
+  providerRef String?
+  error       String?
+
+  sentAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  campaign EmailCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, createdAt])
+  @@index([campaignId])
+}
+
+/// A bulk email to a segment of customers.
+model EmailCampaign {
+  id        String @id @default(cuid())
+  companyId String
+
+  name     String
+  subject  String
+  bodyHtml String
+
+  /// Audience filters; null means all active customers who have an address.
+  segment      String?
+  customerType String?
+  territoryId  String?
+
+  /// DRAFT | SENDING | SENT | FAILED
+  status          String @default("DRAFT")
+  totalRecipients Int    @default(0)
+  sentCount       Int    @default(0)
+  failedCount     Int    @default(0)
+
+  createdById String?
+  sentAt      DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  company  Company        @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  messages EmailMessage[]
+
+  @@index([companyId, status])
+}
+
+/// A customer who has opted out of this company's bulk email.
+model EmailUnsubscribe {
+  id        String   @id @default(cuid())
+  companyId String
+  email     String
+  createdAt DateTime @default(now())
+
+  company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
+
+  @@unique([companyId, email])
 }
 
 /// A gateway collection attempt, kept apart from `Payment`.

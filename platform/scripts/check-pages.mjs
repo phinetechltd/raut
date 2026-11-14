@@ -48,6 +48,7 @@ const ROLES = [
       ["/app/sales/targets", "with commission earned"],
       ["/app/routes", "Routing &amp; Geofencing"],
       ["/app/sms", "Message log"],
+      ["/app/email", "bulk campaigns to a segment"],
       ["/app/reports", "Product mix"],
       ["/app/settings", "Stock locations"],
       ["/app/settings/payments", "Payments &amp; Tax"],

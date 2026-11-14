@@ -98,10 +98,12 @@ export type Permission =
   // Geofencing
   | "geofence:read"
   | "geofence:write"
-  // SMS
+  // SMS & email (the Communication module)
   | "sms:read"
   | "sms:send"
   | "sms:template"
+  | "email:read"
+  | "email:send"
   // Analytics
   | "report:read"
   | "report:advanced"
@@ -186,6 +188,8 @@ const PERMISSION_MODULE: Partial<Record<Permission, ModuleKey>> = {
   "sms:read": "SMS",
   "sms:send": "SMS",
   "sms:template": "SMS",
+  "email:read": "SMS",
+  "email:send": "SMS",
 
   "report:advanced": "ANALYTICS",
   // Owned by Finance, not Analytics, so the API and the Finance console page
@@ -273,6 +277,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "sms:read",
     "sms:send",
     "sms:template",
+    "email:read",
+    "email:send",
     "report:advanced",
     "report:financial",
     "etims:read",
@@ -319,6 +325,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "geofence:read",
     "sms:read",
     "sms:send",
+    "email:read",
+    "email:send",
     "report:advanced",
     "report:financial",
     "etims:read",
@@ -362,6 +370,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "geofence:write",
     "sms:read",
     "sms:send",
+    "email:read",
+    "email:send",
     "report:advanced",
     "report:financial",
     "etims:read",
@@ -392,6 +402,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "finance:read",
     "sms:read",
     "sms:send",
+    "email:read",
+    "email:send",
     "report:advanced",
     "report:financial",
     "etims:read",
