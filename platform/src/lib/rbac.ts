@@ -55,6 +55,8 @@ export type Permission =
   | "deal:write"
   | "task:read"
   | "task:write"
+  | "meeting:read"
+  | "meeting:write"
   // Sales & POS
   | "product:read"
   | "quotation:read"
@@ -145,6 +147,8 @@ const PERMISSION_MODULE: Partial<Record<Permission, ModuleKey>> = {
   "deal:write": "CRM",
   "task:read": "CRM",
   "task:write": "CRM",
+  "meeting:read": "CRM",
+  "meeting:write": "CRM",
 
   "quotation:read": "SALES_POS",
   "quotation:write": "SALES_POS",
@@ -244,6 +248,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "deal:write",
     "task:read",
     "task:write",
+    "meeting:read",
+    "meeting:write",
     "product:write",
     "quotation:read",
     "quotation:write",
@@ -307,6 +313,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "deal:write",
     "task:read",
     "task:write",
+    "meeting:read",
+    "meeting:write",
     "order:read",
     "order:write",
     "invoice:read",
@@ -357,6 +365,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "deal:write",
     "task:read",
     "task:write",
+    "meeting:read",
+    "meeting:write",
     "quotation:read",
     "quotation:write",
     "order:read",
@@ -399,6 +409,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     ...CORE_READ,
     "task:read",
     "task:write",
+    "meeting:read",
+    "meeting:write",
     "invoice:read",
     "invoice:write",
     "invoice:approve",
@@ -453,6 +465,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "deal:write",
     "task:read",
     "task:write",
+    "meeting:read",
+    "meeting:write",
     "order:read",
     "order:write",
     "invoice:read",

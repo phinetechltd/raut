@@ -91,6 +91,7 @@ model Company {
   emailUnsubscribes   EmailUnsubscribe[]
   conversations       Conversation[]
   messages            Message[]
+  meetings            Meeting[]
   smsTemplates        SmsTemplate[]
   smsMessages         SmsMessage[]
   auditLogs           AuditLog[]
@@ -400,6 +401,7 @@ model Customer {
   deliveryNotes  DeliveryNote[]
   deals          Deal[]
   tasks          Task[]
+  meetings       Meeting[]
 
   @@unique([companyId, code])
   @@index([companyId, status])
@@ -1800,6 +1802,32 @@ model Message {
 
   @@index([conversationId, createdAt])
   @@index([companyId, createdAt])
+}
+
+/// An online meeting with a customer or colleagues, held in a Jitsi room.
+/// roomName is the room slug; the full join URL is derived from JITSI_BASE so
+/// the provider host can change without rewriting stored links.
+model Meeting {
+  id          String   @id @default(cuid())
+  companyId   String
+  customerId  String?
+  title       String
+  scheduledAt DateTime
+  durationMin Int      @default(30)
+  roomName    String
+  /// SCHEDULED | DONE | CANCELLED
+  status      String   @default("SCHEDULED")
+  notes       String?
+  hostId      String?
+  createdById String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: SetNull)
+
+  @@index([companyId, scheduledAt])
 }
 
 /// A gateway collection attempt, kept apart from `Payment`.
