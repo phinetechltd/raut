@@ -232,6 +232,36 @@ class Task {
       );
 }
 
+/// One message in the rep's thread with the office.
+class ChatMessage {
+  ChatMessage({
+    required this.id,
+    required this.senderId,
+    required this.body,
+    required this.createdAt,
+    this.isBroadcast = false,
+    this.pending = false,
+  });
+
+  final String id;
+  final String senderId;
+  final String body;
+  final DateTime createdAt;
+  final bool isBroadcast;
+
+  /// Written offline, not yet acknowledged by the server.
+  final bool pending;
+
+  factory ChatMessage.fromRow(Map<String, Object?> r) => ChatMessage(
+        id: _str(r['id']),
+        senderId: _str(r['senderId']),
+        body: _str(r['body']),
+        createdAt: _date(r['createdAt']) ?? DateTime.now(),
+        isBroadcast: _bool(r['isBroadcast']),
+        pending: r['pendingUuid'] != null,
+      );
+}
+
 class RouteStop {
   RouteStop({
     required this.id,

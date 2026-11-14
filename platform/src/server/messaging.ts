@@ -98,14 +98,21 @@ export async function repThread(principal: Principal) {
 }
 
 export async function repSend(principal: Principal, body: string) {
-  const companyId = principal.companyId!;
   if (!body.trim()) throw conflict("A message cannot be empty");
-  const conversation = await ensureConversation(companyId, principal.userId);
+  return repSendRaw(principal.companyId!, principal.userId, body);
+}
+
+/**
+ * A rep posts to their own thread, by raw ids. Used by the offline sync drain,
+ * which has the company and user ids but not a full principal.
+ */
+export async function repSendRaw(companyId: string, userId: string, body: string) {
+  const conversation = await ensureConversation(companyId, userId);
   const now = new Date();
-  const [message] = await Promise.all([
-    db.message.create({ data: { companyId, conversationId: conversation.id, senderId: principal.userId, body: body.trim() } }),
-    db.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: now, repLastReadAt: now } }),
-  ]);
+  const message = await db.message.create({
+    data: { companyId, conversationId: conversation.id, senderId: userId, body: body.trim() },
+  });
+  await db.conversation.update({ where: { id: conversation.id }, data: { lastMessageAt: now, repLastReadAt: now } });
   return message;
 }
 

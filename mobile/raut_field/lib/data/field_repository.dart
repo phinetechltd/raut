@@ -213,6 +213,38 @@ class FieldRepository extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ── messages (office ↔ field) ────────────────────────────────────────────
+
+  Future<List<ChatMessage>> chatMessages() async {
+    final rows = await _db.query('messages', orderBy: 'createdAt ASC');
+    return rows.map(ChatMessage.fromRow).toList();
+  }
+
+  /// Unread = messages from the office newer than the rep's last read time.
+  Future<int> unreadMessageCount(String selfUserId, DateTime? lastRead) async {
+    final db = await _db.database;
+    final r = await db.rawQuery(
+      'SELECT COUNT(*) AS c FROM messages WHERE senderId != ? AND createdAt > ?',
+      [selfUserId, (lastRead ?? DateTime.fromMillisecondsSinceEpoch(0)).toUtc().toIso8601String()],
+    );
+    return (r.first['c'] as int?) ?? 0;
+  }
+
+  /// Sends a message to the office offline, shown immediately.
+  Future<void> sendChatMessage({required String senderId, required String body}) async {
+    final uuid = await _outbox.enqueue(OpType.messageCreate, {'body': body});
+    await _db.insert('messages', {
+      'id': 'local:$uuid',
+      'conversationId': null,
+      'senderId': senderId,
+      'body': body,
+      'isBroadcast': 0,
+      'createdAt': _utc(DateTime.now()),
+      'pendingUuid': uuid,
+    });
+    notifyListeners();
+  }
+
   // ── products ─────────────────────────────────────────────────────────
 
   Future<List<Product>> products({String? search, bool vanOnly = false}) async {

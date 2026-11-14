@@ -59,6 +59,7 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
     payments,
     expenseCategories,
     tasks,
+    messages,
   ] = await Promise.all([
     db.customer.findMany({
       where: {
@@ -189,6 +190,16 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
         updatedAt: true,
       },
     }),
+
+    // The rep's thread with the office. Messages are immutable, so a plain
+    // createdAt delta is a complete sync.
+    selfOnly
+      ? db.message.findMany({
+          where: { companyId, conversation: { repId: principal.userId }, ...(newer ? { createdAt: newer } : {}) },
+          select: { id: true, conversationId: true, senderId: true, body: true, isBroadcast: true, createdAt: true },
+          orderBy: { createdAt: "asc" },
+        })
+      : Promise.resolve([]),
   ]);
 
   // Referential closure.
@@ -241,6 +252,7 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
     creditNotes: creditNotes.length,
     payments: payments.length,
     tasks: tasks.length,
+    messages: messages.length,
   };
 
   return {
@@ -263,6 +275,7 @@ export const GET = handler({}, async ({ principal, searchParams }) => {
       payments,
       expenseCategories,
       tasks,
+      messages,
     },
   };
 });

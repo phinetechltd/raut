@@ -689,4 +689,33 @@ void main() {
       expect(await outbox.pendingCount(), 1);
     });
   });
+
+  group('Messages', () {
+    test('lists mirrored messages and counts office ones as unread', () async {
+      await db.upsertAll('messages', [
+        {'id': 'm-1', 'conversationId': 'c-1', 'senderId': 'office-user', 'body': 'Visit the depot', 'isBroadcast': 0, 'createdAt': '2026-01-01T08:00:00.000Z'},
+        {'id': 'm-2', 'conversationId': 'c-1', 'senderId': 'rep-self', 'body': 'On it', 'isBroadcast': 0, 'createdAt': '2026-01-01T09:00:00.000Z'},
+      ]);
+
+      final msgs = await repo.chatMessages();
+      expect(msgs.map((m) => m.id).toList(), ['m-1', 'm-2'], reason: 'oldest first');
+
+      // From the rep's view, only the office message is unread, and only when it
+      // is newer than their last-read time.
+      expect(await repo.unreadMessageCount('rep-self', null), 1);
+      expect(await repo.unreadMessageCount('rep-self', DateTime.parse('2026-01-01T08:30:00.000Z')), 0);
+    });
+
+    test('a message written offline is queued and shows immediately', () async {
+      await repo.sendChatMessage(senderId: 'rep-self', body: 'Need more stock');
+
+      final pending = await outbox.pending();
+      expect(pending.single.type, OpType.messageCreate);
+      expect(pending.single.payload['body'], 'Need more stock');
+
+      final mine = (await repo.chatMessages()).where((m) => m.body == 'Need more stock').toList();
+      expect(mine.single.pending, isTrue);
+      expect(mine.single.id, startsWith('local:'));
+    });
+  });
 }

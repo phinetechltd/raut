@@ -22,6 +22,7 @@ class OpType {
   static const expenseCreate = 'expense.create';
   static const taskCreate = 'task.create';
   static const taskUpdate = 'task.update';
+  static const messageCreate = 'message.create';
 }
 
 class OutboxEntry {
@@ -85,6 +86,7 @@ class OutboxEntry {
         OpType.expenseCreate => 'Expense claim',
         OpType.taskCreate => 'New task',
         OpType.taskUpdate => 'Task update',
+        OpType.messageCreate => 'Message',
         _ => type,
       };
 }

@@ -9,6 +9,7 @@ import { denialReason, type Permission } from "@/lib/rbac";
 import { companyIdOf } from "@/lib/tenant";
 import { checkIn, checkOut } from "@/server/field";
 import { markDelivered } from "@/server/delivery";
+import { repSendRaw } from "@/server/messaging";
 import { recordOdometer } from "@/server/routing";
 import { createInvoice, createSalesOrder, notifyPayment, recordPayment } from "@/server/sales";
 import { storePings } from "@/server/tracking";
@@ -64,6 +65,7 @@ const operationSchema = z.object({
     "delivery.deliver",
     "task.create",
     "task.update",
+    "message.create",
   ]),
   /** Client timestamp of when the rep performed the action. */
   at: z.string().optional(),
@@ -116,6 +118,7 @@ const OPERATION_PERMISSION: Record<z.infer<typeof operationSchema>["type"], Perm
   "delivery.deliver": "delivery:write",
   "task.create": "task:write",
   "task.update": "task:write",
+  "message.create": "message:write",
 };
 
 export const POST = handler({}, async ({ principal, request }) => {
@@ -611,6 +614,12 @@ async function applyOperation(
         data: { status, completedAt: status === "DONE" ? new Date() : null },
       });
       return { entityId: task.id, entityType: "Task" };
+    }
+
+    case "message.create": {
+      const body = z.string().trim().min(1, "A message cannot be empty").parse(p.body);
+      const message = await repSendRaw(companyId, principal.userId, body);
+      return { entityId: message.id, entityType: "Message" };
     }
 
     default:

@@ -320,7 +320,7 @@ class SyncService extends ChangeNotifier {
   /// after the visit was created — is rejected for ever, so the outbox never
   /// drains and "All your work has been sent" never becomes true.
   Future<void> _adoptServerId(String uuid, String serverId, String? entityType) async {
-    const tables = {'Customer': 'customers', 'Visit': 'visits', 'Task': 'tasks'};
+    const tables = {'Customer': 'customers', 'Visit': 'visits', 'Task': 'tasks', 'Message': 'messages'};
     final table = tables[entityType];
     final localId = 'local:$uuid';
 
@@ -469,6 +469,12 @@ class SyncService extends ChangeNotifier {
     await mirror('tasks', 'tasks', const [
       'id', 'title', 'description', 'dueAt', 'status', 'priority',
       'assignedToId', 'customerId', 'dealId', 'updatedAt',
+    ]);
+
+    // The rep's thread with the office. Messages are immutable; the office side
+    // the rep sent offline comes back here and replaces the local pending row.
+    await mirror('messages', 'messages', const [
+      'id', 'conversationId', 'senderId', 'body', 'isBroadcast', 'createdAt',
     ]);
 
     await mirror('invoices', 'invoices', const [

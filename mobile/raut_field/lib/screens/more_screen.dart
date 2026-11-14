@@ -1,6 +1,7 @@
 ﻿import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/auth_service.dart';
 import '../core/config.dart';
@@ -11,6 +12,7 @@ import '../core/sync_service.dart';
 import '../data/field_repository.dart';
 import '../theme.dart';
 import 'etims_queue_screen.dart';
+import 'messages_screen.dart';
 import 'tasks_screen.dart';
 
 /// Sync queue, expense claims, account and diagnostics.
@@ -124,6 +126,26 @@ class MoreScreen extends StatelessWidget {
 
           const Divider(),
           _SectionLabel('Field'),
+
+          if (session.hasModule('FIELD_SALES') && session.can('message:read'))
+            FutureBuilder<int>(
+              future: _unreadMessages(context, session.userId),
+              builder: (context, snap) {
+                final count = snap.data ?? 0;
+                return ListTile(
+                  leading: Icon(
+                    count > 0 ? Icons.mark_chat_unread_outlined : Icons.chat_bubble_outline,
+                    color: count > 0 ? RautTheme.brand : Colors.grey.shade600,
+                  ),
+                  title: const Text('Messages'),
+                  subtitle: Text(count == 0 ? 'Chat with the office' : '$count unread'),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(builder: (_) => const MessagesScreen()),
+                  ),
+                );
+              },
+            ),
 
           if (session.hasModule('CRM'))
             FutureBuilder<int>(
@@ -310,6 +332,13 @@ class MoreScreen extends StatelessWidget {
 
     if (force == true) await auth.signOut(force: true);
   }
+}
+
+Future<int> _unreadMessages(BuildContext context, String userId) async {
+  final repo = context.read<FieldRepository>();
+  final prefs = await SharedPreferences.getInstance();
+  final raw = prefs.getString(messagesLastReadKey);
+  return repo.unreadMessageCount(userId, raw == null ? null : DateTime.tryParse(raw));
 }
 
 class _SectionLabel extends StatelessWidget {

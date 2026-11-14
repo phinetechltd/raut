@@ -41,7 +41,7 @@ class LocalDb {
     final path = _overridePath ?? p.join(await getDatabasesPath(), 'raut_field.db');
     return openDatabase(
       path,
-      version: 5,
+      version: 6,
       onConfigure: (db) async {
         await db.execute('PRAGMA foreign_keys = ON');
       },
@@ -194,6 +194,22 @@ class LocalDb {
       ''');
       await db.execute('CREATE INDEX IF NOT EXISTS idx_tasks_status ON tasks(status, dueAt)');
     }
+
+    if (from < 6) {
+      await db.execute('''
+        CREATE TABLE IF NOT EXISTS messages (
+          id TEXT PRIMARY KEY,
+          conversationId TEXT,
+          senderId TEXT,
+          body TEXT NOT NULL,
+          isBroadcast INTEGER DEFAULT 0,
+          createdAt TEXT,
+          /* set when the rep wrote this message offline and it has not synced */
+          pendingUuid TEXT
+        )
+      ''');
+      await db.execute('CREATE INDEX IF NOT EXISTS idx_messages_created ON messages(createdAt)');
+    }
   }
 
   Future<void> _createSchema(Database db, int version) async {
@@ -306,6 +322,19 @@ class LocalDb {
       )
     ''');
     await db.execute('CREATE INDEX idx_tasks_status ON tasks(status, dueAt)');
+
+    await db.execute('''
+      CREATE TABLE messages (
+        id TEXT PRIMARY KEY,
+        conversationId TEXT,
+        senderId TEXT,
+        body TEXT NOT NULL,
+        isBroadcast INTEGER DEFAULT 0,
+        createdAt TEXT,
+        pendingUuid TEXT
+      )
+    ''');
+    await db.execute('CREATE INDEX idx_messages_created ON messages(createdAt)');
 
     await db.execute('''
       CREATE TABLE routes (
