@@ -49,12 +49,17 @@ function smtpTransport(): Transporter | null {
   const host = process.env.SMTP_HOST;
   if (!host) return null;
   const port = Number(process.env.SMTP_PORT ?? 587);
+  // A loopback relay (the mail server on the same host) presents a certificate
+  // for its public name, not 127.0.0.1, so opportunistic STARTTLS would fail
+  // verification. Skip the check there only — the hop never leaves the machine.
+  const isLocal = host === "127.0.0.1" || host === "localhost" || host === "::1";
   cachedTransport = nodemailer.createTransport({
     host,
     port,
     // 465 is implicit TLS; 587/25 upgrade with STARTTLS.
     secure: process.env.SMTP_SECURE ? process.env.SMTP_SECURE === "true" : port === 465,
     auth: process.env.SMTP_USER ? { user: process.env.SMTP_USER, pass: process.env.SMTP_PASS ?? "" } : undefined,
+    ...(isLocal ? { tls: { rejectUnauthorized: false } } : {}),
   });
   return cachedTransport;
 }
