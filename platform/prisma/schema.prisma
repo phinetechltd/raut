@@ -89,6 +89,8 @@ model Company {
   emailMessages       EmailMessage[]
   emailCampaigns      EmailCampaign[]
   emailUnsubscribes   EmailUnsubscribe[]
+  conversations       Conversation[]
+  messages            Message[]
   smsTemplates        SmsTemplate[]
   smsMessages         SmsMessage[]
   auditLogs           AuditLog[]
@@ -1756,6 +1758,48 @@ model EmailUnsubscribe {
   company Company @relation(fields: [companyId], references: [id], onDelete: Cascade)
 
   @@unique([companyId, email])
+}
+
+/// A message thread between the office and one field rep. One per rep: the
+/// office side is shared by every manager, the rep side is that rep alone.
+/// Read state is a per-side watermark rather than a flag per message.
+model Conversation {
+  id        String @id @default(cuid())
+  companyId String
+  repId     String
+
+  officeLastReadAt DateTime?
+  repLastReadAt    DateTime?
+  lastMessageAt    DateTime  @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  company  Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  messages Message[]
+
+  @@unique([companyId, repId])
+  @@index([companyId, lastMessageAt])
+}
+
+/// One message in a conversation. senderId is a scalar user id (like
+/// Customer.createdById); a broadcast is the same message fanned out to every
+/// rep's thread, flagged so the UI can mark it.
+model Message {
+  id             String  @id @default(cuid())
+  companyId      String
+  conversationId String
+  senderId       String
+  body           String
+  isBroadcast    Boolean @default(false)
+
+  createdAt DateTime @default(now())
+
+  company      Company      @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@index([conversationId, createdAt])
+  @@index([companyId, createdAt])
 }
 
 /// A gateway collection attempt, kept apart from `Payment`.

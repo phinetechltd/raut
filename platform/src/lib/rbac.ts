@@ -88,6 +88,8 @@ export type Permission =
   | "visit:write"
   | "target:write"
   | "field:self"
+  | "message:read"
+  | "message:write"
   // Routing
   | "route:read"
   | "route:write"
@@ -174,6 +176,8 @@ const PERMISSION_MODULE: Partial<Record<Permission, ModuleKey>> = {
   "visit:write": "FIELD_SALES",
   "target:write": "FIELD_SALES",
   "field:self": "FIELD_SALES",
+  "message:read": "FIELD_SALES",
+  "message:write": "FIELD_SALES",
 
   "route:read": "ROUTING",
   "route:write": "ROUTING",
@@ -265,6 +269,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "finance:read",
     "visit:read",
     "visit:write",
+    "message:read",
+    "message:write",
     "target:write",
     "route:read",
     "route:write",
@@ -318,6 +324,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "expense:approve",
     "visit:read",
     "visit:write",
+    "message:read",
+    "message:write",
     "route:read",
     "route:write",
     "vehicle:read",
@@ -360,6 +368,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "stock:read",
     "visit:read",
     "visit:write",
+    "message:read",
+    "message:write",
     "target:write",
     "route:read",
     "route:write",
@@ -451,6 +461,8 @@ const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
     "stock:read",
     "visit:read",
     "visit:write",
+    "message:read",
+    "message:write",
     "route:read",
     // The plate and odometer of the van they are driving today, nothing more.
     "vehicle:read",
