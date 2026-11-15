@@ -205,6 +205,60 @@
     background: var(--text-muted);
   }
 
+  /* ── Landing-page motion ────────────────────────────────────────────
+     All of this is neutralised by the reduced-motion rule below. */
+  @keyframes lp-rise {
+    from { opacity: 0; transform: translateY(18px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes lp-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-12px); }
+  }
+  @keyframes lp-pan {
+    0% { background-position: 0% 50%; }
+    100% { background-position: 100% 50%; }
+  }
+  @keyframes lp-pulse-ring {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent-green-500) 55%, transparent); }
+    70% { box-shadow: 0 0 0 10px transparent; }
+    100% { box-shadow: 0 0 0 0 transparent; }
+  }
+
+  .lp-rise { animation: lp-rise 0.7s cubic-bezier(0.16, 0.84, 0.44, 1) both; }
+  .lp-float { animation: lp-float 6s ease-in-out infinite; }
+  .lp-live-dot { animation: lp-pulse-ring 2.2s ease-out infinite; }
+
+  /* Scroll reveal. Hidden only once the client wrapper arms it, so no-JS and
+     crawlers always get visible content. */
+  .lp-reveal {
+    opacity: 0;
+    transform: translateY(22px);
+    transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.16, 0.84, 0.44, 1);
+    will-change: opacity, transform;
+  }
+  .lp-reveal[data-shown="true"] { opacity: 1; transform: none; }
+
+  /* Slow drifting colour wash behind the hero. */
+  .lp-aurora {
+    background-image:
+      radial-gradient(55% 75% at 18% 12%, color-mix(in srgb, var(--brand-500) 42%, transparent), transparent 60%),
+      radial-gradient(48% 60% at 88% 28%, color-mix(in srgb, var(--afr-teal) 26%, transparent), transparent 58%),
+      radial-gradient(40% 55% at 60% 90%, color-mix(in srgb, var(--afr-ochre) 20%, transparent), transparent 60%);
+    background-size: 180% 180%;
+    animation: lp-pan 20s ease-in-out infinite alternate;
+  }
+
+  /* Feature cards lift and warm on hover. */
+  .lp-card {
+    transition: transform 0.25s ease, box-shadow 0.25s ease, border-color 0.25s ease;
+  }
+  .lp-card:hover {
+    transform: translateY(-4px);
+    box-shadow: var(--shadow-lg);
+    border-color: color-mix(in srgb, var(--brand-500) 45%, var(--border));
+  }
+
   @media (prefers-reduced-motion: reduce) {
     *,
     *::before,
@@ -212,6 +266,7 @@
       animation-duration: 0.01ms !important;
       transition-duration: 0.01ms !important;
     }
+    .lp-reveal { opacity: 1 !important; transform: none !important; }
   }
 
   /* ── Leaflet ────────────────────────────────────────────────────────
