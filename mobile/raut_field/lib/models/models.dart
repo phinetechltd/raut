@@ -681,7 +681,11 @@ class CartLine {
   String get label => variant == null ? product.name : '${product.name} - ${variant!.name}';
 
   int get grossCents => quantity * unitPriceCents;
-  int get netCents => grossCents - discountCents;
+
+  /// Discount never exceeds the gross line — the same cap the server applies in
+  /// computeLine, so a mistyped discount can't drive the line negative.
+  int get effectiveDiscountCents => discountCents > grossCents ? grossCents : discountCents;
+  int get netCents => grossCents - effectiveDiscountCents;
   int get taxCents => (netCents * product.taxRateBp / 10000).round();
   int get totalCents => netCents + taxCents;
 

@@ -63,7 +63,10 @@ class _OrderScreenState extends State<OrderScreen> {
     });
   }
 
-  int get _subtotal => _cart.values.fold(0, (s, l) => s + l.netCents);
+  // Matches the server's computeTotals so the rep's summary equals the invoice
+  // the office raises: subtotal is gross, discount is shown on its own line.
+  int get _subtotal => _cart.values.fold(0, (s, l) => s + l.grossCents);
+  int get _discount => _cart.values.fold(0, (s, l) => s + l.effectiveDiscountCents);
   int get _tax => _cart.values.fold(0, (s, l) => s + l.taxCents);
   int get _total => _cart.values.fold(0, (s, l) => s + l.totalCents);
 
@@ -275,6 +278,7 @@ class _OrderScreenState extends State<OrderScreen> {
                     ),
                     const SizedBox(height: 12),
                     _TotalRow('Subtotal', _subtotal),
+                    if (_discount > 0) _TotalRow('Discount', -_discount),
                     _TotalRow('VAT', _tax),
                     const Divider(height: 16),
                     _TotalRow('Total', _total, emphasis: true),
