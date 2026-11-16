@@ -193,7 +193,7 @@ class _ReturnScreenState extends State<ReturnScreen> {
                           Text(
                             '${_remaining(l)} of ${l.quantity} can be returned'
                             '${(_credited[l.id] ?? 0) > 0 ? ' · ${_credited[l.id]} already credited' : ''}',
-                            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                            style: TextStyle(fontSize: 12, color: RautTheme.textMuted),
                           ),
                           const SizedBox(height: 8),
                           Row(

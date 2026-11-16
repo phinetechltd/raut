@@ -61,7 +61,7 @@ class _LoginScreenState extends State<LoginScreen> {
                 Text(
                   'Sign in to load your route. You can work offline once your '
                   'data has synced.',
-                  style: TextStyle(color: Colors.grey.shade600, height: 1.4),
+                  style: TextStyle(color: RautTheme.textMuted, height: 1.4),
                 ),
                 const SizedBox(height: 32),
 
@@ -178,7 +178,7 @@ class _LoginScreenState extends State<LoginScreen> {
                         const SizedBox(height: 8),
                         Text(
                           'Change with --dart-define=RAUT_API_BASE=<url>',
-                          style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                          style: TextStyle(fontSize: 11, color: RautTheme.textMuted),
                         ),
                       ],
                     ),

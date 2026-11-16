@@ -313,6 +313,62 @@ class StatusChip extends StatelessWidget {
   }
 }
 
+/// A friendly empty state: a framed icon over a short line, instead of a
+/// paragraph of grey text. Less to read, clearer at a glance, high-contrast.
+class EmptyState extends StatelessWidget {
+  const EmptyState({
+    super.key,
+    required this.icon,
+    required this.title,
+    this.message,
+    this.action,
+  });
+
+  final IconData icon;
+  final String title;
+  final String? message;
+  final Widget? action;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 76,
+              height: 76,
+              decoration: BoxDecoration(
+                color: RautTheme.brand50,
+                shape: BoxShape.circle,
+                border: Border.all(color: RautTheme.brand100),
+              ),
+              child: Icon(icon, size: 36, color: RautTheme.brand600),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              title,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700, color: RautTheme.text),
+            ),
+            if (message != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                message!,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 13.5, height: 1.35, color: RautTheme.textMuted),
+              ),
+            ],
+            if (action != null) ...[const SizedBox(height: 18), action!],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// Section label above grouped content, matching the console's heading.
 class SectionLabel extends StatelessWidget {
   const SectionLabel(this.text, {super.key});

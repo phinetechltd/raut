@@ -431,7 +431,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                     children: [
                       Text(
                         'Current balance',
-                        style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                        style: TextStyle(color: RautTheme.textMuted, fontSize: 13),
                       ),
                       const Spacer(),
                       Text(
@@ -449,7 +449,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                       children: [
                         Text(
                           'After this payment',
-                          style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+                          style: TextStyle(color: RautTheme.textMuted, fontSize: 13),
                         ),
                         const Spacer(),
                         Text(
@@ -522,7 +522,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             style: TextStyle(
               fontSize: 12,
               fontWeight: FontWeight.w600,
-              color: Colors.grey.shade600,
+              color: RautTheme.textMuted,
             ),
           ),
           const SizedBox(height: 8),
@@ -552,7 +552,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                   style: TextStyle(
                     fontSize: 12,
                     fontWeight: FontWeight.w600,
-                    color: Colors.grey.shade600,
+                    color: RautTheme.textMuted,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -625,7 +625,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
             const SizedBox(height: 24),
             Text(
               'This payment will be applied to the oldest invoices first',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 12, color: RautTheme.textMuted),
             ),
             const SizedBox(height: 8),
             Card(
@@ -649,7 +649,7 @@ class _PaymentScreenState extends State<PaymentScreen> {
                                   fontSize: 11.5,
                                   color: inv.isOverdue
                                       ? RautTheme.danger
-                                      : Colors.grey.shade600,
+                                      : RautTheme.textMuted,
                                 ),
                               ),
                         trailing: Row(
@@ -931,7 +931,7 @@ class _AwaitingPaymentDialogState extends State<_AwaitingPaymentDialog> {
             'This screen updates on its own. You can close it and keep '
             'working — the payment will still come through and is checked '
             'again the next time you open this customer.',
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600, height: 1.35),
+            style: TextStyle(fontSize: 12, color: RautTheme.textMuted, height: 1.35),
           ),
         ],
       ),

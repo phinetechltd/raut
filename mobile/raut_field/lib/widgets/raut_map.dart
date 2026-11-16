@@ -82,7 +82,7 @@ class RautMap extends StatelessWidget {
         Center(
           child: Text(
             'No GPS pins to show',
-            style: TextStyle(color: Colors.grey.shade600),
+            style: TextStyle(color: RautTheme.textMuted),
           ),
         ),
       );

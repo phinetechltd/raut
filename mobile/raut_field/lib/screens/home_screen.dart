@@ -5,6 +5,7 @@ import '../core/auth_service.dart';
 import '../core/location_service.dart';
 import '../core/sync_service.dart';
 import '../data/field_repository.dart';
+import '../theme.dart';
 import '../widgets/sync_banner.dart';
 import 'customers_screen.dart';
 import 'more_screen.dart';
@@ -112,7 +113,7 @@ class _TodayScreen extends StatelessWidget {
                 ),
                 Text(
                   session.companyName,
-                  style: TextStyle(color: Colors.grey.shade600),
+                  style: TextStyle(color: RautTheme.textMuted),
                 ),
                 const SizedBox(height: 20),
 
@@ -194,7 +195,7 @@ class _TodayScreen extends StatelessWidget {
                             'Last synced ${_ago(sync.status.lastSyncedAt!)}',
                             style: TextStyle(
                               fontSize: 12,
-                              color: Colors.grey.shade600,
+                              color: RautTheme.textMuted,
                             ),
                           ),
                         ],
@@ -257,7 +258,7 @@ class _Metric extends StatelessWidget {
             ),
             Text(
               label,
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 12, color: RautTheme.textMuted),
             ),
           ],
         ),

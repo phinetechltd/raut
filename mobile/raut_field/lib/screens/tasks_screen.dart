@@ -75,18 +75,11 @@ class _TasksScreenState extends State<TasksScreen> {
             if (tasks.isEmpty) {
               return ListView(
                 children: [
-                  const SizedBox(height: 120),
-                  Center(
-                    child: Padding(
-                      padding: const EdgeInsets.all(32),
-                      child: Text(
-                        _openOnly
-                            ? 'No open tasks. New follow-ups from the office appear here after a sync.'
-                            : 'No tasks yet.',
-                        textAlign: TextAlign.center,
-                        style: TextStyle(color: Colors.grey.shade600, height: 1.4),
-                      ),
-                    ),
+                  const SizedBox(height: 80),
+                  EmptyState(
+                    icon: Icons.checklist_rounded,
+                    title: _openOnly ? 'No open tasks' : 'No tasks yet',
+                    message: _openOnly ? 'New follow-ups appear here after a sync.' : null,
                   ),
                 ],
               );
@@ -127,7 +120,7 @@ class _TasksScreenState extends State<TasksScreen> {
         'Due ${DateFormat('d MMM').format(t.dueAt!.toLocal())}',
         style: TextStyle(
           fontSize: 12,
-          color: t.isOverdue ? RautTheme.danger : Colors.grey.shade600,
+          color: t.isOverdue ? RautTheme.danger : RautTheme.textMuted,
           fontWeight: t.isOverdue ? FontWeight.w600 : FontWeight.normal,
         ),
       ));

@@ -83,17 +83,12 @@ class _MessagesScreenState extends State<MessagesScreen> {
                   final msgs = snap.data;
                   if (msgs == null) return const Center(child: CircularProgressIndicator());
                   if (msgs.isEmpty) {
-                    return ListView(children: [
-                      const SizedBox(height: 120),
-                      Center(
-                        child: Padding(
-                          padding: const EdgeInsets.all(32),
-                          child: Text(
-                            'No messages yet. Write to the office below; it sends when you have signal.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.grey.shade600, height: 1.4),
-                          ),
-                        ),
+                    return ListView(children: const [
+                      SizedBox(height: 80),
+                      EmptyState(
+                        icon: Icons.forum_rounded,
+                        title: 'No messages yet',
+                        message: 'Write to the office below — it sends when you have signal.',
                       ),
                     ]);
                   }

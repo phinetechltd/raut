@@ -223,12 +223,10 @@ class _OrderScreenState extends State<OrderScreen> {
                 ),
                 Expanded(
                   child: _products.isEmpty
-                      ? Center(
-                          child: Text(
-                            'No products on this device yet.\nSync to download the catalogue.',
-                            textAlign: TextAlign.center,
-                            style: TextStyle(color: Colors.grey.shade600),
-                          ),
+                      ? const EmptyState(
+                          icon: Icons.inventory_2_rounded,
+                          title: 'No products yet',
+                          message: 'Sync to download the catalogue.',
                         )
                       : ListView.separated(
                           itemCount: _products.length,
@@ -353,7 +351,7 @@ class _ProductRow extends StatelessWidget {
                   children: [
                     Text(
                       '${Money.format(price)} / $unitLabel',
-                      style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+                      style: TextStyle(fontSize: 12.5, color: RautTheme.textMuted),
                     ),
                     if (van != null) ...[
                       Text(
@@ -364,7 +362,7 @@ class _ProductRow extends StatelessWidget {
                         'van: $van',
                         style: TextStyle(
                           fontSize: 12.5,
-                          color: short ? RautTheme.warning : Colors.grey.shade600,
+                          color: short ? RautTheme.warning : RautTheme.textMuted,
                           fontWeight: short ? FontWeight.w700 : FontWeight.normal,
                         ),
                       ),
@@ -411,7 +409,7 @@ class _ProductRow extends StatelessWidget {
                         // The number a shopkeeper actually wants: what one
                         // bottle costs if they take the whole dozen.
                         '${Money.format(selected!.perBaseUnitCents)} per ${product.unit}',
-                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                        style: TextStyle(fontSize: 11, color: RautTheme.textMuted),
                       ),
                     ),
                 ],

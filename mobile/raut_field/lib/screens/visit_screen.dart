@@ -327,7 +327,7 @@ class _VisitScreenState extends State<VisitScreen> {
                                         fontSize: 11.5,
                                         color: inv.isOverdue
                                             ? RautTheme.danger
-                                            : Colors.grey.shade600,
+                                            : RautTheme.textMuted,
                                       ),
                                     ),
                                 ],
@@ -428,7 +428,7 @@ class _CustomerCard extends StatelessWidget {
                       ),
                       Text(
                         '${customer.code} · ${customer.town ?? "no town"}',
-                        style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+                        style: TextStyle(fontSize: 12.5, color: RautTheme.textMuted),
                       ),
                     ],
                   ),
@@ -448,7 +448,7 @@ class _CustomerCard extends StatelessWidget {
                       ),
                       Text(
                         'balance',
-                        style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
+                        style: TextStyle(fontSize: 11, color: RautTheme.textMuted),
                       ),
                     ],
                   ),
@@ -528,7 +528,7 @@ class _CustomerCard extends StatelessWidget {
               const Divider(height: 20),
               Row(
                 children: [
-                  Icon(Icons.phone_outlined, size: 15, color: Colors.grey.shade600),
+                  Icon(Icons.phone_outlined, size: 15, color: RautTheme.textMuted),
                   const SizedBox(width: 6),
                   Text(customer.phone!, style: const TextStyle(fontSize: 13)),
                 ],
@@ -648,7 +648,7 @@ class _Row extends StatelessWidget {
         children: [
           Icon(icon, size: 15, color: Colors.grey.shade500),
           const SizedBox(width: 8),
-          Text(label, style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+          Text(label, style: TextStyle(fontSize: 13, color: RautTheme.textMuted)),
           const Spacer(),
           Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
         ],

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../theme.dart';
+
 /// The Raut mark.
 ///
 /// Renders the supplied brand artwork from `assets/brand/`. An earlier version
@@ -78,7 +80,7 @@ class RautWordmark extends StatelessWidget {
                 'One Platform. Every Mile.',
                 style: TextStyle(
                   fontSize: markSize * 0.17,
-                  color: Colors.grey.shade600,
+                  color: RautTheme.textMuted,
                   height: 1.1,
                 ),
               ),

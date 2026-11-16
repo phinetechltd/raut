@@ -65,7 +65,7 @@ class MoreScreen extends StatelessWidget {
                             session.companyName,
                             style: TextStyle(
                               fontSize: 13,
-                              color: Colors.grey.shade600,
+                              color: RautTheme.textMuted,
                             ),
                           ),
                           if (session.branchName != null)
@@ -135,7 +135,7 @@ class MoreScreen extends StatelessWidget {
                 return ListTile(
                   leading: Icon(
                     count > 0 ? Icons.mark_chat_unread_outlined : Icons.chat_bubble_outline,
-                    color: count > 0 ? RautTheme.brand : Colors.grey.shade600,
+                    color: count > 0 ? RautTheme.brand : RautTheme.textMuted,
                   ),
                   title: const Text('Messages'),
                   subtitle: Text(count == 0 ? 'Chat with the office' : '$count unread'),
@@ -263,7 +263,7 @@ class MoreScreen extends StatelessWidget {
             padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
             child: Text(
               'Locked features are not part of your company\'s subscription.',
-              style: TextStyle(fontSize: 11.5, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 11.5, color: RautTheme.textMuted),
             ),
           ),
 
@@ -416,16 +416,10 @@ class _SyncQueueScreenState extends State<_SyncQueueScreen> {
             return const Center(child: CircularProgressIndicator());
           }
           if (entries.isEmpty) {
-            return Center(
-              child: Padding(
-                padding: const EdgeInsets.all(32),
-                child: Text(
-                  'Nothing in the queue. Everything you have done has reached '
-                  'the office.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.grey.shade600, height: 1.4),
-                ),
-              ),
+            return const EmptyState(
+              icon: Icons.cloud_done_rounded,
+              title: 'All caught up',
+              message: 'Everything you have done has reached the office.',
             );
           }
 
@@ -598,7 +592,7 @@ class _ExpenseScreenState extends State<_ExpenseScreen> {
           Text(
             'Your current location is attached to the claim, and it will sync '
             'for your manager to approve.',
-            style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+            style: TextStyle(fontSize: 12, color: RautTheme.textMuted),
           ),
         ],
       ),

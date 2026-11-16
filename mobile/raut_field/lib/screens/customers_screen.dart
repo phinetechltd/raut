@@ -188,7 +188,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
                     const Spacer(),
                     Text(
                       '${_customers.length} customer(s)',
-                      style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                      style: TextStyle(fontSize: 12, color: RautTheme.textMuted),
                     ),
                   ],
                 ),
@@ -207,17 +207,12 @@ class _CustomersScreenState extends State<CustomersScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _customers.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(32),
-                    child: Text(
-                      _search.text.isEmpty
-                          ? 'No customers on this device yet.\nSync to download your customer book.'
-                          : 'No customers match "${_search.text}".',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey.shade600, height: 1.4),
-                    ),
-                  ),
+              ? EmptyState(
+                  icon: _search.text.isEmpty ? Icons.storefront_rounded : Icons.search_off_rounded,
+                  title: _search.text.isEmpty ? 'No customers yet' : 'No matches',
+                  message: _search.text.isEmpty
+                      ? 'Sync to download your customer book.'
+                      : 'Nothing matches "${_search.text}".',
                 )
               : ListView.separated(
                   itemCount: _customers.length,
@@ -335,7 +330,7 @@ class _NewCustomerSheetState extends State<_NewCustomerSheet> {
           const SizedBox(height: 4),
           Text(
             'Saved on this phone and synced when you have signal.',
-            style: TextStyle(fontSize: 13, color: Colors.grey.shade600),
+            style: TextStyle(fontSize: 13, color: RautTheme.textMuted),
           ),
           const SizedBox(height: 16),
           TextField(
@@ -365,7 +360,7 @@ class _NewCustomerSheetState extends State<_NewCustomerSheet> {
             subtitle: Text(
               'Uses your current position. Without a pin this customer cannot '
               'be routed to or geofenced.',
-              style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+              style: TextStyle(fontSize: 12, color: RautTheme.textMuted),
             ),
           ),
           const SizedBox(height: 12),

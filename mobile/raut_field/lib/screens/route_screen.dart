@@ -114,29 +114,12 @@ class _RouteScreenState extends State<RouteScreen> {
 
             if (data.visits.isEmpty) {
               return ListView(
-                children: [
-                  const SizedBox(height: 80),
-                  Icon(Icons.map_outlined, size: 56, color: Colors.grey.shade400),
-                  const SizedBox(height: 16),
-                  Center(
-                    child: Text(
-                      'No visits scheduled for today',
-                      style: TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.grey.shade700,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 8),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 40),
-                    child: Text(
-                      'Pull down to sync, or start an unplanned visit from the '
-                      'Customers tab.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.grey.shade600, height: 1.4),
-                    ),
+                children: const [
+                  SizedBox(height: 60),
+                  EmptyState(
+                    icon: Icons.map_rounded,
+                    title: 'No visits today',
+                    message: 'Pull down to sync, or start a visit from Customers.',
                   ),
                 ],
               );
@@ -339,13 +322,13 @@ class _RouteHeaderState extends State<_RouteHeader> {
   }
 
   Widget _odometerRow(BuildContext context) {
-    final muted = TextStyle(fontSize: 12, color: Colors.grey.shade600);
+    final muted = TextStyle(fontSize: 12, color: RautTheme.textMuted);
     final driven = (_startKm != null && _endKm != null) ? _endKm! - _startKm! : null;
     return Padding(
       padding: const EdgeInsets.only(top: 12),
       child: Row(
         children: [
-          Icon(Icons.speed, size: 18, color: Colors.grey.shade600),
+          Icon(Icons.speed, size: 18, color: RautTheme.textMuted),
           const SizedBox(width: 8),
           Expanded(
             child: Text(
@@ -392,7 +375,7 @@ class _RouteHeaderState extends State<_RouteHeader> {
             const SizedBox(height: 4),
             Text(
               DateFormat('EEEE, d MMMM').format(DateTime.now()),
-              style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
+              style: TextStyle(color: RautTheme.textMuted, fontSize: 13),
             ),
             const SizedBox(height: 16),
 
@@ -416,7 +399,7 @@ class _RouteHeaderState extends State<_RouteHeader> {
                 if (route != null && routingEnabled)
                   Text(
                     '${route!.distanceKm.toStringAsFixed(1)} km · ~${route!.estimatedMin} min',
-                    style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
+                    style: TextStyle(fontSize: 12, color: RautTheme.textMuted),
                   ),
               ],
             ),
@@ -494,12 +477,12 @@ class _StopCard extends StatelessWidget {
                         const SizedBox(width: 4),
                         Text(
                           DateFormat('h:mm a').format(visit.scheduledAt),
-                          style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+                          style: TextStyle(fontSize: 12.5, color: RautTheme.textMuted),
                         ),
                         if (customer?.town != null) ...[
                           Text(
                             '  ·  ${customer!.town}',
-                            style: TextStyle(fontSize: 12.5, color: Colors.grey.shade600),
+                            style: TextStyle(fontSize: 12.5, color: RautTheme.textMuted),
                           ),
                         ],
                       ],
