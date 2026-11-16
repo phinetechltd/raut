@@ -55,7 +55,12 @@ class RautTheme {
   static const surface = Color(0xFFFFFDF9);
   static const background = slate50;
   static const border = Color(0xFFE8DFCF);
+  /// A heavier border for cards and fields — the hairline above is too faint in
+  /// bright sun, so the structural edges use this darker step.
+  static const borderStrong = Color(0xFFCDBFA6);
   static const text = Color(0xFF211A14);
+  /// Secondary text that still clears AA on the warm surface (≈5.6:1).
+  static const textMuted = slate600;
 
   /// Comfortable target for a thumb on a moving matatu — above the 48dp
   /// Material minimum, because the failure mode here is a mis-tapped order.
@@ -80,6 +85,13 @@ class RautTheme {
       colorScheme: scheme,
       scaffoldBackgroundColor: background,
 
+      // Every text style defaults to the dark ink, so nothing falls through to
+      // Material's low-contrast greys — the whole app reads high-contrast.
+      textTheme: ThemeData(brightness: Brightness.light).textTheme.apply(
+            bodyColor: text,
+            displayColor: text,
+          ),
+
       appBarTheme: const AppBarTheme(
         centerTitle: false,
         elevation: 0,
@@ -101,7 +113,7 @@ class RautTheme {
         margin: EdgeInsets.zero,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(14),
-          side: const BorderSide(color: border),
+          side: const BorderSide(color: borderStrong),
         ),
       ),
 
@@ -133,8 +145,8 @@ class RautTheme {
         filled: true,
         fillColor: surface,
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 16),
-        border: _fieldBorder(border),
-        enabledBorder: _fieldBorder(border),
+        border: _fieldBorder(borderStrong),
+        enabledBorder: _fieldBorder(borderStrong),
         focusedBorder: _fieldBorder(brand500, width: 2),
         errorBorder: _fieldBorder(danger),
         focusedErrorBorder: _fieldBorder(danger, width: 2),
@@ -188,8 +200,8 @@ class RautTheme {
         ),
         iconTheme: WidgetStateProperty.resolveWith(
           (states) => IconThemeData(
-            color: states.contains(WidgetState.selected) ? brand700 : slate500,
-            size: 24,
+            color: states.contains(WidgetState.selected) ? brand700 : slate600,
+            size: 25,
           ),
         ),
       ),
@@ -239,6 +251,16 @@ class RautTheme {
         _ => slate500,
       };
 
+  /// A glyph for each status, so a pill reads at a glance without its word —
+  /// less text, more signal, which is the point in the field.
+  static IconData statusIcon(String status) => switch (status) {
+        'COMPLETED' || 'DONE' || 'PAID' || 'VERIFIED' || 'APPROVED' => Icons.check_circle_rounded,
+        'IN_PROGRESS' || 'ARRIVED' || 'ISSUED' || 'CONFIRMED' || 'SENT' => Icons.bolt_rounded,
+        'SCHEDULED' || 'PENDING' || 'PARTIALLY_PAID' || 'SUBMITTED' => Icons.schedule_rounded,
+        'MISSED' || 'CANCELLED' || 'SKIPPED' || 'OVERDUE' || 'UNVERIFIED' => Icons.error_rounded,
+        _ => Icons.circle,
+      };
+
   static Color statusTint(String status) {
     final c = statusColor(status);
     if (c == success) return successBg;
@@ -262,19 +284,21 @@ class StatusChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = RautTheme.statusColor(status);
+    // Default to the status's own glyph; a caller can still override it.
+    final glyph = icon ?? RautTheme.statusIcon(status);
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
         color: RautTheme.statusTint(status),
         borderRadius: BorderRadius.circular(999),
+        // A hairline in the status colour lifts the pill off busy backgrounds.
+        border: Border.all(color: color.withValues(alpha: 0.35)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          if (icon != null) ...[
-            Icon(icon, size: 13, color: color),
-            const SizedBox(width: 4),
-          ],
+          Icon(glyph, size: 14, color: color),
+          const SizedBox(width: 5),
           Text(
             RautTheme.statusLabel(status),
             style: TextStyle(
