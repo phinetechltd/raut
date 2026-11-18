@@ -1,5 +1,7 @@
 import java.util.Properties
+import java.util.Base64
 import java.io.FileInputStream
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 
 // Signing material is read from android/key.properties, which is gitignored.
 // When it is absent — a fresh clone, or CI without the secret — release builds
@@ -16,7 +18,7 @@ if (hasReleaseSigning) {
 fun dartDefine(name: String): String {
     val raw = project.findProperty("dart-defines") as String? ?: return ""
     return raw.split(",")
-        .map { String(java.util.Base64.getDecoder().decode(it), Charsets.UTF_8) }
+        .map { String(Base64.getDecoder().decode(it), Charsets.UTF_8) }
         .firstOrNull { it.startsWith("$name=") }
         ?.substringAfter("=")
         ?: ""
@@ -29,6 +31,12 @@ plugins {
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_11
+    }
+}
+
 android {
     namespace = "com.raut.app"
     compileSdk = flutter.compileSdkVersion
@@ -39,9 +47,6 @@ android {
         targetCompatibility = JavaVersion.VERSION_11
     }
 
-    kotlinOptions {
-        jvmTarget = JavaVersion.VERSION_11.toString()
-    }
 
     // The Sunmi printer is reached over AIDL. The interface is declared in
     // src/main/aidl rather than pulled from a vendor jar, so the build has no
