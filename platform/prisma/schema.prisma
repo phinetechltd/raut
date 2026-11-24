@@ -190,7 +190,8 @@ model User {
   company Company? @relation(fields: [companyId], references: [id], onDelete: Cascade)
   branch  Branch?  @relation(fields: [branchId], references: [id], onDelete: SetNull)
 
-  refreshTokens     RefreshToken[]
+  refreshTokens      RefreshToken[]
+  passwordResetTokens PasswordResetToken[]
   devices           Device[]
   assignedCustomers Customer[]         @relation("CustomerAssignedRep")
   activities        CustomerActivity[]
@@ -215,6 +216,22 @@ model RefreshToken {
   deviceId  String?
   expiresAt DateTime
   revokedAt DateTime?
+  createdAt DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+/// A one-time password-reset link. The raw token is emailed; only its SHA-256
+/// hash is stored, so a leaked database row cannot be used to reset a password.
+/// Single-use (usedAt) and short-lived (expiresAt).
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
   createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)

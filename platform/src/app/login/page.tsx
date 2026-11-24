@@ -1,6 +1,8 @@
 "use client";
 
-import { useActionState } from "react";
+import { useActionState, useEffect, useState } from "react";
+
+import Link from "next/link";
 
 import { RautLockup } from "@/components/raut-mark";
 
@@ -25,6 +27,13 @@ const DEMO_ACCOUNTS = [
 
 export default function LoginPage() {
   const [state, action, pending] = useActionState<LoginState, FormData>(login, {});
+
+  // Read on the client so the login route needs no Suspense boundary. Shows a
+  // one-time confirmation after a successful password reset (/login?reset=1).
+  const [justReset, setJustReset] = useState(false);
+  useEffect(() => {
+    setJustReset(new URLSearchParams(window.location.search).get("reset") === "1");
+  }, []);
 
   return (
     <main className="grid min-h-screen lg:grid-cols-2">
@@ -77,6 +86,10 @@ export default function LoginPage() {
         <p className="text-xs text-white/40">
           Prepared for Tari Solutions Limited · Core platform + 11 modules
           {" · "}
+          <a href="/terms" className="underline hover:text-white/70">
+            Terms
+          </a>
+          {" · "}
           <a href="/policy" className="underline hover:text-white/70">
             Privacy &amp; Cookies
           </a>
@@ -91,6 +104,15 @@ export default function LoginPage() {
         <div className="w-full max-w-sm">
           <h2 className="text-2xl font-semibold">Sign in</h2>
           <p className="text-content-muted mt-1 text-sm">Access your Raut workspace.</p>
+
+          {justReset ? (
+            <p
+              role="status"
+              className="mt-4 rounded-lg bg-success/10 px-3 py-2 text-sm text-success"
+            >
+              Your password has been reset. Sign in with your new password.
+            </p>
+          ) : null}
 
           <form action={action} className="mt-8 space-y-4">
             <div>
@@ -109,9 +131,17 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="mb-1 block text-sm font-medium" htmlFor="password">
-                Password
-              </label>
+              <div className="mb-1 flex items-baseline justify-between">
+                <label className="block text-sm font-medium" htmlFor="password">
+                  Password
+                </label>
+                <Link
+                  href="/forgot-password"
+                  className="text-accent text-xs font-medium hover:underline"
+                >
+                  Forgot password?
+                </Link>
+              </div>
               <input
                 id="password"
                 name="password"
@@ -136,6 +166,13 @@ export default function LoginPage() {
               {pending ? "Signing in…" : "Sign in"}
             </button>
           </form>
+
+          <p className="text-content-muted mt-6 text-center text-sm">
+            New to Raut?{" "}
+            <Link href="/signup" className="text-accent font-medium hover:underline">
+              Create an account
+            </Link>
+          </p>
 
           {SHOW_DEMO_ACCOUNTS ? (
           <div className="rounded-lg border border-border bg-surface shadow-sm mt-8 p-4">

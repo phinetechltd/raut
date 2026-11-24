@@ -194,7 +194,8 @@ export function Landing() {
             <a href="#how" className="text-content-secondary hidden hover:underline sm:inline">The app</a>
             <Link href="/gps-trackers" className="text-content-secondary hidden hover:underline md:inline">GPS trackers</Link>
             <Link href="/blog" className="text-content-secondary hover:underline">Blog</Link>
-            <Link href="/login" className="bg-accent hover:bg-accent-hover rounded-lg px-4 py-2 font-medium text-white transition-colors">Sign in</Link>
+            <Link href="/login" className="text-content-secondary hover:underline">Sign in</Link>
+            <Link href="/signup" className="bg-accent hover:bg-accent-hover rounded-lg px-4 py-2 font-medium text-white transition-colors">Start free</Link>
           </div>
         </nav>
         <div className="afr-band" aria-hidden="true" />
@@ -217,8 +218,8 @@ export function Landing() {
               Raut is the ERP and field-sales platform for African distributors — CRM, sales, stock, finance, messaging and scheduling in one console, with an offline-first app in the hands of the reps who work where the network does not.
             </p>
             <div className="mt-8 flex flex-wrap gap-3">
-              <Link href="/login" className="bg-accent hover:bg-accent-hover rounded-lg px-5 py-3 text-sm font-medium text-white transition-colors">Sign in to the console</Link>
-              <a href="#features" className="rounded-lg border border-white/25 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-white/10">Explore the features</a>
+              <Link href="/signup" className="bg-accent hover:bg-accent-hover rounded-lg px-5 py-3 text-sm font-medium text-white transition-colors">Start free</Link>
+              <Link href="/login" className="rounded-lg border border-white/25 px-5 py-3 text-sm font-medium text-white transition-colors hover:bg-white/10">Sign in to the console</Link>
             </div>
             <p className="mt-7 text-xs text-white/60">Tari Africa Platforms Limited · Nairobi</p>
           </div>
@@ -349,9 +350,10 @@ export function Landing() {
         <div className="mx-auto max-w-6xl px-6 py-16 text-center">
           <Reveal>
             <h2 className="font-display text-2xl font-semibold tracking-tight sm:text-3xl">Ready to run it all from one place?</h2>
-            <p className="text-content-secondary mx-auto mt-3 max-w-xl text-[15px] leading-relaxed">Sign in to the console, or talk to us about rolling Raut out to your field team.</p>
+            <p className="text-content-secondary mx-auto mt-3 max-w-xl text-[15px] leading-relaxed">Create your workspace free, or talk to us about rolling Raut out to your field team.</p>
             <div className="mt-7 flex flex-wrap justify-center gap-3">
-              <Link href="/login" className="bg-accent hover:bg-accent-hover rounded-lg px-6 py-3 text-sm font-medium text-white transition-colors">Sign in to the console</Link>
+              <Link href="/signup" className="bg-accent hover:bg-accent-hover rounded-lg px-6 py-3 text-sm font-medium text-white transition-colors">Start free</Link>
+              <Link href="/login" className="border-border rounded-lg border px-6 py-3 text-sm font-medium transition-colors hover:bg-surface-hover">Sign in</Link>
               <Link href="/contact-us" className="border-border rounded-lg border px-6 py-3 text-sm font-medium transition-colors hover:bg-surface-hover">Contact us</Link>
             </div>
           </Reveal>
@@ -369,6 +371,7 @@ export function Landing() {
             <Link href="/login" className="text-white/75 hover:text-white">Sign in</Link>
             <Link href="/blog" className="text-white/75 hover:text-white">Blog</Link>
             <Link href="/gps-trackers" className="text-white/75 hover:text-white">GPS trackers</Link>
+            <Link href="/terms" className="text-white/75 hover:text-white">Terms</Link>
             <Link href="/policy" className="text-white/75 hover:text-white">Privacy &amp; Cookies</Link>
             <Link href="/contact-us" className="text-white/75 hover:text-white">Contact us</Link>
           </div>
