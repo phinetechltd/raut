@@ -216,7 +216,7 @@ class _CustomersScreenState extends State<CustomersScreen> {
                 )
               : ListView.separated(
                   itemCount: _customers.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
+                  separatorBuilder: (_, _) => const Divider(height: 1),
                   itemBuilder: (context, index) {
                     final customer = _customers[index];
                     return ListTile(

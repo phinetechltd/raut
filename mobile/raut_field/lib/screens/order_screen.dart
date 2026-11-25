@@ -230,7 +230,7 @@ class _OrderScreenState extends State<OrderScreen> {
                         )
                       : ListView.separated(
                           itemCount: _products.length,
-                          separatorBuilder: (_, __) => const Divider(height: 1),
+                          separatorBuilder: (_, _) => const Divider(height: 1),
                           itemBuilder: (context, index) {
                             final product = _products[index];
                             final variant = _selected(product);
@@ -384,7 +384,7 @@ class _ProductRow extends StatelessWidget {
                     child: ListView.separated(
                       scrollDirection: Axis.horizontal,
                       itemCount: variants.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 6),
+                      separatorBuilder: (_, _) => const SizedBox(width: 6),
                       itemBuilder: (context, i) {
                         final v = variants[i];
                         final on = v.id == selected?.id;

@@ -73,7 +73,7 @@ void main() {
       await db.insert('location_buffer', {
         'latitude': -1.28,
         'longitude': 36.82,
-        if (batteryPct != null) 'batteryPct': batteryPct,
+        'batteryPct': ?batteryPct,
         'recordedAt': start.add(Duration(minutes: i)).toIso8601String(),
       });
     }

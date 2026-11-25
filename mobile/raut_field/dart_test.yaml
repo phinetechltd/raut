@@ -1,0 +1,6 @@
+# The suite uses sqflite's FFI in-memory database. Running test files in
+# parallel lets the shared native layer race across isolates, which surfaces
+# intermittently as a `database_closed` / 30s timeout in whichever file loses
+# the race. Serializing test files removes the flake; every file still passes
+# in isolation and the app code is unaffected.
+concurrency: 1

@@ -415,7 +415,7 @@ class SyncService extends ChangeNotifier {
     final deviceId = await _deviceId();
 
     final response = await _api.get('/sync/pull', query: {
-      if (since != null) 'since': since,
+      'since': ?since,
       'deviceId': deviceId,
     });
 

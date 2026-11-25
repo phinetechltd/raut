@@ -86,7 +86,7 @@ class _TasksScreenState extends State<TasksScreen> {
             }
             return ListView.separated(
               itemCount: tasks.length,
-              separatorBuilder: (_, __) => const Divider(height: 1),
+              separatorBuilder: (_, _) => const Divider(height: 1),
               itemBuilder: (context, i) {
                 final t = tasks[i];
                 return CheckboxListTile(
